@@ -17,7 +17,8 @@
 version: 2
 updates:
 - package-ecosystem: maven
-  directory: "/"
+  directories:
+    - "**/*"
   schedule:
     interval: daily
   ignore:
