@@ -19,6 +19,8 @@ updates:
 - package-ecosystem: maven
   directories:
     - "**/*"
+  allow:
+    - dependency-name: "org.eclipse.jetty:*"
   groups:
     jetty:
       patterns:
@@ -28,5 +30,3 @@ updates:
         - "io.netty:*"
   schedule:
     interval: daily
-  ignore:
-    - dependency-name: org.apache.maven:*
