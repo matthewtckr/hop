@@ -29,4 +29,6 @@ updates:
       patterns:
         - "io.netty:*"
   schedule:
-    interval: monthly
+    interval: daily
+  target-branch: patch-jetty
+
