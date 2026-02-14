@@ -29,7 +29,7 @@
     <name>Hop Plugins Technology AWS</name>
 
     <properties>
-        <aws-java-sdk.version>1.12.651</aws-java-sdk.version>
+        <aws-java-sdk.version>1.12.797</aws-java-sdk.version>
     </properties>
 
     <dependencyManagement>
