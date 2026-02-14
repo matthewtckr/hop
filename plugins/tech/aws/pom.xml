@@ -29,7 +29,7 @@
     <name>Hop Plugins Technology AWS</name>
 
     <properties>
-        <aws-java-sdk.version>1.12.651</aws-java-sdk.version>
+        <aws-java-sdk.version>1.12.797</aws-java-sdk.version>
     </properties>
 
     <dependencyManagement>
@@ -96,6 +96,11 @@
         <dependency>
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-sqs</artifactId>
+            <version>${aws-java-sdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-sts</artifactId>
             <version>${aws-java-sdk.version}</version>
         </dependency>
         <dependency>
