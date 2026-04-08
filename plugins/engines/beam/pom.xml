@@ -30,7 +30,7 @@
 
     <properties>
         <opentelemetry.version>1.47.0</opentelemetry.version>
-        <spark.version>3.5.1</spark.version>
+        <spark.version>3.5.7</spark.version>
     </properties>
 
     <dependencyManagement>
