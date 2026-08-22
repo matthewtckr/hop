@@ -68,18 +68,6 @@ public class CubeInputMeta extends BaseTransformMeta<CubeInput, CubeInputData> {
     file = new CubeFile();
   }
 
-  public CubeInputMeta(CubeInputMeta m) {
-    this();
-    this.file = new CubeFile(m.file);
-    this.rowLimit = m.rowLimit;
-    this.addFilenameResult = m.addFilenameResult;
-  }
-
-  @Override
-  public CubeInputMeta clone() {
-    return new CubeInputMeta(this);
-  }
-
   @Override
   public void setDefault() {
     this.file = new CubeFile();
@@ -99,7 +87,9 @@ public class CubeInputMeta extends BaseTransformMeta<CubeInput, CubeInputData> {
     GZIPInputStream fis = null;
     DataInputStream dis = null;
     try {
-      InputStream is = HopVfs.getInputStream(variables.resolve(file.getName()));
+      InputStream is =
+          HopVfs.getInputStream(
+              variables.resolve(file.getName().replace("${Internal.Transform.CopyNr}", "0")));
       fis = new GZIPInputStream(is);
       dis = new DataInputStream(fis);
 

@@ -17,7 +17,6 @@
 
 package org.apache.hop.workflow.actions.deletefolders;
 
-import java.util.ArrayList;
 import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
@@ -123,19 +122,6 @@ public class ActionDeleteFolders extends ActionBase {
     fileItems = List.of();
     successCondition = SuccessCondition.NO_ERRORS;
     limitFolders = "10";
-  }
-
-  public ActionDeleteFolders(ActionDeleteFolders other) {
-    super(other.getName(), other.getDescription(), other.getPluginId());
-    this.argFromPrevious = other.argFromPrevious;
-    this.limitFolders = other.limitFolders;
-    this.successCondition = other.successCondition;
-    this.fileItems = new ArrayList<>(other.fileItems);
-  }
-
-  @Override
-  public Object clone() {
-    return new ActionDeleteFolders(this);
   }
 
   @Override
@@ -273,7 +259,9 @@ public class ActionDeleteFolders extends ActionBase {
           rcode = true;
         } else {
           // Error...This file is not a folder!
-          logError(BaseMessages.getString(PKG, "ActionDeleteFolders.Error.NotFolder"));
+          logError(
+              BaseMessages.getString(
+                  PKG, "ActionDeleteFolders.Error.NotFolder", folder.toString()));
         }
       } else {
         // File already deleted, no reason to try to delete it

@@ -16,7 +16,7 @@
  */
 package org.apache.hop.pipeline.transforms.xml.xmloutput;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
@@ -25,6 +25,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
+import java.util.List;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamWriter;
 import org.apache.hop.core.exception.HopException;
@@ -37,34 +39,31 @@ import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.transform.TransformMeta;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
 import org.apache.hop.pipeline.transforms.xml.xmloutput.XmlField.ContentType;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 
-public class XmlOutputTest {
-
-  private TransformMockHelper<XmlOutputMeta, XmlOutputData> transformMockHelper;
+class XmlOutputTest {
   private XmlOutput xmlOutput;
-  private XmlOutputMeta xmlOutputMeta;
   private XmlOutputData xmlOutputData;
-  private Pipeline pipeline = mock(Pipeline.class);
-  private static final String[] ILLEGAL_CHARACTERS_IN_XML_ATTRIBUTES = {"<", ">", "&", "\'", "\""};
+  private final Pipeline pipeline = mock(Pipeline.class);
+  private static final String[] ILLEGAL_CHARACTERS_IN_XML_ATTRIBUTES = {"<", ">", "&", "'", "\""};
 
   private static Object[] rowWithData;
   private static Object[] rowWithNullData;
 
-  @BeforeClass
-  public static void setUpBeforeClass() {
+  @BeforeAll
+  static void setUpBeforeClass() {
 
-    rowWithData = initRowWithData(ILLEGAL_CHARACTERS_IN_XML_ATTRIBUTES);
-    rowWithNullData = initRowWithNullData();
+    rowWithData = initRowWithData();
+    rowWithNullData = new Object[15];
   }
 
-  @Before
-  public void setup() throws Exception {
+  @BeforeEach
+  void setup() throws Exception {
 
-    transformMockHelper =
+    TransformMockHelper<XmlOutputMeta, XmlOutputData> transformMockHelper =
         new TransformMockHelper<>("XML_OUTPUT_TEST", XmlOutputMeta.class, XmlOutputData.class);
     when(transformMockHelper.logChannelFactory.create(any(), any(ILoggingObject.class)))
         .thenReturn(transformMockHelper.iLogChannel);
@@ -74,14 +73,14 @@ public class XmlOutputTest {
     when(pipeline.getLogLevel()).thenReturn(LogLevel.DEBUG);
 
     // Create and set Meta with some realistic data
-    xmlOutputMeta = new XmlOutputMeta();
+    XmlOutputMeta xmlOutputMeta = new XmlOutputMeta();
     xmlOutputMeta.setOutputFields(initOutputFields(rowWithData.length, ContentType.Attribute));
     // Set as true to prevent unnecessary for this test checks at initialization
-    xmlOutputMeta.setDoNotOpenNewFileInit(false);
+    xmlOutputMeta.getFileDetails().setDoNotOpenNewFileInit(false);
 
     xmlOutputData = new XmlOutputData();
     xmlOutputData.formatRowMeta = initRowMeta(rowWithData.length);
-    xmlOutputData.fieldnrs = initFieldNmrs(rowWithData.length);
+    xmlOutputData.fieldnrs = initFieldNumbers(rowWithData.length);
     xmlOutputData.OpenedNewFile = true;
 
     TransformMeta transformMeta =
@@ -98,8 +97,7 @@ public class XmlOutputTest {
   }
 
   @Test
-  public void testSpecialSymbolsInAttributeValuesAreEscaped()
-      throws HopException, XMLStreamException {
+  void testSpecialSymbolsInAttributeValuesAreEscaped() throws HopException, XMLStreamException {
     xmlOutput.init();
 
     xmlOutputData.writer = mock(XMLStreamWriter.class);
@@ -110,56 +108,42 @@ public class XmlOutputTest {
   }
 
   @Test
-  public void testNullInAttributeValuesAreEscaped() throws HopException, XMLStreamException {
+  void testNullInAttributeValuesAreEscaped() throws HopException, XMLStreamException {
 
-    testNullValuesInAttribute(0);
+    testNullValuesInAttribute();
   }
 
   /** Testing to verify that getIfPresent defaults the XMLField ContentType value */
   @Test
-  public void testDefaultXmlFieldContentType() {
-    XmlField[] xmlFields = initOutputFields(4, null);
-    xmlFields[0].setContentType(ContentType.getIfPresent("Element"));
-    xmlFields[1].setContentType(ContentType.getIfPresent("Attribute"));
-    xmlFields[2].setContentType(ContentType.getIfPresent(""));
-    xmlFields[3].setContentType(ContentType.getIfPresent("WrongValue"));
-    assertEquals(ContentType.Element, xmlFields[0].getContentType());
-    assertEquals(ContentType.Attribute, xmlFields[1].getContentType());
-    assertEquals(ContentType.Element, xmlFields[2].getContentType());
-    assertEquals(ContentType.Element, xmlFields[3].getContentType());
+  void testDefaultXmlFieldContentType() {
+    List<XmlField> xmlFields = initOutputFields(4, null);
+    xmlFields.get(0).setContentType(ContentType.getIfPresent("Element"));
+    xmlFields.get(1).setContentType(ContentType.getIfPresent("Attribute"));
+    xmlFields.get(2).setContentType(ContentType.getIfPresent(""));
+    xmlFields.get(3).setContentType(ContentType.getIfPresent("WrongValue"));
+    assertEquals(ContentType.Element, xmlFields.get(0).getContentType());
+    assertEquals(ContentType.Attribute, xmlFields.get(1).getContentType());
+    assertEquals(ContentType.Element, xmlFields.get(2).getContentType());
+    assertEquals(ContentType.Element, xmlFields.get(3).getContentType());
   }
 
-  private void testNullValuesInAttribute(int writeNullInvocationExpected)
-      throws HopException, XMLStreamException {
-
+  private void testNullValuesInAttribute() throws HopException, XMLStreamException {
     xmlOutput.init();
-
     xmlOutputData.writer = mock(XMLStreamWriter.class);
     xmlOutput.writeRowAttributes(rowWithNullData);
     xmlOutput.dispose();
-    verify(xmlOutputData.writer, times(writeNullInvocationExpected)).writeAttribute(any(), any());
+    verify(xmlOutputData.writer, times(0)).writeAttribute(any(), any());
     verify(xmlOutput, atLeastOnce()).closeOutputStream(any());
   }
 
-  private static Object[] initRowWithData(String[] dt) {
-
-    Object[] data = new Object[dt.length * 3];
-    for (int i = 0; i < dt.length; i++) {
-      data[3 * i] = dt[i] + "TEST";
-      data[3 * i + 1] = "TEST" + dt[i] + "TEST";
-      data[3 * i + 2] = "TEST" + dt[i];
+  private static Object[] initRowWithData() {
+    String[] inputData = ILLEGAL_CHARACTERS_IN_XML_ATTRIBUTES;
+    Object[] data = new Object[inputData.length * 3];
+    for (int i = 0; i < inputData.length; i++) {
+      data[3 * i] = inputData[i] + "TEST";
+      data[3 * i + 1] = "TEST" + inputData[i] + "TEST";
+      data[3 * i + 2] = "TEST" + inputData[i];
     }
-    return data;
-  }
-
-  private static Object[] initRowWithNullData() {
-
-    Object[] data = new Object[15];
-    for (int i = 0; i < data.length; i++) {
-
-      data[i] = null;
-    }
-
     return data;
   }
 
@@ -171,33 +155,21 @@ public class XmlOutputTest {
     return rm;
   }
 
-  private XmlField[] initOutputFields(int i, ContentType attribute) {
+  private List<XmlField> initOutputFields(int amount, ContentType attribute) {
 
-    XmlField[] fields = new XmlField[i];
-    for (int j = 0; j < fields.length; j++) {
-      fields[j] =
-          new XmlField(
-              attribute,
-              "Fieldname" + (j + 1),
-              "ElementName" + (j + 1),
-              2,
-              null,
-              -1,
-              -1,
-              null,
-              null,
-              null,
-              null);
+    List<XmlField> fields = new ArrayList<>();
+    for (int j = 0; j < amount; j++) {
+      fields.add(
+          new XmlField(attribute, "Fieldname" + (j + 1), "ElementName" + (j + 1), 2, -1, -1));
     }
-
     return fields;
   }
 
-  private int[] initFieldNmrs(int i) {
-    int[] fNmrs = new int[i];
-    for (int j = 0; j < fNmrs.length; j++) {
-      fNmrs[j] = j;
+  private int[] initFieldNumbers(int i) {
+    int[] fieldNumbers = new int[i];
+    for (int j = 0; j < fieldNumbers.length; j++) {
+      fieldNumbers[j] = j;
     }
-    return fNmrs;
+    return fieldNumbers;
   }
 }

@@ -17,45 +17,232 @@
 
 package org.apache.hop.pipeline.transforms.fileinput.text;
 
-import org.apache.hop.core.variables.Variables;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
-import org.apache.hop.pipeline.transforms.file.BaseFileField;
-import org.junit.ClassRule;
-import org.junit.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-public class TextFileInputContentParsingTest extends BaseTextParsingTest {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+import java.util.List;
+import org.apache.hop.core.Const;
+import org.apache.hop.core.file.TextFileInputField;
+import org.apache.hop.core.variables.Variables;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+
+class TextFileInputContentParsingTest extends BaseTextParsingTest {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
+
+  /**
+   * Regression guard: the "Rownum in output" option must actually populate the row-number column.
+   * It regressed (commit 6bdc5fd095) because TextFileInputMeta.isIncludeRowNumber() was stubbed to
+   * return false, so getFields added the column but convertLineToRow never filled it (null on every
+   * row).
+   */
+  @Test
+  void testIncludeRowNumberIsPopulated() throws Exception {
+    meta.getContent().setFileFormat("unix");
+    meta.getContent().setIncludeRowNumber(true);
+    meta.getContent().setRowNumberField("rownr");
+
+    initByFile("default.csv");
+    setFields(
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f3", -1, -1));
+
+    process();
+
+    int idx = data.outputRowMeta.indexOfValue("rownr");
+    assertTrue(idx >= 0, "rownr column should be present");
+    assertEquals(3, rows.size());
+    for (int i = 0; i < rows.size(); i++) {
+      assertNotNull(rows.get(i)[idx], "rownr must not be null on row " + i);
+      assertEquals((long) (i + 1), ((Number) rows.get(i)[idx]).longValue());
+    }
+  }
+
+  /**
+   * Regression guard for the "include filename in output" option, broken the same way as rownum
+   * (TextFileInputMeta.isIncludeFilename() was stubbed to return false).
+   */
+  @Test
+  void testIncludeFilenameIsPopulated() throws Exception {
+    meta.getContent().setFileFormat("unix");
+    meta.getContent().setIncludeFilename(true);
+    meta.getContent().setFilenameField("fname");
+
+    initByFile("default.csv");
+    setFields(
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f3", -1, -1));
+
+    process();
+
+    int idx = data.outputRowMeta.indexOfValue("fname");
+    assertTrue(idx >= 0, "fname column should be present");
+    assertEquals(3, rows.size());
+    for (int i = 0; i < rows.size(); i++) {
+      Object value = rows.get(i)[idx];
+      assertNotNull(value, "filename must not be null on row " + i);
+      assertTrue(value.toString().endsWith("default.csv"), "unexpected filename: " + value);
+    }
+  }
+
+  /**
+   * Regression guard for the additional-output-field misalignment: getFields adds these columns
+   * with StringUtils.isNotBlank(...) but the runtime used to add/shift them with a plain != null
+   * check. An empty-string field name (how the UI serializes an unused field) would then be written
+   * by the runtime even though getFields skipped it, shifting every following column by one. Here a
+   * blank short-filename field precedes a real extension field, so the extension column must hold
+   * the file extension - not the misaligned short filename.
+   */
+  @Test
+  void testBlankAdditionalFieldDoesNotMisalignColumns() throws Exception {
+    meta.getContent().setFileFormat("unix");
+    // Unused field serialized as an empty string (not null), preceding a real one.
+    meta.getAdditionalOutputFields().setShortFilenameField("");
+    meta.getAdditionalOutputFields().setExtensionField("theext");
+
+    initByFile("default.csv");
+    setFields(
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f3", -1, -1));
+
+    process();
+
+    // The blank short-filename field must NOT have produced a column.
+    assertTrue(
+        data.outputRowMeta.indexOfValue("") < 0, "a blank field name must not create a column");
+    int idx = data.outputRowMeta.indexOfValue("theext");
+    assertTrue(idx >= 0, "extension column should be present");
+    assertEquals(3, rows.size());
+    for (int i = 0; i < rows.size(); i++) {
+      assertEquals("csv", rows.get(i)[idx], "extension column misaligned on row " + i);
+    }
+  }
 
   @Test
-  public void testDefaultOptions() throws Exception {
+  void testDefaultOptions() throws Exception {
 
-    meta.content.fileFormat = "unix";
+    meta.getContent().setFileFormat("unix");
 
     initByFile("default.csv");
 
     setFields(
-        new BaseFileField("f1", -1, -1),
-        new BaseFileField("f2", -1, -1),
-        new BaseFileField("f2", -1, -1));
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f2", -1, -1));
 
     process();
 
     check(new Object[][] {{"first", "1", "1.1"}, {"second", "2", "2.2"}, {"third", "3", "3.3"}});
   }
 
+  /**
+   * Issue #5725: with "Return null for empty values which are not enclosed" a value which is empty
+   * and not enclosed (a;;b) is a null, while an empty enclosed value (a;"";b) is an empty string.
+   */
   @Test
-  public void testSeparator() throws Exception {
+  void testNullIfNotEnclosed() throws Exception {
+    meta.getContent().setFileFormat("unix");
+    meta.getContent().setNullIfNotEnclosed(true);
 
-    meta.content.separator = ",";
-    meta.content.fileFormat = "unix";
+    initByFile("null-if-not-enclosed.csv");
+
+    setFields(
+        new TextFileInputField("id", -1, -1),
+        new TextFileInputField("empty_column", -1, -1),
+        new TextFileInputField("null_column", -1, -1),
+        new TextFileInputField("label", -1, -1));
+
+    process();
+
+    check(
+        new Object[][] {
+          {"1", "", null, "a label"},
+          {"2", null, "", "other"},
+          // A line ending on a separator leaves an empty, non-enclosed last value.
+          {"3", "x", "y", null},
+          {"4", "x", "y", ""}
+        });
+  }
+
+  /**
+   * The scenario from issue #5725: with HOP_EMPTY_STRING_DIFFERS_FROM_NULL every empty value used
+   * to end up as an empty string, so a missing value could never be told apart from an enclosed
+   * empty one. The option has to return the non-enclosed values as null anyway.
+   */
+  @Test
+  void testNullIfNotEnclosedWithEmptyStringDiffersFromNull() throws Exception {
+    System.setProperty(Const.HOP_EMPTY_STRING_DIFFERS_FROM_NULL, "Y");
+    try {
+      meta.getContent().setFileFormat("unix");
+      meta.getContent().setNullIfNotEnclosed(true);
+
+      initByFile("null-if-not-enclosed.csv");
+
+      setFields(
+          new TextFileInputField("id", -1, -1),
+          new TextFileInputField("empty_column", -1, -1),
+          new TextFileInputField("null_column", -1, -1),
+          new TextFileInputField("label", -1, -1));
+
+      process();
+
+      check(
+          new Object[][] {
+            {"1", "", null, "a label"},
+            {"2", null, "", "other"},
+            {"3", "x", "y", null},
+            {"4", "x", "y", ""}
+          });
+    } finally {
+      System.clearProperty(Const.HOP_EMPTY_STRING_DIFFERS_FROM_NULL);
+    }
+  }
+
+  /**
+   * Without the option both an empty and an empty enclosed value stay null, as they always were.
+   */
+  @Test
+  void testNullIfNotEnclosedDisabled() throws Exception {
+    meta.getContent().setFileFormat("unix");
+
+    initByFile("null-if-not-enclosed.csv");
+
+    setFields(
+        new TextFileInputField("id", -1, -1),
+        new TextFileInputField("empty_column", -1, -1),
+        new TextFileInputField("null_column", -1, -1),
+        new TextFileInputField("label", -1, -1));
+
+    process();
+
+    check(
+        new Object[][] {
+          {"1", null, null, "a label"},
+          {"2", null, null, "other"},
+          {"3", "x", "y", null},
+          {"4", "x", "y", null}
+        });
+  }
+
+  @Test
+  void testSeparator() throws Exception {
+
+    meta.getContent().setSeparator(",");
+    meta.getContent().setFileFormat("unix");
 
     initByFile("separator.csv");
 
     setFields(
-        new BaseFileField("f1", -1, -1),
-        new BaseFileField("f2", -1, -1),
-        new BaseFileField("f2", -1, -1));
-    meta.getInputFields()[2].setDecimalSymbol(".");
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f2", -1, -1));
+    meta.getInputFields().get(2).setDecimalSymbol(".");
 
     process();
 
@@ -66,17 +253,17 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testEscape() throws Exception {
+  void testEscape() throws Exception {
 
-    meta.content.escapeCharacter = "\\";
-    meta.content.fileFormat = "unix";
+    meta.getContent().setEscapeCharacter("\\");
+    meta.getContent().setFileFormat("unix");
 
     initByFile("escape.csv");
 
     setFields(
-        new BaseFileField("f1", -1, -1),
-        new BaseFileField("f2", -1, -1),
-        new BaseFileField("f2", -1, -1));
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f2", -1, -1));
 
     process();
 
@@ -87,17 +274,17 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testHeader() throws Exception {
+  void testHeader() throws Exception {
 
-    meta.content.header = false;
-    meta.content.fileFormat = "unix";
+    meta.getContent().setHeader(false);
+    meta.getContent().setFileFormat("unix");
 
     initByFile("default.csv");
 
     setFields(
-        new BaseFileField("f1", -1, -1),
-        new BaseFileField("f2", -1, -1),
-        new BaseFileField("f2", -1, -1));
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f2", -1, -1));
 
     process();
 
@@ -111,15 +298,15 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testGzipCompression() throws Exception {
+  void testGzipCompression() throws Exception {
 
-    meta.content.fileCompression = "GZip";
+    meta.getContent().setFileCompression("GZip");
     initByFile("default.csv.gz");
 
     setFields(
-        new BaseFileField("f1", -1, -1),
-        new BaseFileField("f2", -1, -1),
-        new BaseFileField("f2", -1, -1));
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f2", -1, -1));
 
     process();
 
@@ -127,16 +314,16 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testVfsGzipCompression() throws Exception {
+  void testVfsGzipCompression() throws Exception {
 
-    meta.content.fileCompression = "None";
+    meta.getContent().setFileCompression("None");
     String url = "gz:" + this.getClass().getResource(inPrefix + "default.csv.gz");
     initByURL(url);
 
     setFields(
-        new BaseFileField("f1", -1, -1),
-        new BaseFileField("f2", -1, -1),
-        new BaseFileField("f2", -1, -1));
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f2", -1, -1));
 
     process();
 
@@ -144,16 +331,16 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testVfsBzip2Compression() throws Exception {
+  void testVfsBzip2Compression() throws Exception {
 
-    meta.content.fileCompression = "None";
+    meta.getContent().setFileCompression("None");
     String url = "bz2:" + this.getClass().getResource(inPrefix + "default.csv.bz2");
     initByURL(url);
 
     setFields(
-        new BaseFileField("f1", -1, -1),
-        new BaseFileField("f2", -1, -1),
-        new BaseFileField("f2", -1, -1));
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f2", -1, -1));
 
     process();
 
@@ -161,17 +348,16 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testFixedWidth() throws Exception {
-
-    meta.content.fileType = "Fixed";
-    meta.content.fileFormat = "unix";
+  void testFixedWidth() throws Exception {
+    meta.getContent().setFileType("Fixed");
+    meta.getContent().setFileFormat("unix");
 
     initByFile("fixed.csv");
 
     setFields(
-        new BaseFileField("f1", 0, 7),
-        new BaseFileField("f2", 8, 7),
-        new BaseFileField("f3", 16, 7));
+        new TextFileInputField("f1", 0, 7),
+        new TextFileInputField("f2", 8, 7),
+        new TextFileInputField("f3", 16, 7));
 
     process();
 
@@ -184,20 +370,20 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testFixedWidthBytes() throws Exception {
+  void testFixedWidthBytes() throws Exception {
 
-    meta.content.header = false;
-    meta.content.fileType = "Fixed";
-    meta.content.fileFormat = "Unix";
-    meta.content.encoding = "Shift_JIS";
-    meta.content.length = "Bytes";
+    meta.getContent().setHeader(false);
+    meta.getContent().setFileType("Fixed");
+    meta.getContent().setFileFormat("Unix");
+    meta.getContent().setEncoding("Shift_JIS");
+    meta.getContent().setLength("Bytes");
     initByFile("test-fixed-length-bytes.txt");
 
     setFields(
-        new BaseFileField("f1", 0, 5),
-        new BaseFileField("f2", 5, 3),
-        new BaseFileField("f3", 8, 1),
-        new BaseFileField("f4", 9, 3));
+        new TextFileInputField("f1", 0, 5),
+        new TextFileInputField("f2", 5, 3),
+        new TextFileInputField("f3", 8, 1),
+        new TextFileInputField("f4", 9, 3));
 
     process();
 
@@ -205,36 +391,35 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testFixedWidthCharacters() throws Exception {
-    meta.content.header = false;
-    meta.content.fileType = "Fixed";
-    meta.content.fileFormat = "DOS";
-    meta.content.encoding = "ISO-8859-1";
-    meta.content.length = "Characters";
-    meta.content.fileFormat = "unix";
+  void testFixedWidthCharacters() throws Exception {
+    meta.getContent().setHeader(false);
+    meta.getContent().setFileType("Fixed");
+    meta.getContent().setFileFormat("DOS");
+    meta.getContent().setEncoding("ISO-8859-1");
+    meta.getContent().setLength("Characters");
+    meta.getContent().setFileFormat("unix");
 
     initByFile("test-fixed-length-characters.txt");
 
     setFields(
-        new BaseFileField("f1", 0, 3),
-        new BaseFileField("f2", 3, 2),
-        new BaseFileField("f3", 5, 2),
-        new BaseFileField("f4", 7, 4));
+        new TextFileInputField("f1", 0, 3),
+        new TextFileInputField("f2", 3, 2),
+        new TextFileInputField("f3", 5, 2),
+        new TextFileInputField("f4", 7, 4));
 
     process();
     check(new Object[][] {{"ABC", "DE", "FG", "HIJK"}, {"LmN", "oP", "qR", "sTuV"}});
   }
 
   @Test
-  public void testFilterEmptyBacklog5381() throws Exception {
-
-    meta.content.header = false;
-    meta.content.fileType = "Fixed";
-    meta.content.noEmptyLines = true;
-    meta.content.fileFormat = "mixed";
+  void testFilterEmptyBacklog5381() throws Exception {
+    meta.getContent().setHeader(false);
+    meta.getContent().setFileType("Fixed");
+    meta.getContent().setNoEmptyLines(true);
+    meta.getContent().setFileFormat("mixed");
     initByFile("filterempty-BACKLOG-5381.csv");
 
-    setFields(new BaseFileField("f", 0, 100));
+    setFields(new TextFileInputField("f", 0, 100));
 
     process();
 
@@ -249,9 +434,9 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testFilterVariables() throws Exception {
+  void testFilterVariables() throws Exception {
 
-    meta.content.fileFormat = "unix";
+    meta.getContent().setFileFormat("unix");
 
     initByFile("default.csv");
 
@@ -259,11 +444,12 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
     vars.setVariable("VAR_TEST", "second");
     data.filterProcessor =
         new TextFileFilterProcessor(
-            new TextFileFilter[] {new TextFileFilter(0, "${VAR_TEST}", false, false)}, vars);
+            List.of(new TextFileFilter(0, "${VAR_TEST}", false, false)), vars);
+
     setFields(
-        new BaseFileField("f1", -1, -1),
-        new BaseFileField("f2", -1, -1),
-        new BaseFileField("f2", -1, -1));
+        new TextFileInputField("f1", -1, -1),
+        new TextFileInputField("f2", -1, -1),
+        new TextFileInputField("f2", -1, -1));
 
     process();
 
@@ -271,13 +457,13 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testBOM_UTF8() throws Exception {
+  void testBOM_UTF8() throws Exception {
 
-    meta.content.encoding = "UTF-32LE";
-    meta.content.header = false;
+    meta.getContent().setEncoding("UTF-32LE");
+    meta.getContent().setHeader(false);
     initByFile("test-BOM-UTF-8.txt");
 
-    setFields(new BaseFileField("f1", -1, -1), new BaseFileField("f2", -1, -1));
+    setFields(new TextFileInputField("f1", -1, -1), new TextFileInputField("f2", -1, -1));
 
     process();
 
@@ -285,13 +471,13 @@ public class TextFileInputContentParsingTest extends BaseTextParsingTest {
   }
 
   @Test
-  public void testBOM_UTF16BE() throws Exception {
+  void testBOM_UTF16BE() throws Exception {
 
-    meta.content.encoding = "UTF-32LE";
-    meta.content.header = false;
+    meta.getContent().setEncoding("UTF-32LE");
+    meta.getContent().setHeader(false);
     initByFile("test-BOM-UTF-16BE.txt");
 
-    setFields(new BaseFileField("f1", -1, -1), new BaseFileField("f2", -1, -1));
+    setFields(new TextFileInputField("f1", -1, -1), new TextFileInputField("f2", -1, -1));
 
     process();
 

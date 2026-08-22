@@ -74,7 +74,7 @@ public class SampleRows extends BaseTransform<SampleRowsMeta, SampleRowsData> {
           if (isDebug()) {
             logDebug(BaseMessages.getString(PKG, "SampleRows.Log.RangeValue", part));
           }
-          int vpart = Integer.valueOf(part);
+          int vpart = Integer.parseInt(part);
           setBuilder.add(Range.singleton(vpart));
 
         } else if (part.matches("\\d+\\.\\.\\d+")) {
@@ -115,7 +115,7 @@ public class SampleRows extends BaseTransform<SampleRowsMeta, SampleRowsData> {
             BaseMessages.getString(
                 PKG,
                 "SampleRows.Log.LineNumber",
-                linesRead + " : " + getInputRowMeta().getString(r)));
+                linesRead + " : " + data.outputRowMeta.getString(data.outputRow)));
       }
     }
 

@@ -20,7 +20,7 @@ package org.apache.hop.pipeline.transforms.script;
 
 import java.util.Collections;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Props;
 import org.apache.hop.core.row.IRowMeta;
@@ -36,6 +36,7 @@ import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.MessageBox;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.widget.ColumnInfo;
+import org.apache.hop.ui.core.widget.HopTree;
 import org.apache.hop.ui.core.widget.ScriptStyledTextComp;
 import org.apache.hop.ui.core.widget.StyledTextComp;
 import org.apache.hop.ui.core.widget.TableView;
@@ -67,7 +68,6 @@ import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
 import org.eclipse.swt.layout.FormLayout;
-import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Label;
@@ -155,58 +155,17 @@ public class ScriptDialog extends BaseTransformDialog {
   }
 
   public String open() {
+    createShell(BaseMessages.getString(PKG, "ScriptDialog.Shell.Title"));
+    buildButtonBar().ok(e -> ok()).cancel(e -> cancel()).build();
+
     Shell parent = getParent();
     Display display = parent.getDisplay();
-
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
-    PropsUi.setLook(shell);
-    setShellImage(shell, input);
 
     lsMod =
         e -> {
           input.setChanged();
         };
     changed = input.hasChanged();
-
-    shell.setLayout(props.createFormLayout());
-    shell.setText(BaseMessages.getString(PKG, "ScriptDialog.Shell.Title"));
-
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
-
-    // Buttons at the bottom
-    //
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, e -> ok());
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, e -> cancel());
-    setButtonPositions(
-        new Button[] {
-          wOk, wCancel,
-        },
-        margin,
-        null);
-
-    // Filename line
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(BaseMessages.getString(PKG, "ScriptDialog.TransformName.Label"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    fdlTransformName.top = new FormAttachment(0, margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    wTransformName.addModifyListener(lsMod);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(middle, 0);
-    fdTransformName.top = new FormAttachment(0, margin);
-    fdTransformName.right = new FormAttachment(100, 0);
-    wTransformName.setLayoutData(fdTransformName);
 
     // Script engines line
     Label wlEngines = new Label(shell, SWT.RIGHT);
@@ -215,7 +174,7 @@ public class ScriptDialog extends BaseTransformDialog {
     FormData fdlEngines = new FormData();
     fdlEngines.left = new FormAttachment(0, 0);
     fdlEngines.right = new FormAttachment(middle, -margin);
-    fdlEngines.top = new FormAttachment(wTransformName, margin);
+    fdlEngines.top = new FormAttachment(wSpacer, margin);
     wlEngines.setLayoutData(fdlEngines);
     wEngines = new CCombo(shell, SWT.LEFT | SWT.READ_ONLY | SWT.BORDER);
     List<String> scriptEngineNames = ScriptUtils.getInstance().getScriptLanguageNames();
@@ -232,18 +191,18 @@ public class ScriptDialog extends BaseTransformDialog {
     wEngines.addModifyListener(lsMod);
     FormData fdEngines = new FormData();
     fdEngines.left = new FormAttachment(middle, 0);
-    fdEngines.top = new FormAttachment(wTransformName, margin);
+    fdEngines.top = new FormAttachment(wSpacer, margin);
     fdEngines.right = new FormAttachment(100, 0);
     wEngines.setLayoutData(fdEngines);
 
     SashForm wSash = new SashForm(shell, SWT.VERTICAL);
     wSash.setLayout(new FormLayout());
-    FormData fdSashForm = new FormData();
-    fdSashForm.left = new FormAttachment(0, 0);
-    fdSashForm.top = new FormAttachment(wEngines, 0);
-    fdSashForm.right = new FormAttachment(100, 0);
-    fdSashForm.bottom = new FormAttachment(100, 0);
-    wSash.setLayoutData(fdSashForm);
+    FormData fdSash = new FormData();
+    fdSash.left = new FormAttachment(0, margin);
+    fdSash.top = new FormAttachment(wEngines, margin);
+    fdSash.right = new FormAttachment(100, -margin);
+    fdSash.bottom = new FormAttachment(wOk, -margin);
+    wSash.setLayoutData(fdSash);
 
     // Top sash form
     //
@@ -261,7 +220,7 @@ public class ScriptDialog extends BaseTransformDialog {
     wlScriptFunctions.setLayoutData(fdlScriptFunctions);
 
     // Tree View Test
-    wTree = new Tree(wTop, SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL);
+    wTree = new HopTree(wTop, SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL);
     PropsUi.setLook(wTree);
     FormData fdlTree = new FormData();
     fdlTree.left = new FormAttachment(0, 0);
@@ -291,6 +250,7 @@ public class ScriptDialog extends BaseTransformDialog {
     fdScript.top = new FormAttachment(wlScript, margin);
     fdScript.right = new FormAttachment(100, -5);
     fdScript.bottom = new FormAttachment(100, -50);
+    fdScript.height = 200;
     folder.setLayoutData(fdScript);
 
     wlPosition = new Label(wTop, SWT.NONE);
@@ -348,6 +308,8 @@ public class ScriptDialog extends BaseTransformDialog {
             BaseMessages.getString(PKG, "ScriptDialog.ColumnInfo.ReturnValue"),
             ColumnInfo.COLUMN_TYPE_CCOMBO,
             YES_NO_COMBO);
+    scriptResultColumn.setToolTip(
+        BaseMessages.getString(PKG, "ScriptDialog.ColumnInfo.ReturnValue.Tooltip"));
 
     ColumnInfo[] colinf =
         new ColumnInfo[] {
@@ -377,6 +339,12 @@ public class ScriptDialog extends BaseTransformDialog {
               YES_NO_COMBO),
           scriptResultColumn,
         };
+    colinf[0].setToolTip(BaseMessages.getString(PKG, "ScriptDialog.ColumnInfo.Filename.Tooltip"));
+    colinf[1].setToolTip(BaseMessages.getString(PKG, "ScriptDialog.ColumnInfo.RenameTo.Tooltip"));
+    colinf[2].setToolTip(BaseMessages.getString(PKG, "ScriptDialog.ColumnInfo.Type.Tooltip"));
+    colinf[3].setToolTip(BaseMessages.getString(PKG, "ScriptDialog.ColumnInfo.Length.Tooltip"));
+    colinf[4].setToolTip(BaseMessages.getString(PKG, "ScriptDialog.ColumnInfo.Precision.Tooltip"));
+    colinf[5].setToolTip(BaseMessages.getString(PKG, "ScriptDialog.ColumnInfo.Replace.Tooltip"));
 
     wFields =
         new TableView(
@@ -402,14 +370,7 @@ public class ScriptDialog extends BaseTransformDialog {
     fdBottom.bottom = new FormAttachment(100, 0);
     wBottom.setLayoutData(fdBottom);
 
-    FormData fdSash = new FormData();
-    fdSash.left = new FormAttachment(0, 0);
-    fdSash.top = new FormAttachment(wEngines, 0);
-    fdSash.right = new FormAttachment(100, 0);
-    fdSash.bottom = new FormAttachment(wOk, -2 * margin);
-    wSash.setLayoutData(fdSash);
-
-    wSash.setWeights(new int[] {75, 25});
+    wSash.setWeights(new int[] {50, 50});
 
     // Add listeners
     folder.addCTabFolder2Listener(
@@ -534,6 +495,7 @@ public class ScriptDialog extends BaseTransformDialog {
         display.sleep();
       }
     }
+
     return transformName;
   }
 
@@ -559,7 +521,8 @@ public class ScriptDialog extends BaseTransformDialog {
               variables,
               item.getParent(),
               SWT.MULTI | SWT.LEFT | SWT.H_SCROLL | SWT.V_SCROLL,
-              false);
+              false,
+              TextComposite.STYLE_TYPE_SCRIPT);
     } else {
       wScript =
           new ScriptStyledTextComp(
@@ -803,8 +766,7 @@ public class ScriptDialog extends BaseTransformDialog {
 
     List<SScript> jsScripts = input.getScripts();
     if (!jsScripts.isEmpty()) {
-      for (int i = 0; i < jsScripts.size(); i++) {
-        SScript script = jsScripts.get(i);
+      for (SScript script : jsScripts) {
         if (script.isTransformScript()) {
           strActiveScript = script.getScriptName();
         } else if (script.isStartScript()) {
@@ -822,9 +784,6 @@ public class ScriptDialog extends BaseTransformDialog {
 
     wFields.setRowNums();
     wFields.optWidth(true);
-
-    wTransformName.selectAll();
-    wTransformName.setFocus();
   }
 
   // Setting default active Script
@@ -889,17 +848,15 @@ public class ScriptDialog extends BaseTransformDialog {
     meta.getScripts().clear();
     CTabItem[] cTabs = folder.getItems();
     if (cTabs.length > 0) {
-      for (int i = 0; i < cTabs.length; i++) {
+      for (CTabItem cTab : cTabs) {
         SScript jsScript =
             new SScript(
-                ScriptType.NORMAL_SCRIPT,
-                cTabs[i].getText(),
-                getStyledTextComp(cTabs[i]).getText());
-        if (cTabs[i].getImage().equals(imageActiveScript)) {
+                ScriptType.NORMAL_SCRIPT, cTab.getText(), getStyledTextComp(cTab).getText());
+        if (cTab.getImage().equals(imageActiveScript)) {
           jsScript.setScriptType(ScriptType.TRANSFORM_SCRIPT);
-        } else if (cTabs[i].getImage().equals(imageActiveStartScript)) {
+        } else if (cTab.getImage().equals(imageActiveStartScript)) {
           jsScript.setScriptType(ScriptType.START_SCRIPT);
-        } else if (cTabs[i].getImage().equals(imageActiveEndScript)) {
+        } else if (cTab.getImage().equals(imageActiveEndScript)) {
           jsScript.setScriptType(ScriptType.END_SCRIPT);
         }
         meta.getScripts().add(jsScript);
@@ -964,8 +921,8 @@ public class ScriptDialog extends BaseTransformDialog {
     boolean bRC = false;
     if (itemToCheck.getItemCount() > 0) {
       TreeItem[] items = itemToCheck.getItems();
-      for (int i = 0; i < items.length; i++) {
-        if (items[i].getText().equals(strItemName)) {
+      for (TreeItem item : items) {
+        if (item.getText().equals(strItemName)) {
           return true;
         }
       }

@@ -21,129 +21,106 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.logging.ILoggingObject;
 import org.apache.hop.mail.workflow.actions.getpop.MailConnectionMeta;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-public class MailInputTest {
+class MailInputTest {
 
   private TransformMockHelper<MailInputMeta, MailInputData> mockHelper;
 
-  @Before
-  public void setUp() throws Exception {
+  @BeforeAll
+  static void initEnvironment() throws Exception {
+    // Registers JavaMail providers (mstor, etc.) so MailConnection's constructor
+    // does not throw a NoSuchProviderException for MBOX.
+    HopClientEnvironment.init();
+  }
+
+  @BeforeEach
+  void setUp() throws Exception {
     mockHelper = new TransformMockHelper<>("MailInput", MailInputMeta.class, MailInputData.class);
     when(mockHelper.logChannelFactory.create(any(), any(ILoggingObject.class)))
         .thenReturn(mockHelper.iLogChannel);
     when(mockHelper.pipeline.isRunning()).thenReturn(true);
   }
 
-  @After
-  public void cleanUp() {
+  @AfterEach
+  void cleanUp() {
     mockHelper.cleanUp();
   }
 
-  /** Check that imap retrieve ... first will be applied. */
-  @Test
-  @Ignore("This test needs to be reviewed")
-  public void testInitSetGetFirstForIMAP() {
-    MailInput transform =
-        new MailInput(
-            mockHelper.transformMeta,
-            new MailInputMeta(),
-            mockHelper.iTransformData,
-            0,
-            mockHelper.pipelineMeta,
-            mockHelper.pipeline);
-    MailInputData data = new MailInputData();
-    MailInputMeta meta = mock(MailInputMeta.class);
-    when(meta.isUseDynamicFolder()).thenReturn(false);
-    when(meta.getProtocol()).thenReturn(MailConnectionMeta.PROTOCOL_STRING_IMAP);
-    when(meta.getImapFirstMails()).thenReturn("2");
-    when(meta.getFirstMails()).thenReturn("3");
-
-    transform.init();
-
-    Assert.assertEquals("Row Limit is set up to 2 rows.", 2, data.rowlimit);
+  /** Build a transform whose data + meta references are the ones we want to assert against. */
+  private MailInput buildTransform(MailInputMeta meta, MailInputData data) {
+    return new MailInput(
+        mockHelper.transformMeta, meta, data, 0, mockHelper.pipelineMeta, mockHelper.pipeline);
   }
 
-  /** Check that pop3 retrieve ... first will be applied. */
-  @Test
-  @Ignore("This test needs to be reviewed")
-  public void testInitSetGetFirstForPOP3() {
-    MailInput transform =
-        new MailInput(
-            mockHelper.transformMeta,
-            mockHelper.iTransformMeta,
-            mockHelper.iTransformData,
-            0,
-            mockHelper.pipelineMeta,
-            mockHelper.pipeline);
-    MailInputData data = new MailInputData();
+  private MailInputMeta stubBaseMeta(String protocol) {
     MailInputMeta meta = mock(MailInputMeta.class);
     when(meta.isUseDynamicFolder()).thenReturn(false);
-    when(meta.getProtocol()).thenReturn(MailConnectionMeta.PROTOCOL_STRING_POP3);
+    when(meta.getProtocol()).thenReturn(protocol);
     when(meta.getImapFirstMails()).thenReturn("2");
     when(meta.getFirstMails()).thenReturn("3");
-
-    transform.init();
-
-    Assert.assertEquals("Row Limit is set up to 3 rows.", 3, data.rowlimit);
+    return meta;
   }
 
-  /** Check that Limit value overrides retrieve ... first if any. */
+  /** IMAP uses imapFirstMails as the row-limit fallback. */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testInitSetGetFirstLimitOverride() {
-    MailInput transform =
-        new MailInput(
-            mockHelper.transformMeta,
-            mockHelper.iTransformMeta,
-            mockHelper.iTransformData,
-            0,
-            mockHelper.pipelineMeta,
-            mockHelper.pipeline);
+  void testInitSetGetFirstForIMAP() {
     MailInputData data = new MailInputData();
-    MailInputMeta meta = mock(MailInputMeta.class);
-    when(meta.isUseDynamicFolder()).thenReturn(false);
-    when(meta.getProtocol()).thenReturn(MailConnectionMeta.PROTOCOL_STRING_POP3);
-    when(meta.getImapFirstMails()).thenReturn("2");
-    when(meta.getFirstMails()).thenReturn("3");
+    MailInputMeta meta = stubBaseMeta(MailConnectionMeta.PROTOCOL_STRING_IMAP);
 
+    buildTransform(meta, data).init();
+
+    Assertions.assertEquals(2, data.rowlimit, "Row Limit is set up to 2 rows.");
+  }
+
+  /** POP3 uses firstMails as the row-limit fallback. */
+  @Test
+  void testInitSetGetFirstForPOP3() {
+    MailInputData data = new MailInputData();
+    MailInputMeta meta = stubBaseMeta(MailConnectionMeta.PROTOCOL_STRING_POP3);
+
+    buildTransform(meta, data).init();
+
+    Assertions.assertEquals(3, data.rowlimit, "Row Limit is set up to 3 rows.");
+  }
+
+  /** An explicit Limit value overrides the protocol-specific fallback. */
+  @Test
+  void testInitSetGetFirstLimitOverride() {
+    MailInputData data = new MailInputData();
+    MailInputMeta meta = stubBaseMeta(MailConnectionMeta.PROTOCOL_STRING_POP3);
     when(meta.getRowLimit()).thenReturn("5");
 
-    transform.init();
+    buildTransform(meta, data).init();
 
-    Assert.assertEquals(
-        "Row Limit is set up to 5 rows as the Limit has priority.", 5, data.rowlimit);
+    Assertions.assertEquals(
+        5, data.rowlimit, "Row Limit is set up to 5 rows as the Limit has priority.");
   }
 
-  /** We do not use any of retrieve ... first if protocol is MBOX */
+  /** MBOX has no retrieve-first option, so the row limit stays at 0. */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testInitSetGetFirstForMBOXIgnored() {
-    MailInput transform =
-        new MailInput(
-            mockHelper.transformMeta,
-            mockHelper.iTransformMeta,
-            mockHelper.iTransformData,
-            0,
-            mockHelper.pipelineMeta,
-            mockHelper.pipeline);
+  void testInitSetGetFirstForMBOXIgnored() {
     MailInputData data = new MailInputData();
-    MailInputMeta meta = mock(MailInputMeta.class);
-    when(meta.isUseDynamicFolder()).thenReturn(false);
-    when(meta.getProtocol()).thenReturn(MailConnectionMeta.PROTOCOL_STRING_MBOX);
-    when(meta.getImapFirstMails()).thenReturn("2");
-    when(meta.getFirstMails()).thenReturn("3");
+    MailInputMeta meta = stubBaseMeta(MailConnectionMeta.PROTOCOL_STRING_MBOX);
 
-    transform.init();
+    // For MBOX the legacy MailConnection constructor needs the mstor provider, which is
+    // not on this module's test classpath; the failure leaves data.mailConn null and a
+    // later getFolders() call NPEs. data.rowlimit is set before that, which is what we
+    // care about here.
+    try {
+      buildTransform(meta, data).init();
+    } catch (NullPointerException ignored) {
+      // expected — see comment above
+    }
 
-    Assert.assertEquals(
-        "Row Limit is set up to 0 rows as the Limit has priority.", 0, data.rowlimit);
+    Assertions.assertEquals(0, data.rowlimit, "Row Limit defaults to 0 for MBOX.");
   }
 }

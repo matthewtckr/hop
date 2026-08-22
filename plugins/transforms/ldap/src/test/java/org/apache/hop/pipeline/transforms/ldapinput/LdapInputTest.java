@@ -16,25 +16,26 @@
  */
 package org.apache.hop.pipeline.transforms.ldapinput;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.Arrays;
 import org.apache.hop.core.logging.ILoggingObject;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 /** Tests LDAP Input Transform */
-public class LdapInputTest {
+class LdapInputTest {
   private static TransformMockHelper<LdapInputMeta, LdapInputData> mockHelper;
 
-  @BeforeClass
-  public static void setup() {
+  @BeforeAll
+  static void setup() {
     mockHelper =
         new TransformMockHelper<>("LDAP INPUT TEST", LdapInputMeta.class, LdapInputData.class);
     when(mockHelper.logChannelFactory.create(any(), any(ILoggingObject.class)))
@@ -42,13 +43,13 @@ public class LdapInputTest {
     when(mockHelper.pipeline.isRunning()).thenReturn(true);
   }
 
-  @AfterClass
-  public static void tearDown() {
+  @AfterAll
+  static void tearDown() {
     mockHelper.cleanUp();
   }
 
   @Test
-  public void testRowProcessing() throws Exception {
+  void testRowProcessing() throws Exception {
 
     // Setup transform
     LdapInputMeta meta = mock(LdapInputMeta.class);
@@ -65,7 +66,8 @@ public class LdapInputTest {
     int sortedField = 1;
     fields[sortedField].setSortedKey(true);
     meta.setInputFields(fields);
-    when(meta.getInputFields()).thenReturn(fields);
+    when(meta.getInputFields()).thenReturn(Arrays.asList(fields));
+    when(meta.getInputFieldsArray()).thenReturn(fields);
 
     // Mock LDAP Connection
     when(meta.getProtocol()).thenReturn(LdapMockProtocol.getName());
@@ -76,14 +78,14 @@ public class LdapInputTest {
 
     try {
       // Run Initialization
-      assertTrue("Input Initialization Failed", ldapInput.init());
+      assertTrue(ldapInput.init(), "Input Initialization Failed");
 
       // Verify
-      assertEquals("Field not marked as sorted", 1, data.connection.getSortingAttributes().size());
+      assertEquals(1, data.connection.getSortingAttributes().size(), "Field not marked as sorted");
       assertEquals(
-          "Field not marked as sorted",
           data.attrReturned[sortedField],
-          data.connection.getSortingAttributes().get(0));
+          data.connection.getSortingAttributes().get(0),
+          "Field not marked as sorted");
       assertNotNull(data.attrReturned[sortedField]);
     } finally {
       LdapMockProtocol.cleanup();

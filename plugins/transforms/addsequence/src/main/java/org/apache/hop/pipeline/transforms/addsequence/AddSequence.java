@@ -56,6 +56,9 @@ public class AddSequence extends BaseTransform<AddSequenceMeta, AddSequenceData>
 
     if (meta.isCounterUsed()) {
       next = data.counter.getAndNext();
+      if (isDetailed()) {
+        logDetailed("count name: {0}, next: {1}", data.getLookup(), next);
+      }
     } else if (meta.isDatabaseUsed()) {
       try {
         next =
@@ -90,8 +93,8 @@ public class AddSequence extends BaseTransform<AddSequenceMeta, AddSequenceData>
 
   @Override
   public boolean processRow() throws HopException {
-
-    Object[] r = getRow(); // Get row from input rowset & set row busy!
+    // Get row from input rowset & set row busy!
+    Object[] r = getRow();
     if (r == null) {
       // no more input to be expected...
       setOutputDone();
@@ -113,14 +116,18 @@ public class AddSequence extends BaseTransform<AddSequenceMeta, AddSequenceData>
     }
 
     try {
-      putRow(data.outputRowMeta, addSequence(getInputRowMeta(), r));
+      // The row we wrote is the row with the sequence value in it, so render it with the output
+      // metadata: the incoming metadata doesn't know about the value we just added.
+      //
+      Object[] outputRowData = addSequence(getInputRowMeta(), r);
+      putRow(data.outputRowMeta, outputRowData);
 
       if (isRowLevel()) {
         logRowlevel(
             BaseMessages.getString(PKG, "AddSequence.Log.WriteRow")
                 + getLinesWritten()
                 + " : "
-                + getInputRowMeta().getString(r));
+                + data.outputRowMeta.getString(outputRowData));
       }
       if (checkFeedback(getLinesRead()) && isBasic()) {
         logBasic(BaseMessages.getString(PKG, "AddSequence.Log.LineNumber") + getLinesRead());
@@ -216,9 +223,9 @@ public class AddSequence extends BaseTransform<AddSequenceMeta, AddSequenceData>
 
         String realCounterName = resolve(meta.getCounterName());
         if (!Utils.isEmpty(realCounterName)) {
-          data.setLookup("@@sequence:" + realCounterName);
+          data.setLookup(lookupCounterName(realCounterName));
         } else {
-          data.setLookup("@@sequence:" + meta.getValueName());
+          data.setLookup(lookupCounterName(meta.getValueName()));
         }
 
         // We need to synchronize over the whole pipeline to make sure that we always get the same
@@ -226,6 +233,9 @@ public class AddSequence extends BaseTransform<AddSequenceMeta, AddSequenceData>
         // regardless of the number of transform copies asking for it.
         //
         synchronized (getPipeline()) {
+          if (isDetailed()) {
+            logDetailed("init counter name: {0}", data.getLookup());
+          }
           data.counter =
               Counters.getInstance()
                   .getOrUpdateCounter(
@@ -263,5 +273,21 @@ public class AddSequence extends BaseTransform<AddSequenceMeta, AddSequenceData>
   @Override
   public void cleanup() {
     super.cleanup();
+  }
+
+  /**
+   * Build a unique identifier for this pipeline run.
+   *
+   * @param counterName counter name
+   * @return unique key
+   */
+  private String lookupCounterName(String counterName) {
+    // unique per run
+    String scope = getPipeline().getContainerId();
+    if (Utils.isEmpty(scope)) {
+      // fallback: unique per run as well
+      scope = getPipeline().getLogChannelId();
+    }
+    return "@@sequence:" + scope + ":" + counterName;
   }
 }

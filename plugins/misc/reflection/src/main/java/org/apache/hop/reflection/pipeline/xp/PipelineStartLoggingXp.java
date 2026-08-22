@@ -20,14 +20,14 @@ package org.apache.hop.reflection.pipeline.xp;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.extension.ExtensionPoint;
 import org.apache.hop.core.extension.IExtensionPoint;
 import org.apache.hop.core.logging.ILogChannel;
-import org.apache.hop.core.logging.LogLevel;
 import org.apache.hop.core.util.ExecutorUtil;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.vfs.HopVfs;
@@ -91,10 +91,9 @@ public class PipelineStartLoggingXp implements IExtensionPoint<Pipeline> {
 
     // If we log parent (root) pipelines only we don't want a parent
     //
-    if (pipelineLog.isLoggingParentsOnly()) {
-      if (pipeline.getParentWorkflow() != null || pipeline.getParentPipeline() != null) {
-        return;
-      }
+    if (pipelineLog.isLoggingParentsOnly()
+        && (pipeline.getParentWorkflow() != null || pipeline.getParentPipeline() != null)) {
+      return;
     }
 
     // Load the pipeline filename specified in the Pipeline Log object...
@@ -112,18 +111,28 @@ public class PipelineStartLoggingXp implements IExtensionPoint<Pipeline> {
         return;
       }
     } catch (Exception e) {
-      pipeline.stopAll();
-      throw new HopException(
-          "Error handling Pipeline Log metadata object '"
-              + pipelineLog.getName()
-              + "' at the start of pipeline: "
-              + pipeline,
-          e);
+      if (pipelineLog.isFailParentOnLoggingFailure()) {
+        pipeline.stopAll();
+        throw new HopException(
+            "Error handling Pipeline Log metadata object '"
+                + pipelineLog.getName()
+                + "' at the start of pipeline: "
+                + e.getMessage(),
+            e);
+      } else {
+        log.logError(
+            "Error handling Pipeline Log metadata object '"
+                + pipelineLog.getName()
+                + "' at the start of pipeline: "
+                + e.getMessage(),
+            e);
+        return;
+      }
     }
 
     // check if we need to log everything or specific pipelines only.
     if (pipelineLog.getPipelinesToLog().isEmpty()) {
-      logPipeline(pipelineLog, pipeline, loggingPipelineFilename, variables);
+      logPipeline(log, pipelineLog, pipeline, loggingPipelineFilename, variables);
     } else {
       for (PipelineToLogLocation pipelineToLogLocation : pipelineLog.getPipelinesToLog()) {
 
@@ -135,7 +144,7 @@ public class PipelineStartLoggingXp implements IExtensionPoint<Pipeline> {
                       variables.resolve(pipelineToLogLocation.getPipelineToLogFilename()))
                   .getPublicURIString();
           if (pipelineUri.equals(pipelineToLogUri)) {
-            logPipeline(pipelineLog, pipeline, loggingPipelineFilename, variables);
+            logPipeline(log, pipelineLog, pipeline, loggingPipelineFilename, variables);
           }
         }
       }
@@ -143,6 +152,7 @@ public class PipelineStartLoggingXp implements IExtensionPoint<Pipeline> {
   }
 
   private void logPipeline(
+      ILogChannel log,
       PipelineLog pipelineLog,
       IPipelineEngine<PipelineMeta> pipeline,
       String loggingPipelineFilename,
@@ -158,9 +168,23 @@ public class PipelineStartLoggingXp implements IExtensionPoint<Pipeline> {
       if (pipelineLog.isExecutingAtEnd()) {
         pipeline.addExecutionFinishedListener(
             engine -> {
-              executeLoggingPipeline(
-                  pipelineLog, "end", loggingPipelineFilename, pipeline, variables);
-              ExecutorUtil.cleanup(timer);
+              try {
+                executeLoggingPipeline(
+                    pipelineLog, "end", loggingPipelineFilename, pipeline, variables);
+              } catch (HopException e) {
+                if (pipelineLog.isFailParentOnLoggingFailure()) {
+                  throw e;
+                } else {
+                  log.logError(
+                      "Error handling Pipeline Log metadata object '"
+                          + pipelineLog.getName()
+                          + "' at the end of pipeline: "
+                          + e.getMessage(),
+                      e);
+                }
+              } finally {
+                ExecutorUtil.cleanup(timer);
+              }
             });
         pipeline.addExecutionStoppedListener(
             engine -> {
@@ -168,13 +192,23 @@ public class PipelineStartLoggingXp implements IExtensionPoint<Pipeline> {
                 executeLoggingPipeline(
                     pipelineLog, "stop", loggingPipelineFilename, pipeline, variables);
               } catch (Exception e) {
-                throw new RuntimeException(
-                    "Unable to do interval logging for Pipeline Log object '"
-                        + pipelineLog.getName()
-                        + "'",
-                    e);
+                if (pipelineLog.isFailParentOnLoggingFailure()) {
+                  throw new HopRuntimeException(
+                      "Unable to do stop logging for Pipeline Log object '"
+                          + pipelineLog.getName()
+                          + "'",
+                      e);
+                } else {
+                  log.logError(
+                      "Unable to do stop logging for Pipeline Log object '"
+                          + pipelineLog.getName()
+                          + "': "
+                          + e.getMessage(),
+                      e);
+                }
+              } finally {
+                ExecutorUtil.cleanup(timer);
               }
-              ExecutorUtil.cleanup(timer);
             });
       }
 
@@ -190,11 +224,20 @@ public class PipelineStartLoggingXp implements IExtensionPoint<Pipeline> {
                     executeLoggingPipeline(
                         pipelineLog, "interval", loggingPipelineFilename, pipeline, variables);
                   } catch (Exception e) {
-                    throw new RuntimeException(
-                        "Unable to do interval logging for Pipeline Log object '"
-                            + pipelineLog.getName()
-                            + "'",
-                        e);
+                    if (pipelineLog.isFailParentOnLoggingFailure()) {
+                      throw new HopRuntimeException(
+                          "Unable to do interval logging for Pipeline Log object '"
+                              + pipelineLog.getName()
+                              + "'",
+                          e);
+                    } else {
+                      log.logError(
+                          "Unable to do interval logging for Pipeline Log object '"
+                              + pipelineLog.getName()
+                              + "': "
+                              + e.getMessage(),
+                          e);
+                    }
                   }
                 }
               };
@@ -202,13 +245,22 @@ public class PipelineStartLoggingXp implements IExtensionPoint<Pipeline> {
         }
       }
     } catch (Exception e) {
-      pipeline.stopAll();
-      throw new HopException(
-          "Error handling Pipeline Log metadata object '"
-              + pipelineLog.getName()
-              + "' at the start of pipeline: "
-              + pipeline,
-          e);
+      if (pipelineLog.isFailParentOnLoggingFailure()) {
+        pipeline.stopAll();
+        throw new HopException(
+            "Error handling Pipeline Log metadata object '"
+                + pipelineLog.getName()
+                + "' at the start of pipeline: "
+                + e.getMessage(),
+            e);
+      } else {
+        log.logError(
+            "Error handling Pipeline Log metadata object '"
+                + pipelineLog.getName()
+                + "' at the start of pipeline: "
+                + e.getMessage(),
+            e);
+      }
     }
   }
 
@@ -227,18 +279,13 @@ public class PipelineStartLoggingXp implements IExtensionPoint<Pipeline> {
     //
     LocalPipelineEngine loggingPipeline =
         new LocalPipelineEngine(loggingPipelineMeta, variables, pipeline);
-
-    // Do NOT link the logging pipeline to parent to avoid linking the stopped() signal
-    //
     loggingPipeline.setParentPipeline(null);
-    loggingPipeline.setParent(null);
 
     // Flag it as a logging pipeline so we don't log ourselves...
     //
     loggingPipeline.getExtensionDataMap().put(PIPELINE_LOGGING_FLAG, "Y");
 
-    // Only log errors
-    loggingPipeline.setLogLevel(LogLevel.ERROR);
+    loggingPipeline.setLogLevel(pipelineLog.getLogLevel());
     loggingPipeline.prepareExecution();
 
     // Grab the WorkflowLogging transforms and inject the pipeline information...
@@ -254,6 +301,10 @@ public class PipelineStartLoggingXp implements IExtensionPoint<Pipeline> {
     //
     loggingPipeline.startThreads();
     loggingPipeline.waitUntilFinished();
+
+    if (loggingPipeline.getErrors() > 0) {
+      throw new HopException("Errors occurred during logging pipeline execution.");
+    }
   }
 
   private boolean logLocationExists(

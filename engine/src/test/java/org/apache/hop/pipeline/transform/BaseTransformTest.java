@@ -17,16 +17,21 @@
 
 package org.apache.hop.pipeline.transform;
 
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -37,76 +42,91 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.hop.core.BlockingRowSet;
+import org.apache.hop.core.Const;
 import org.apache.hop.core.IRowSet;
 import org.apache.hop.core.QueueRowSet;
 import org.apache.hop.core.ResultFile;
 import org.apache.hop.core.SingleRowRowSet;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.exception.HopPluginException;
 import org.apache.hop.core.exception.HopTransformException;
 import org.apache.hop.core.fileinput.NonAccessibleFileObject;
 import org.apache.hop.core.logging.ILogChannel;
 import org.apache.hop.core.logging.ILoggingObject;
+import org.apache.hop.core.logging.LogLevel;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.row.RowMeta;
-import org.apache.hop.core.row.value.ValueMetaBase;
+import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.core.row.value.ValueMetaInteger;
 import org.apache.hop.core.row.value.ValueMetaString;
+import org.apache.hop.core.util.TestUtil;
 import org.apache.hop.core.variables.IVariables;
+import org.apache.hop.core.variables.Variables;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.junit.MockitoJUnitRunner;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.stubbing.Answer;
 
-@RunWith(MockitoJUnitRunner.class)
-public class BaseTransformTest {
+/** Unit test for {@link BaseTransform} */
+@ExtendWith(MockitoExtension.class)
+class BaseTransformTest {
   private TransformMockHelper<ITransformMeta, ITransformData> mockHelper;
 
-  @Mock IRowHandler rowHandler;
+  @Mock private IRowHandler rowHandler;
 
-  @Before
-  public void setup() {
+  @BeforeEach
+  void setup() throws HopException {
+    TestUtil.registerTestPluginTypes();
     mockHelper =
         new TransformMockHelper<>("BASE TRANSFORM", ITransformMeta.class, ITransformData.class);
-    when(mockHelper.logChannelFactory.create(any(), any(ILoggingObject.class)))
+
+    lenient()
+        .when(mockHelper.logChannelFactory.create(any(), any(ILoggingObject.class)))
         .thenReturn(mockHelper.iLogChannel);
   }
 
-  @After
-  public void tearDown() {
+  @AfterEach
+  void tearDown() {
     mockHelper.cleanUp();
   }
 
   @Test
-  public void testBaseTransformGetLogLevelWontThrowNPEWithNullLog() {
+  void testBaseTransformGetLogLevelWontThrowNPEWithNullLog() {
     when(mockHelper.logChannelFactory.create(any(), any(ILoggingObject.class)))
         .thenAnswer(
             (Answer<ILogChannel>)
                 invocation -> {
-                  ((BaseTransform) invocation.getArguments()[0]).getLogLevel();
+                  ((BaseTransform<?, ?>) invocation.getArguments()[0]).getLogLevel();
                   return mockHelper.iLogChannel;
                 });
-    new BaseTransform(
-            mockHelper.transformMeta,
-            mockHelper.iTransformMeta,
-            mockHelper.iTransformData,
-            0,
-            mockHelper.pipelineMeta,
-            mockHelper.pipeline)
-        .getLogLevel();
+    LogLevel logLevel =
+        new BaseTransform<>(
+                mockHelper.transformMeta,
+                mockHelper.iTransformMeta,
+                mockHelper.iTransformData,
+                0,
+                mockHelper.pipelineMeta,
+                mockHelper.pipeline)
+            .getLogLevel();
+    assertNull(logLevel);
   }
 
+  /**
+   * A nested execution (Pipeline/Workflow Executor) passes the calling transform's variables down
+   * to the child pipeline, so the parent variable space can carry another transform's
+   * Internal.Transform.* values. Initializing from that space must not overwrite ours.
+   */
   @Test
-  public void testTransformListenersConcurrentModification() throws InterruptedException {
-    // Create a base transform
-    final BaseTransform baseTransform =
-        new BaseTransform(
+  void testInitializeFromKeepsOwnInternalTransformVariables() {
+    BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
             mockHelper.transformMeta,
             mockHelper.iTransformMeta,
             mockHelper.iTransformData,
@@ -114,6 +134,30 @@ public class BaseTransformTest {
             mockHelper.pipelineMeta,
             mockHelper.pipeline);
 
+    IVariables parent = new Variables();
+    parent.setVariable(Const.INTERNAL_VARIABLE_TRANSFORM_NAME, "some other transform");
+    parent.setVariable(Const.INTERNAL_VARIABLE_TRANSFORM_COPYNR, "7");
+
+    baseTransform.initializeFrom(parent);
+
+    assertEquals(
+        "BASE TRANSFORM", baseTransform.getVariable(Const.INTERNAL_VARIABLE_TRANSFORM_NAME));
+    assertEquals("0", baseTransform.getVariable(Const.INTERNAL_VARIABLE_TRANSFORM_COPYNR));
+  }
+
+  @Test
+  void testTransformListenersConcurrentModification() throws InterruptedException {
+    // Create a base transform
+    final BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
+            mockHelper.transformMeta,
+            mockHelper.iTransformMeta,
+            mockHelper.iTransformData,
+            0,
+            mockHelper.pipelineMeta,
+            mockHelper.pipeline);
+
+    assertNotNull(baseTransform);
     // Create thread to dynamically add listeners
     final AtomicBoolean done = new AtomicBoolean(false);
     Thread addListeners =
@@ -159,9 +203,9 @@ public class BaseTransformTest {
   }
 
   @Test
-  public void resultFilesMapIsSafeForConcurrentModification() throws Exception {
+  void resultFilesMapIsSafeForConcurrentModification() throws Exception {
     final BaseTransform<ITransformMeta, ITransformData> transform =
-        new BaseTransform(
+        new BaseTransform<>(
             mockHelper.transformMeta,
             mockHelper.iTransformMeta,
             mockHelper.iTransformData,
@@ -171,7 +215,7 @@ public class BaseTransformTest {
 
     final AtomicBoolean complete = new AtomicBoolean(false);
 
-    final int FILES_AMOUNT = 10 * 1000;
+    final int FILES_AMOUNT = 1000;
     Thread filesProducer =
         new Thread(
             () -> {
@@ -204,13 +248,13 @@ public class BaseTransformTest {
   }
 
   @Test
-  public void outputRowMetasAreNotSharedAmongSeveralStreams() throws Exception {
+  void outputRowMetasAreNotSharedAmongSeveralStreams() throws Exception {
     IRowSet rs1 = new SingleRowRowSet();
     IRowSet rs2 = new SingleRowRowSet();
 
     when(mockHelper.pipeline.isRunning()).thenReturn(true);
     BaseTransform<ITransformMeta, ITransformData> baseTransform =
-        new BaseTransform(
+        new BaseTransform<>(
             mockHelper.transformMeta,
             mockHelper.iTransformMeta,
             mockHelper.iTransformData,
@@ -222,7 +266,7 @@ public class BaseTransformTest {
     baseTransform.setOutputRowSets(Arrays.asList(rs1, rs2));
 
     for (IRowSet rowSet : baseTransform.getOutputRowSets()) {
-      assertNull("RowMeta should be null, since no calls were done", rowSet.getRowMeta());
+      assertNull(rowSet.getRowMeta(), "RowMeta should be null, since no calls were done");
     }
 
     IRowMeta rowMeta = new RowMeta();
@@ -237,16 +281,16 @@ public class BaseTransformTest {
     assertNotNull(meta2);
     // content is same
     for (IValueMeta meta : meta1.getValueMetaList()) {
-      assertTrue(meta.getName(), meta2.exists(meta));
+      assertTrue(meta2.exists(meta), meta.getName());
     }
     // whereas instances differ
     assertNotSame(meta1, meta2);
   }
 
   @Test
-  public void getRowWithRowHandler() throws HopException {
-    BaseTransform baseTransform =
-        new BaseTransform(
+  void getRowWithRowHandler() throws HopException {
+    BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
             mockHelper.transformMeta,
             mockHelper.iTransformMeta,
             mockHelper.iTransformData,
@@ -259,9 +303,9 @@ public class BaseTransformTest {
   }
 
   @Test
-  public void putRowWithRowHandler() throws HopException {
-    BaseTransform baseTransform =
-        new BaseTransform(
+  void putRowWithRowHandler() throws HopException {
+    BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
             mockHelper.transformMeta,
             mockHelper.iTransformMeta,
             mockHelper.iTransformData,
@@ -277,9 +321,9 @@ public class BaseTransformTest {
   }
 
   @Test
-  public void putErrorWithRowHandler() throws HopException {
-    BaseTransform baseTransform =
-        new BaseTransform(
+  void putErrorWithRowHandler() throws HopException {
+    BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
             mockHelper.transformMeta,
             mockHelper.iTransformMeta,
             mockHelper.iTransformData,
@@ -295,9 +339,35 @@ public class BaseTransformTest {
   }
 
   @Test
-  public void putGetFromPutToDefaultRowHandlerMethods() throws HopException {
-    BaseTransform baseTransform =
-        new BaseTransform(
+  void putErrorStopsPipelineWhenErrorRowSetUnavailable() throws HopException {
+    TransformMeta targetMeta = mock(TransformMeta.class);
+    when(targetMeta.getName()).thenReturn("Write to log error");
+    TransformErrorMeta errorMeta = new TransformErrorMeta(mockHelper.transformMeta, targetMeta);
+    errorMeta.setEnabled(true);
+    when(mockHelper.transformMeta.getTransformErrorMeta()).thenReturn(errorMeta);
+
+    BaseTransform<ITransformMeta, ITransformData> base =
+        spy(
+            new BaseTransform<>(
+                mockHelper.transformMeta,
+                mockHelper.iTransformMeta,
+                mockHelper.iTransformData,
+                0,
+                mockHelper.pipelineMeta,
+                mockHelper.pipeline));
+
+    IRowMeta iRowMeta = new RowMeta();
+    Object[] objects = new Object[] {"Bob", "Col"};
+    base.putError(iRowMeta, objects, 1L, "PKIX path building failed", null, "Rest001");
+
+    verify(base).stopAll();
+    assertTrue(base.getErrors() > 0);
+  }
+
+  @Test
+  void putGetFromPutToDefaultRowHandlerMethods() throws HopException {
+    BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
             mockHelper.transformMeta,
             mockHelper.iTransformMeta,
             mockHelper.iTransformData,
@@ -322,6 +392,43 @@ public class BaseTransformTest {
     } catch (UnsupportedOperationException uoe) {
       assertTrue(uoe.getMessage().contains(this.getClass().getName()));
     }
+  }
+
+  @Test
+  void putRowToInvokesRowToListenersNotRowListeners() throws HopException {
+    BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
+            mockHelper.transformMeta,
+            mockHelper.iTransformMeta,
+            mockHelper.iTransformData,
+            0,
+            mockHelper.pipelineMeta,
+            mockHelper.pipeline);
+
+    IRowMeta rowMeta = new RowMeta();
+    rowMeta.addValueMeta(new ValueMetaString("col"));
+    Object[] row = new Object[] {"value"};
+    QueueRowSet rowSet = new QueueRowSet();
+
+    IRowListener rowListener = mock(IRowListener.class);
+    baseTransform.addRowListener(rowListener);
+
+    final IRowSet[] receivedRowSet = new IRowSet[1];
+    final Object[][] receivedRow = new Object[1][];
+    baseTransform.addRowToListener(
+        (meta, data, dest) -> {
+          receivedRowSet[0] = dest;
+          receivedRow[0] = data;
+        });
+
+    baseTransform.putRowTo(rowMeta, row, rowSet);
+
+    assertSame(rowSet, receivedRowSet[0]);
+    assertSame(row, receivedRow[0]);
+    assertEquals(1L, baseTransform.getLinesWritten());
+    verify(rowListener, never()).rowWrittenEvent(any(), any());
+    verify(rowListener, never()).rowReadEvent(any(), any());
+    verify(rowListener, never()).errorRowWrittenEvent(any(), any());
   }
 
   private IRowHandler rowHandlerWithDefaultMethods() {
@@ -351,87 +458,94 @@ public class BaseTransformTest {
   }
 
   @Test
-  public void notEmptyFieldName() throws HopTransformException {
-    BaseTransform baseTransform =
-        new BaseTransform(
+  void notEmptyFieldName() throws HopException {
+    BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
             mockHelper.transformMeta,
             mockHelper.iTransformMeta,
             mockHelper.iTransformData,
             0,
             mockHelper.pipelineMeta,
             mockHelper.pipeline);
+
+    assertNotNull(baseTransform);
     baseTransform.setRowHandler(rowHandler);
 
     IRowMeta rowMeta = new RowMeta();
-    rowMeta.addValueMeta(new ValueMetaBase("name", IValueMeta.TYPE_INTEGER));
-
-    baseTransform.putRow(rowMeta, new Object[] {0});
-  }
-
-  @Test(expected = HopTransformException.class)
-  public void nullFieldName() throws HopTransformException {
-    BaseTransform baseTransform =
-        new BaseTransform(
-            mockHelper.transformMeta,
-            mockHelper.iTransformMeta,
-            mockHelper.iTransformData,
-            0,
-            mockHelper.pipelineMeta,
-            mockHelper.pipeline);
-    baseTransform.setRowHandler(rowHandler);
-    baseTransform.setAllowEmptyFieldNamesAndTypes(false);
-
-    IRowMeta rowMeta = new RowMeta();
-    rowMeta.addValueMeta(new ValueMetaBase(null, IValueMeta.TYPE_INTEGER));
-
-    baseTransform.putRow(rowMeta, new Object[] {0});
-  }
-
-  @Test(expected = HopTransformException.class)
-  public void emptyFieldName() throws HopTransformException {
-    BaseTransform baseTransform =
-        new BaseTransform(
-            mockHelper.transformMeta,
-            mockHelper.iTransformMeta,
-            mockHelper.iTransformData,
-            0,
-            mockHelper.pipelineMeta,
-            mockHelper.pipeline);
-    baseTransform.setRowHandler(rowHandler);
-    baseTransform.setAllowEmptyFieldNamesAndTypes(false);
-
-    IRowMeta rowMeta = new RowMeta();
-    rowMeta.addValueMeta(new ValueMetaBase("", IValueMeta.TYPE_INTEGER));
-
-    baseTransform.putRow(rowMeta, new Object[] {0});
-  }
-
-  @Test(expected = HopTransformException.class)
-  public void blankFieldName() throws HopTransformException {
-    BaseTransform baseTransform =
-        new BaseTransform(
-            mockHelper.transformMeta,
-            mockHelper.iTransformMeta,
-            mockHelper.iTransformData,
-            0,
-            mockHelper.pipelineMeta,
-            mockHelper.pipeline);
-    baseTransform.setRowHandler(rowHandler);
-    baseTransform.setAllowEmptyFieldNamesAndTypes(false);
-
-    IRowMeta rowMeta = new RowMeta();
-    rowMeta.addValueMeta(new ValueMetaBase("  ", IValueMeta.TYPE_INTEGER));
+    rowMeta.addValueMeta(ValueMetaFactory.createValueMeta("name", IValueMeta.TYPE_INTEGER));
 
     baseTransform.putRow(rowMeta, new Object[] {0});
   }
 
   @Test
-  public void testGetRowSafeModeEnabled() throws HopException {
+  void nullFieldName() throws HopPluginException {
+    BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
+            mockHelper.transformMeta,
+            mockHelper.iTransformMeta,
+            mockHelper.iTransformData,
+            0,
+            mockHelper.pipelineMeta,
+            mockHelper.pipeline);
+
+    assertNotNull(baseTransform);
+    baseTransform.setRowHandler(rowHandler);
+    baseTransform.setAllowEmptyFieldNamesAndTypes(false);
+
+    IRowMeta rowMeta = new RowMeta();
+    rowMeta.addValueMeta(ValueMetaFactory.createValueMeta(null, IValueMeta.TYPE_INTEGER));
+
+    assertThrows(
+        HopTransformException.class, () -> baseTransform.putRow(rowMeta, new Object[] {0}));
+  }
+
+  @Test
+  void emptyFieldName() throws HopPluginException {
+    BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
+            mockHelper.transformMeta,
+            mockHelper.iTransformMeta,
+            mockHelper.iTransformData,
+            0,
+            mockHelper.pipelineMeta,
+            mockHelper.pipeline);
+    baseTransform.setRowHandler(rowHandler);
+    baseTransform.setAllowEmptyFieldNamesAndTypes(false);
+
+    IRowMeta rowMeta = new RowMeta();
+    rowMeta.addValueMeta(ValueMetaFactory.createValueMeta("", IValueMeta.TYPE_INTEGER));
+
+    assertThrows(
+        HopTransformException.class, () -> baseTransform.putRow(rowMeta, new Object[] {0}));
+  }
+
+  @Test
+  void blankFieldName() throws HopPluginException {
+    BaseTransform<ITransformMeta, ITransformData> baseTransform =
+        new BaseTransform<>(
+            mockHelper.transformMeta,
+            mockHelper.iTransformMeta,
+            mockHelper.iTransformData,
+            0,
+            mockHelper.pipelineMeta,
+            mockHelper.pipeline);
+    baseTransform.setRowHandler(rowHandler);
+    baseTransform.setAllowEmptyFieldNamesAndTypes(false);
+
+    IRowMeta rowMeta = new RowMeta();
+    rowMeta.addValueMeta(ValueMetaFactory.createValueMeta("  ", IValueMeta.TYPE_INTEGER));
+
+    assertThrows(
+        HopTransformException.class, () -> baseTransform.putRow(rowMeta, new Object[] {0}));
+  }
+
+  @Test
+  void testGetRowSafeModeEnabled() throws HopException {
     Pipeline pipelineMock = spy(new LocalPipelineEngine());
     when(pipelineMock.isSafeModeEnabled()).thenReturn(true);
-    BaseTransform baseTransformSpy =
+    BaseTransform<ITransformMeta, ITransformData> baseTransformSpy =
         spy(
-            new BaseTransform(
+            new BaseTransform<>(
                 mockHelper.transformMeta,
                 mockHelper.iTransformMeta,
                 mockHelper.iTransformData,

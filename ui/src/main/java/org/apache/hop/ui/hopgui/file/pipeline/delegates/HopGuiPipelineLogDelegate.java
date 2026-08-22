@@ -20,11 +20,12 @@ package org.apache.hop.ui.hopgui.file.pipeline.delegates;
 import java.util.ArrayList;
 import java.util.Map;
 import lombok.Getter;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Props;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.gui.plugin.toolbar.GuiToolbarElement;
+import org.apache.hop.core.gui.plugin.toolbar.GuiToolbarElementType;
 import org.apache.hop.core.logging.HopLogStore;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.pipeline.PipelineMeta;
@@ -33,19 +34,27 @@ import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.EnterSelectionDialog;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.gui.GuiToolbarWidgets;
+import org.apache.hop.ui.core.gui.IToolbarContainer;
 import org.apache.hop.ui.core.widget.OsHelper;
+import org.apache.hop.ui.core.widget.StyledTextComp;
+import org.apache.hop.ui.core.widget.StyledTextVar;
+import org.apache.hop.ui.core.widget.TextComposite;
 import org.apache.hop.ui.hopgui.HopGui;
+import org.apache.hop.ui.hopgui.ToolbarFacade;
 import org.apache.hop.ui.hopgui.file.IHopFileTypeHandler;
 import org.apache.hop.ui.hopgui.file.pipeline.HopGuiLogBrowser;
 import org.apache.hop.ui.hopgui.file.pipeline.HopGuiPipelineGraph;
+import org.apache.hop.ui.hopgui.file.shared.TextZoom;
+import org.apache.hop.ui.util.EnvironmentUtils;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CTabItem;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
 import org.eclipse.swt.layout.FormLayout;
+import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Text;
-import org.eclipse.swt.widgets.ToolBar;
 import org.eclipse.swt.widgets.ToolItem;
 
 @GuiPlugin(description = "Pipeline Graph Log Delegate")
@@ -58,6 +67,15 @@ public class HopGuiPipelineLogDelegate {
   public static final String TOOLBAR_ICON_LOG_COPY_TO_CLIPBOARD =
       "ToolbarIcon-10020-LogCopyToClipboard";
   public static final String TOOLBAR_ICON_LOG_PAUSE_RESUME = "ToolbarIcon-10030-LogPauseResume";
+  public static final String TOOLBAR_ICON_LOG_INCREASE_FONT = "ToolbarIcon-10040-LogIncreaseFont";
+  public static final String TOOLBAR_ICON_LOG_DECREASE_FONT = "ToolbarIcon-10050-LogDecreaseFont";
+  public static final String TOOLBAR_ICON_LOG_RESET_FONT = "ToolbarIcon-10060-LogResetFont";
+  public static final String TOOLBAR_ICON_LOG_FILTER_TEXT = "ToolbarIcon-10070-LogFilterText";
+  public static final String TOOLBAR_ICON_LOG_FILTER_HIGHLIGHT =
+      "ToolbarIcon-10080-LogFilterHighlight";
+  public static final String TOOLBAR_ICON_LOG_FILTER_CASE_SENSITIVE =
+      "ToolbarIcon-10090-LogFilterCaseSensitive";
+  public static final String TOOLBAR_ICON_LOG_FILTER_EXCLUDE = "ToolbarIcon-10100-LogFilterExclude";
 
   private final HopGuiPipelineGraph pipelineGraph;
 
@@ -65,9 +83,10 @@ public class HopGuiPipelineLogDelegate {
 
   @Getter private CTabItem pipelineLogTab;
 
-  private Text pipelineLogText;
+  private TextComposite pipelineLogText;
+  private TextZoom textZoom;
 
-  private ToolBar toolbar;
+  private Control toolbar;
   private GuiToolbarWidgets toolBarWidgets;
 
   private Composite pipelineLogComposite;
@@ -108,10 +127,26 @@ public class HopGuiPipelineLogDelegate {
     fd.right = new FormAttachment(100, 0);
     toolbar.setLayoutData(fd);
 
-    pipelineLogText =
-        new Text(
-            pipelineLogComposite,
-            SWT.READ_ONLY | SWT.BORDER | SWT.MULTI | SWT.V_SCROLL | SWT.H_SCROLL);
+    // Use StyledTextComp for web (uses Text widget), StyledTextVar for desktop (uses StyledText
+    // for highlighting)
+    if (EnvironmentUtils.getInstance().isWeb()) {
+      pipelineLogText =
+          new StyledTextComp(
+              pipelineGraph.getVariables(),
+              pipelineLogComposite,
+              SWT.READ_ONLY | SWT.BORDER | SWT.MULTI | SWT.V_SCROLL | SWT.H_SCROLL,
+              TextComposite.STYLE_TYPE_LOG);
+    } else {
+      pipelineLogText =
+          new StyledTextVar(
+              pipelineGraph.getVariables(),
+              pipelineLogComposite,
+              SWT.READ_ONLY | SWT.BORDER | SWT.MULTI | SWT.V_SCROLL | SWT.H_SCROLL,
+              false,
+              false,
+              TextComposite.STYLE_TYPE_LOG);
+      // Error highlighting is applied directly in HopGuiLogBrowser when adding lines
+    }
     PropsUi.setLook(pipelineLogText);
     FormData fdText = new FormData();
     fdText.left = new FormAttachment(0, 0);
@@ -119,6 +154,10 @@ public class HopGuiPipelineLogDelegate {
     fdText.top = new FormAttachment(toolbar, 0);
     fdText.bottom = new FormAttachment(100, 0);
     pipelineLogText.setLayoutData(fdText);
+
+    this.textZoom = new TextZoom(pipelineLogText, GuiResource.getInstance().getFontFixed());
+    this.textZoom.resetFont();
+
     // add a CR to avoid fontStyle from getting lost on macos HOP-2583
     if (OsHelper.isMac()) {
       pipelineLogText.setText(Const.CR);
@@ -149,14 +188,16 @@ public class HopGuiPipelineLogDelegate {
   public static HopGuiPipelineLogDelegate getInstance() {
     IHopFileTypeHandler fileTypeHandler = HopGui.getInstance().getActiveFileTypeHandler();
     if (fileTypeHandler instanceof HopGuiPipelineGraph hopGuiPipelineGraph) {
-      HopGuiPipelineGraph graph = hopGuiPipelineGraph;
-      return graph.pipelineLogDelegate;
+      return hopGuiPipelineGraph.pipelineLogDelegate;
     }
     return null;
   }
 
   private void addToolBar() {
-    toolbar = new ToolBar(pipelineLogComposite, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    IToolbarContainer toolBarContainer =
+        ToolbarFacade.createToolbarContainer(
+            pipelineLogComposite, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    toolbar = toolBarContainer.getControl();
     FormData fdToolBar = new FormData();
     fdToolBar.left = new FormAttachment(0, 0);
     fdToolBar.top = new FormAttachment(0, 0);
@@ -166,7 +207,12 @@ public class HopGuiPipelineLogDelegate {
 
     toolBarWidgets = new GuiToolbarWidgets();
     toolBarWidgets.registerGuiPluginObject(this);
-    toolBarWidgets.createToolbarWidgets(toolbar, GUI_PLUGIN_TOOLBAR_PARENT_ID);
+    toolBarWidgets.createToolbarWidgets(toolBarContainer, GUI_PLUGIN_TOOLBAR_PARENT_ID);
+    // Apply filter while typing (not only on Enter) so only-matching mode updates live.
+    Control filterControl = toolBarWidgets.getControlForMenu(TOOLBAR_ICON_LOG_FILTER_TEXT);
+    if (filterControl instanceof Text filterText) {
+      filterText.addListener(SWT.Modify, event -> applyLogFilterFromToolbar());
+    }
     toolbar.pack();
   }
 
@@ -188,11 +234,11 @@ public class HopGuiPipelineLogDelegate {
   public void clearLog() {
     if (pipelineLogText != null && !pipelineLogText.isDisposed()) {
       // add a CR to avoid fontStyle from getting lost on macos HOP-2583
-      if (OsHelper.isMac()) {
-        pipelineLogText.setText(Const.CR);
-      } else {
-        pipelineLogText.setText("");
-      }
+      String textToSet = OsHelper.isMac() ? Const.CR : "";
+      pipelineLogText.setText(textToSet);
+    }
+    if (logBrowser != null) {
+      logBrowser.resetLogPosition();
     }
     Map<String, String> transformLogMap = pipelineGraph.getTransformLogMap();
     if (transformLogMap != null) {
@@ -294,22 +340,128 @@ public class HopGuiPipelineLogDelegate {
       image = "ui/images/pause.svg",
       separator = true)
   public void pauseLog() {
-    ToolItem item = toolBarWidgets.findToolItem(TOOLBAR_ICON_LOG_PAUSE_RESUME);
     if (logBrowser.isPaused()) {
       logBrowser.setPaused(false);
-      item.setImage(GuiResource.getInstance().getImagePause());
-      item.setToolTipText(BaseMessages.getString(PKG, "PipelineLog.Dialog.Pause.Tooltip"));
+      toolBarWidgets.setToolbarItemImage(TOOLBAR_ICON_LOG_PAUSE_RESUME, "ui/images/pause.svg");
+      setPauseResumeTooltip("PipelineLog.Dialog.Pause.Tooltip");
     } else {
       logBrowser.setPaused(true);
-      item.setImage(GuiResource.getInstance().getImageRun());
-      item.setToolTipText(BaseMessages.getString(PKG, "PipelineLog.Dialog.Resume.Tooltip"));
+      toolBarWidgets.setToolbarItemImage(TOOLBAR_ICON_LOG_PAUSE_RESUME, "ui/images/run.svg");
+      setPauseResumeTooltip("PipelineLog.Dialog.Resume.Tooltip");
     }
   }
 
+  private void setPauseResumeTooltip(String messageKey) {
+    ToolItem item = toolBarWidgets.findToolItem(TOOLBAR_ICON_LOG_PAUSE_RESUME);
+    if (item != null && !item.isDisposed()) {
+      item.setToolTipText(BaseMessages.getString(PKG, messageKey));
+    }
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_INCREASE_FONT,
+      toolTip = "i18n:org.apache.hop.ui.hopgui:WorkflowLog.Button.IncreaseFont",
+      image = "ui/images/zoom-in.svg",
+      separator = true)
+  public void increaseFont() {
+    this.textZoom.increaseFont();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_DECREASE_FONT,
+      toolTip = "i18n:org.apache.hop.ui.hopgui:WorkflowLog.Button.DecreaseFont",
+      image = "ui/images/zoom-out.svg",
+      separator = false)
+  public void decreaseFont() {
+    this.textZoom.decreaseFont();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_RESET_FONT,
+      toolTip = "i18n:org.apache.hop.ui.hopgui:WorkflowLog.Button.ResetFont",
+      image = "ui/images/zoom-100.svg",
+      separator = false)
+  public void resetFont() {
+    this.textZoom.resetFont();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_FILTER_TEXT,
+      type = GuiToolbarElementType.TEXT,
+      label = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Text.Label",
+      toolTip = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Text.Tooltip",
+      separator = true)
+  public void filterTextChanged() {
+    applyLogFilterFromToolbar();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_FILTER_HIGHLIGHT,
+      type = GuiToolbarElementType.CHECKBOX,
+      label = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Highlight.Label",
+      toolTip = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Highlight.Tooltip")
+  public void filterHighlightChanged() {
+    applyLogFilterFromToolbar();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_FILTER_CASE_SENSITIVE,
+      type = GuiToolbarElementType.CHECKBOX,
+      label = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.CaseSensitive.Label",
+      toolTip = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.CaseSensitive.Tooltip")
+  public void filterCaseSensitiveChanged() {
+    applyLogFilterFromToolbar();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_FILTER_EXCLUDE,
+      type = GuiToolbarElementType.CHECKBOX,
+      label = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Exclude.Label",
+      toolTip = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Exclude.Tooltip")
+  public void filterExcludeChanged() {
+    applyLogFilterFromToolbar();
+  }
+
+  private void applyLogFilterFromToolbar() {
+    if (logBrowser == null || toolBarWidgets == null) {
+      return;
+    }
+
+    String filter = "";
+    Control filterControl = toolBarWidgets.getControlForMenu(TOOLBAR_ICON_LOG_FILTER_TEXT);
+    if (filterControl instanceof Text textWidget && !textWidget.isDisposed()) {
+      filter = Const.NVL(textWidget.getText(), "").trim();
+    }
+
+    boolean highlight = isToolbarCheckboxSelected(TOOLBAR_ICON_LOG_FILTER_HIGHLIGHT);
+    boolean caseSensitive = isToolbarCheckboxSelected(TOOLBAR_ICON_LOG_FILTER_CASE_SENSITIVE);
+    boolean exclude = isToolbarCheckboxSelected(TOOLBAR_ICON_LOG_FILTER_EXCLUDE);
+
+    // Without highlight (and without exclude), only matching lines remain in the log view.
+    logBrowser.setFilter(filter, highlight, caseSensitive, exclude);
+    logBrowser.refreshFilteredView();
+  }
+
+  private boolean isToolbarCheckboxSelected(String id) {
+    Control control = toolBarWidgets.getControlForMenu(id);
+    if (control instanceof Button button && !button.isDisposed()) {
+      return button.getSelection();
+    }
+    return false;
+  }
+
   public boolean hasSelectedText() {
-    return pipelineLogText != null
-        && !pipelineLogText.isDisposed()
-        && StringUtils.isNotEmpty(pipelineLogText.getSelectionText());
+    if (pipelineLogText == null || pipelineLogText.isDisposed()) {
+      return false;
+    }
+    return StringUtils.isNotEmpty(pipelineLogText.getSelectionText());
   }
 
   public void copySelected() {

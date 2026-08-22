@@ -37,6 +37,9 @@ TIP: If you run into a `Algorithm Negotiation Fail` error when connecting to you
 |===
 |Option|Description
 |Action name|The name of the workflow action.
+|SFTP connection|An xref:metadata-types/sftp-connection.adoc[SFTP Connection] in the project metadata.
+When one is selected, the server, credentials, compression and proxy settings below come from that connection and are disabled here.
+Leave it empty to configure the server in this action.
 |SFTP-server name / IP|The name of the SFTP server or the IP address
 |Port|The TCP port to use.
 This is usually 22
@@ -89,6 +92,7 @@ A.*[ENG:0-9].txt  : files tarting with A, ending with a number and .txt
 2+|*Target files*
 |Target Directory|The directory on the machine on which Hop runs in which you want to place the transferred files
 |Create target folder|Check this option if the destination folder does not exist and should be created.
+|Preserve timestamp|If checked the last modified timestamp of the source file is preserved in the downloaded file. If not checked, the downloaded file will have the last modified timestamp updated to the instant when the file's download happens.
 |Add filenames to result|If checked the information about downloaded files is added to the result files stream.
 |===
 

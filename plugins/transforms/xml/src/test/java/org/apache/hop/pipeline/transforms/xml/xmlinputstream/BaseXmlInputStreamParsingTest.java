@@ -17,18 +17,19 @@
 
 package org.apache.hop.pipeline.transforms.xml.xmlinputstream;
 
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.row.RowMeta;
 import org.apache.hop.pipeline.transforms.file.BaseFileField;
-import org.junit.Before;
-import org.junit.Ignore;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 
 /** Base class for all CSV input transform tests. */
-@Ignore("No tests in abstract base class")
-public class BaseXmlInputStreamParsingTest
+@Disabled("No tests in abstract base class")
+class BaseXmlInputStreamParsingTest
     extends BaseParsingTest<XmlInputStreamMeta, XmlInputStreamData, XmlInputStream> {
   /** Initialize transform info. */
-  @Before
-  public void before() {
+  @BeforeEach
+  void before() {
     meta = new XmlInputStreamMeta();
     meta.setDefault();
 
@@ -48,6 +49,6 @@ public class BaseXmlInputStreamParsingTest
   /** For BaseFileInput fields. */
   @Override
   protected void setFields(BaseFileField... fields) throws Exception {
-    throw new RuntimeException("Not implemented");
+    throw new HopRuntimeException("Not implemented");
   }
 }

@@ -26,14 +26,13 @@ import jakarta.mail.Header;
 import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.regex.Pattern;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.logging.ILoggingObject;
 import org.apache.hop.core.row.RowDataUtil;
@@ -41,16 +40,15 @@ import org.apache.hop.mail.pipeline.transforms.mailinput.MailInput.MessageParser
 import org.apache.hop.mail.workflow.actions.getpop.MailConnection;
 import org.apache.hop.pipeline.transform.ITransformData;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.AdditionalMatchers;
 import org.mockito.Mockito;
 
-public class ParseMailInputTest {
+class ParseMailInputTest {
 
   // mock is existed per-class instance loaded by junit loader
   private static TransformMockHelper<MailInputMeta, ITransformData> transformMockHelper;
@@ -78,14 +76,12 @@ public class ParseMailInputTest {
   public static final String HDR_EX2 = "header_ex2";
   public static final String HDR_EX2V = "header_ex2_value";
 
-  // this objects re-created for every test method
+  // re-created for every test method
   private Message message;
-  private MailInputData data;
-  private MailInputMeta meta;
-  private MailInput mailInput;
+  private MailConnection mailConn;
 
-  @BeforeClass
-  public static void setup() {
+  @BeforeAll
+  static void setup() {
     transformMockHelper =
         new TransformMockHelper<>("ABORT TEST", MailInputMeta.class, ITransformData.class);
     when(transformMockHelper.logChannelFactory.create(any(), any(ILoggingObject.class)))
@@ -93,32 +89,24 @@ public class ParseMailInputTest {
     when(transformMockHelper.pipeline.isRunning()).thenReturn(true);
   }
 
-  @AfterClass
-  public static void tearDown() {
+  @AfterAll
+  static void tearDown() {
     transformMockHelper.cleanUp();
   }
 
-  @Before
-  public void beforeTest() throws MessagingException, IOException, HopException {
-    message = Mockito.mock(Message.class);
-
-    MailConnection conn = mock(MailConnection.class);
-    when(conn.getMessageBody(any(Message.class))).thenReturn(MSG_BODY);
-    when(conn.getFolderName()).thenReturn(FLD_NAME);
-    when(conn.getAttachedFilesCount(any(Message.class), any(Pattern.class)))
+  @BeforeEach
+  void beforeTest() throws MessagingException, IOException, HopException {
+    mailConn = mock(MailConnection.class);
+    when(mailConn.getMessageBody(any(Message.class))).thenReturn(MSG_BODY);
+    when(mailConn.getFolderName()).thenReturn(FLD_NAME);
+    when(mailConn.getAttachedFilesCount(any(Message.class), Mockito.nullable(Pattern.class)))
         .thenReturn(ATTCH_COUNT);
-    when(conn.getMessageBodyContentType(any(Message.class))).thenReturn(CNTNT_TYPE);
-    data = mock(MailInputData.class);
-    data.mailConn = conn;
-
-    mailInput =
-        new MailInput(
-            transformMockHelper.transformMeta,
-            meta,
-            data,
-            0,
-            transformMockHelper.pipelineMeta,
-            transformMockHelper.pipeline);
+    when(mailConn.getMessageBodyContentType(any(Message.class))).thenReturn(CNTNT_TYPE);
+    when(mailConn.isMessageDraft(any(Message.class))).thenReturn(true);
+    when(mailConn.isMessageFlagged(any(Message.class))).thenReturn(true);
+    when(mailConn.isMessageNew(any(Message.class))).thenReturn(true);
+    when(mailConn.isMessageRead(any(Message.class))).thenReturn(true);
+    when(mailConn.isMessageDeleted(any(Message.class))).thenReturn(true);
 
     Address addrFrom1 = mock(Address.class);
     when(addrFrom1.toString()).thenReturn(FROM1);
@@ -160,412 +148,201 @@ public class ParseMailInputTest {
     when(message.getMatchingHeaders(AdditionalMatchers.aryEq(new String[] {HDR_EX1, HDR_EX2})))
         .thenReturn(getEnum(new Header[] {ex1, ex2}));
 
-    // for previous implementation
     when(message.getHeader(HDR_EX1)).thenReturn(new String[] {ex1.getValue()});
     when(message.getHeader(HDR_EX2)).thenReturn(new String[] {ex2.getValue()});
   }
 
-  /**
-   * When mail header is found returns his actual value.
-   *
-   * @throws Exception
-   * @throws HopException
-   */
-  @Test
-  @Ignore("This test needs to be reviewed")
-  public void testHeadersParsedPositive() throws Exception {
-    // add expected fields:
-    int[] fields = {MailInputField.COLUMN_HEADER};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    // points to existed header
-    farr.get(0).setName(HDR_EX1);
+  /** Build a MailInput whose meta/data references match what we'll assert against. */
+  private MailInput buildMailInput(List<MailInputField> fields) {
+    MailInputMeta meta = mock(MailInputMeta.class);
+    when(meta.getInputFields()).thenReturn(fields);
 
-    this.mockMailInputMeta(farr);
+    MailInputData data = new MailInputData();
+    data.nrFields = fields.size();
+    data.mailConn = mailConn;
 
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals("Header is correct", HDR_EX1V, String.class.cast(r[0]));
+    return new MailInput(
+        transformMockHelper.transformMeta,
+        meta,
+        data,
+        0,
+        transformMockHelper.pipelineMeta,
+        transformMockHelper.pipeline);
   }
 
-  /**
-   * When mail header is not found returns empty String
-   *
-   * @throws Exception
-   */
-  @Test
-  @Ignore("This test needs to be reviewed")
-  public void testHeadersParsedNegative() throws Exception {
-    int[] fields = {MailInputField.COLUMN_HEADER};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    farr.get(0).setName(HDR_EX1 + "salt");
-
-    this.mockMailInputMeta(farr);
-
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals("Header is correct", "", String.class.cast(r[0]));
+  /** Run parseToArray against a single-field input and return the value of that field. */
+  private Object parseSingleField(MailInputField field) throws Exception {
+    MailInput mailInput = buildMailInput(Collections.singletonList(field));
+    MessageParser parser = mailInput.new MessageParser();
+    Object[] r = RowDataUtil.allocateRowData(1);
+    parser.parseToArray(r, message);
+    return r[0];
   }
 
-  /**
-   * Test, message number can be parsed correctly
-   *
-   * @throws Exception
-   */
-  @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageNumberIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_MESSAGE_NR};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-    Assert.assertEquals("Message number is correct", Long.valueOf(MSG_NUMB), Long.class.cast(r[0]));
+  private MailInputField fieldForColumn(int column) {
+    MailInputField field = new MailInputField();
+    field.setColumn(column);
+    field.setName(MailInputField.getColumnDesc(column));
+    return field;
   }
 
-  /**
-   * Test message subject can be parsed
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageSubjectIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_SUBJECT};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-    Assert.assertEquals("Message subject is correct", SUBJ, String.class.cast(r[0]));
+  void testHeadersParsedPositive() throws Exception {
+    MailInputField field = fieldForColumn(MailInputField.COLUMN_HEADER);
+    field.setName(HDR_EX1);
+    Assertions.assertEquals(HDR_EX1V, parseSingleField(field), "Header is correct");
   }
 
-  /**
-   * Test message From can be parsed correctly
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageFromIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_SENDER};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
+  void testHeadersParsedNegative() throws Exception {
+    MailInputField field = fieldForColumn(MailInputField.COLUMN_HEADER);
+    field.setName(HDR_EX1 + "salt");
+    Assertions.assertEquals("", parseSingleField(field), "Missing header returns empty string");
+  }
 
-    // expect, that from is concatenated with ';'
+  @Test
+  void testMessageNumberIsParsed() throws Exception {
+    Assertions.assertEquals(
+        Long.valueOf(MSG_NUMB),
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_MESSAGE_NR)),
+        "Message number is correct");
+  }
+
+  @Test
+  void testMessageSubjectIsParsed() throws Exception {
+    Assertions.assertEquals(
+        SUBJ,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_SUBJECT)),
+        "Message subject is correct");
+  }
+
+  @Test
+  void testMessageFromIsParsed() throws Exception {
     String expected = StringUtils.join(new String[] {FROM1, FROM2}, ";");
-    Assert.assertEquals("Message From is correct", expected, String.class.cast(r[0]));
+    Assertions.assertEquals(
+        expected,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_SENDER)),
+        "Message From is correct");
   }
 
-  /**
-   * Test message ReplayTo can be parsed correctly
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageReplayToIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_REPLY_TO};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    // is concatenated with ';'
+  void testMessageReplayToIsParsed() throws Exception {
     String expected = StringUtils.join(new String[] {REP1, REP2}, ";");
-    Assert.assertEquals("Message ReplayTo is correct", expected, String.class.cast(r[0]));
+    Assertions.assertEquals(
+        expected,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_REPLY_TO)),
+        "Message ReplayTo is correct");
   }
 
-  /**
-   * Test message recipients can be parsed
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageRecipientsIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_RECIPIENTS};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    // is concatenated with ';'
+  void testMessageRecipientsIsParsed() throws Exception {
     String expected = StringUtils.join(new String[] {REC1, REC2}, ";");
-    Assert.assertEquals("Message Recipients is correct", expected, String.class.cast(r[0]));
+    Assertions.assertEquals(
+        expected,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_RECIPIENTS)),
+        "Message Recipients is correct");
   }
 
-  /**
-   * Test message description is correct
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageDescriptionIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_DESCRIPTION};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals("Message Description is correct", DESC, String.class.cast(r[0]));
+  void testMessageDescriptionIsParsed() throws Exception {
+    Assertions.assertEquals(
+        DESC,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_DESCRIPTION)),
+        "Message Description is correct");
   }
 
-  /**
-   * Test message received date is correct
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageRecivedDateIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_RECEIVED_DATE};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals("Message Recived date is correct", DATE1, Date.class.cast(r[0]));
+  void testMessageRecivedDateIsParsed() throws Exception {
+    Assertions.assertEquals(
+        DATE1,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_RECEIVED_DATE)),
+        "Message Received date is correct");
   }
 
-  /**
-   * Test message sent date is correct
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageSentDateIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_SENT_DATE};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals("Message Sent date is correct", DATE2, Date.class.cast(r[0]));
+  void testMessageSentDateIsParsed() throws Exception {
+    Assertions.assertEquals(
+        DATE2,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_SENT_DATE)),
+        "Message Sent date is correct");
   }
 
-  /**
-   * Message content type is correct
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageContentTypeIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_CONTENT_TYPE};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals(
-        "Message Content type is correct", CNTNT_TYPE_EMAIL, String.class.cast(r[0]));
+  void testMessageContentTypeIsParsed() throws Exception {
+    Assertions.assertEquals(
+        CNTNT_TYPE_EMAIL,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_CONTENT_TYPE)),
+        "Message Content type is correct");
   }
 
-  /**
-   * Test message size is correct
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageSizeIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_SIZE};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals("Message Size is correct", Long.valueOf(CNTNT_SIZE), Long.class.cast(r[0]));
+  void testMessageSizeIsParsed() throws Exception {
+    Assertions.assertEquals(
+        Long.valueOf(CNTNT_SIZE),
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_SIZE)),
+        "Message Size is correct");
   }
 
-  /**
-   * Test that message body can be parsed correctly
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageBodyIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_BODY};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals("Message Body is correct", MSG_BODY, String.class.cast(r[0]));
+  void testMessageBodyIsParsed() throws Exception {
+    Assertions.assertEquals(
+        MSG_BODY,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_BODY)),
+        "Message Body is correct");
   }
 
-  /**
-   * Test that message folder name can be parsed correctly
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageFolderNameIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_FOLDER_NAME};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals("Message Folder Name is correct", FLD_NAME, String.class.cast(r[0]));
+  void testMessageFolderNameIsParsed() throws Exception {
+    Assertions.assertEquals(
+        FLD_NAME,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_FOLDER_NAME)),
+        "Message Folder Name is correct");
   }
 
-  /**
-   * Test that message folder name can be parsed correctly
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageAttachedFilesCountNameIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_ATTACHED_FILES_COUNT};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals(
-        "Message Attached files count is correct",
+  void testMessageAttachedFilesCountNameIsParsed() throws Exception {
+    Assertions.assertEquals(
         Long.valueOf(ATTCH_COUNT),
-        Long.class.cast(r[0]));
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_ATTACHED_FILES_COUNT)),
+        "Message Attached files count is correct");
   }
 
-  /**
-   * Test that message body content type can be parsed correctly
-   *
-   * @throws Exception
-   */
   @Test
-  @Ignore("This test needs to be reviewed")
-  public void testMessageBodyContentTypeIsParsed() throws Exception {
-    int[] fields = {MailInputField.COLUMN_BODY_CONTENT_TYPE};
-    List<MailInputField> farr = this.getDefaultInputFields(fields);
-    this.mockMailInputMeta(farr);
-    try {
-      mailInput.init();
-    } catch (Exception e) {
-      // don't worry about it
-    }
-    MessageParser underTest = mailInput.new MessageParser();
-    Object[] r = RowDataUtil.allocateRowData(data.nrFields);
-    underTest.parseToArray(r, message);
-
-    Assert.assertEquals(
-        "Message body content type is correct", CNTNT_TYPE, String.class.cast(r[0]));
+  void testMessageBodyContentTypeIsParsed() throws Exception {
+    Assertions.assertEquals(
+        CNTNT_TYPE,
+        parseSingleField(fieldForColumn(MailInputField.COLUMN_BODY_CONTENT_TYPE)),
+        "Message body content type is correct");
   }
 
-  private void mockMailInputMeta(List<MailInputField> arr) {
-    data.nrFields = arr.size();
-    meta = mock(MailInputMeta.class);
-    when(meta.getInputFields()).thenReturn(arr);
+  @Test
+  void testFlagDraftIsParsed() throws Exception {
+    Assertions.assertEquals(
+        Boolean.TRUE, parseSingleField(fieldForColumn(MailInputField.COLUMN_FLAG_DRAFT)));
   }
 
-  private List<MailInputField> getDefaultInputFields(int[] arr) {
-    List<MailInputField> fields = new ArrayList<MailInputField>();
-    for (int i = 0; i < arr.length; i++) {
-      MailInputField field = new MailInputField();
-      field.setColumn(arr[i]);
-      field.setName(MailInputField.getColumnDesc(arr[i]));
-      fields.add(field);
-    }
-    return fields;
+  @Test
+  void testFlagFlaggedIsParsed() throws Exception {
+    Assertions.assertEquals(
+        Boolean.TRUE, parseSingleField(fieldForColumn(MailInputField.COLUMN_FLAG_FLAGGED)));
+  }
+
+  @Test
+  void testFlagNewIsParsed() throws Exception {
+    Assertions.assertEquals(
+        Boolean.TRUE, parseSingleField(fieldForColumn(MailInputField.COLUMN_FLAG_NEW)));
+  }
+
+  @Test
+  void testFlagReadIsParsed() throws Exception {
+    Assertions.assertEquals(
+        Boolean.TRUE, parseSingleField(fieldForColumn(MailInputField.COLUMN_FLAG_READ)));
+  }
+
+  @Test
+  void testFlagDeletedIsParsed() throws Exception {
+    Assertions.assertEquals(
+        Boolean.TRUE, parseSingleField(fieldForColumn(MailInputField.COLUMN_FLAG_DELETED)));
   }
 
   private Enumeration<Header> getEnum(Header[] headers) {

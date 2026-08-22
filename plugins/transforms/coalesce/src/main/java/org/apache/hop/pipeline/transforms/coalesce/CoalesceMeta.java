@@ -22,7 +22,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.ICheckResult;
 import org.apache.hop.core.annotations.Transform;
@@ -70,14 +70,6 @@ public class CoalesceMeta extends BaseTransformMeta<CoalesceTransform, CoalesceD
     fields = new ArrayList<>();
   }
 
-  public CoalesceMeta(CoalesceMeta c) {
-    super();
-    this.treatEmptyStringsAsNulls = c.treatEmptyStringsAsNulls;
-    for (CoalesceField field : c.getFields()) {
-      fields.add(new CoalesceField(field));
-    }
-  }
-
   @Override
   public void setDefault() {
     this.fields = new ArrayList<>();
@@ -90,11 +82,6 @@ public class CoalesceMeta extends BaseTransformMeta<CoalesceTransform, CoalesceD
 
   public void setTreatEmptyStringsAsNulls(boolean value) {
     this.treatEmptyStringsAsNulls = value;
-  }
-
-  @Override
-  public Object clone() {
-    return new CoalesceMeta(this);
   }
 
   @Override
@@ -210,9 +197,11 @@ public class CoalesceMeta extends BaseTransformMeta<CoalesceTransform, CoalesceD
       List<String> duplicateFields = new ArrayList<>();
 
       for (String fieldName : coalesce.getInputFieldNames()) {
-
-        if (fields.contains(fieldName)) duplicateFields.add(fieldName);
-        else fields.add(fieldName);
+        if (fields.contains(fieldName)) {
+          duplicateFields.add(fieldName);
+        } else {
+          fields.add(fieldName);
+        }
 
         IValueMeta vmi = prev.searchValueMeta(fieldName);
         if (vmi == null) {
@@ -292,22 +281,21 @@ public class CoalesceMeta extends BaseTransformMeta<CoalesceTransform, CoalesceD
               // keep TYPE_STRING
               break;
             case IValueMeta.TYPE_INTEGER:
-              if (otherType == IValueMeta.TYPE_NUMBER) {
-                type = IValueMeta.TYPE_NUMBER;
-              } else if (otherType == IValueMeta.TYPE_BIGNUMBER) {
-                type = IValueMeta.TYPE_BIGNUMBER;
-              } else {
-                type = IValueMeta.TYPE_STRING;
-              }
+              type =
+                  switch (otherType) {
+                    case IValueMeta.TYPE_NUMBER -> IValueMeta.TYPE_NUMBER;
+                    case IValueMeta.TYPE_BIGNUMBER -> IValueMeta.TYPE_BIGNUMBER;
+                    default -> IValueMeta.TYPE_STRING;
+                  };
               break;
+
             case IValueMeta.TYPE_NUMBER:
-              if (otherType == IValueMeta.TYPE_INTEGER) {
-                // keep TYPE_NUMBER
-              } else if (otherType == IValueMeta.TYPE_BIGNUMBER) {
-                type = IValueMeta.TYPE_BIGNUMBER;
-              } else {
-                type = IValueMeta.TYPE_STRING;
-              }
+              type =
+                  switch (otherType) {
+                    case IValueMeta.TYPE_INTEGER -> type;
+                    case IValueMeta.TYPE_BIGNUMBER -> IValueMeta.TYPE_BIGNUMBER;
+                    default -> IValueMeta.TYPE_STRING;
+                  };
               break;
 
             case IValueMeta.TYPE_DATE:
@@ -325,13 +313,12 @@ public class CoalesceMeta extends BaseTransformMeta<CoalesceTransform, CoalesceD
               }
               break;
             case IValueMeta.TYPE_BIGNUMBER:
-              if (otherType == IValueMeta.TYPE_INTEGER) {
-                // keep TYPE_BIGNUMBER
-              } else if (otherType == IValueMeta.TYPE_NUMBER) {
-                // keep TYPE_BIGNUMBER
-              } else {
-                type = IValueMeta.TYPE_STRING;
-              }
+              type =
+                  switch (otherType) {
+                      // keep TYPE_BIGNUMBER
+                    case IValueMeta.TYPE_INTEGER, IValueMeta.TYPE_NUMBER -> type;
+                    default -> IValueMeta.TYPE_STRING;
+                  };
               break;
             case IValueMeta.TYPE_BOOLEAN,
                 IValueMeta.TYPE_INET,

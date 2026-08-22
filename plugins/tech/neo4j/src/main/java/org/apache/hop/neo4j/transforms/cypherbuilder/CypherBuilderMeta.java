@@ -21,7 +21,7 @@ package org.apache.hop.neo4j.transforms.cypherbuilder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.annotations.Transform;
 import org.apache.hop.core.exception.HopException;
@@ -72,16 +72,6 @@ public class CypherBuilderMeta extends BaseTransformMeta<CypherBuilder, CypherBu
   public CypherBuilderMeta() {
     this.parameters = new ArrayList<>();
     this.operations = new ArrayList<>();
-  }
-
-  public CypherBuilderMeta(CypherBuilderMeta meta) {
-    this();
-    this.connectionName = meta.connectionName;
-    this.batchSize = meta.batchSize;
-    this.unwindAlias = meta.unwindAlias;
-    this.retries = meta.retries;
-    meta.parameters.forEach(p -> this.parameters.add(p.clone()));
-    meta.operations.forEach(o -> this.operations.add(o.clone()));
   }
 
   @Override
@@ -154,11 +144,6 @@ public class CypherBuilderMeta extends BaseTransformMeta<CypherBuilder, CypherBu
       }
     }
     return false;
-  }
-
-  @Override
-  public CypherBuilderMeta clone() {
-    return new CypherBuilderMeta(this);
   }
 
   public IOperation findOperation(String operationName) {

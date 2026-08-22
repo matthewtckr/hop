@@ -18,32 +18,31 @@
 package org.apache.hop.ui.hopgui.file.workflow;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.extension.ExtensionPointHandler;
+import org.apache.hop.core.extension.HopExtensionPoint;
 import org.apache.hop.core.file.IHasFilename;
 import org.apache.hop.core.gui.plugin.action.GuiAction;
 import org.apache.hop.core.gui.plugin.action.GuiActionType;
-import org.apache.hop.core.logging.LogChannel;
+import org.apache.hop.core.search.ISearchable;
 import org.apache.hop.core.variables.IVariables;
+import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.core.xml.XmlHandler;
 import org.apache.hop.history.AuditManager;
 import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.ui.core.dialog.ErrorDialog;
 import org.apache.hop.ui.core.gui.HopNamespace;
 import org.apache.hop.ui.hopgui.HopGui;
-import org.apache.hop.ui.hopgui.HopGuiExtensionPoint;
 import org.apache.hop.ui.hopgui.context.GuiContextHandler;
 import org.apache.hop.ui.hopgui.context.IGuiContextHandler;
-import org.apache.hop.ui.hopgui.delegates.HopGuiFileOpenedExtension;
 import org.apache.hop.ui.hopgui.file.HopFileTypeBase;
 import org.apache.hop.ui.hopgui.file.HopFileTypePlugin;
 import org.apache.hop.ui.hopgui.file.IHopFileType;
 import org.apache.hop.ui.hopgui.file.IHopFileTypeHandler;
-import org.apache.hop.ui.hopgui.perspective.TabItemHandler;
-import org.apache.hop.ui.hopgui.perspective.dataorch.HopDataOrchestrationPerspective;
+import org.apache.hop.ui.hopgui.search.HopGuiWorkflowSearchable;
 import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.action.ActionMeta;
 import org.apache.hop.workflow.actions.start.ActionStart;
@@ -54,8 +53,7 @@ import org.w3c.dom.Node;
     id = "HopFile-Workflow-Plugin",
     description = "The workflow file information for the Hop GUI",
     image = "ui/images/workflow.svg")
-public class HopWorkflowFileType<T extends WorkflowMeta> extends HopFileTypeBase
-    implements IHopFileType {
+public class HopWorkflowFileType<T extends WorkflowMeta> extends HopFileTypeBase {
 
   public static final Class<?> PKG = HopWorkflowFileType.class; // i18n
 
@@ -115,6 +113,7 @@ public class HopWorkflowFileType<T extends WorkflowMeta> extends HopFileTypeBase
     capabilities.setProperty(IHopFileType.CAPABILITY_DISTRIBUTE_VERTICAL, "true");
 
     capabilities.setProperty(IHopFileType.CAPABILITY_FILE_HISTORY, "true");
+    capabilities.setProperty(IHopFileType.CAPABILITY_SEARCH, "true");
 
     return capabilities;
   }
@@ -123,29 +122,22 @@ public class HopWorkflowFileType<T extends WorkflowMeta> extends HopFileTypeBase
   public IHopFileTypeHandler openFile(HopGui hopGui, String filename, IVariables variables)
       throws HopException {
     try {
-      // This file is opened in the data orchestration perspective
-      //
-      HopDataOrchestrationPerspective perspective = HopGui.getDataOrchestrationPerspective();
-      perspective.activate();
 
-      // Normalize the filename into a relative path...
+      // Normalize the filename
       //
-      HopGuiFileOpenedExtension ext = new HopGuiFileOpenedExtension(null, variables, filename);
-      ExtensionPointHandler.callExtensionPoint(
-          LogChannel.UI, variables, HopGuiExtensionPoint.HopGuiFileOpenedDialog.id, ext);
-      filename = variables.resolve(ext.filename);
+      filename = HopVfs.normalize(variables.resolve(filename));
 
       // See if the same workflow isn't already open.
       // Other file types we might allow to open more than once but not workflows for now.
       //
-      TabItemHandler tabItemHandlerWithFilename =
-          perspective.findTabItemHandlerWithFilename(filename);
-      if (tabItemHandlerWithFilename != null) {
+      IHopFileTypeHandler fileTypeHandler =
+          HopGui.getExplorerPerspective().findFileTypeHandlerByFilename(filename);
+      if (fileTypeHandler != null) {
         // Same file so we can simply switch to it.
         // This will prevent confusion.
         //
-        perspective.switchToTab(tabItemHandlerWithFilename);
-        return tabItemHandlerWithFilename.getTypeHandler();
+        HopGui.getExplorerPerspective().setActiveFileTypeHandler(fileTypeHandler);
+        return fileTypeHandler;
       }
 
       // Load the workflow from file
@@ -153,9 +145,9 @@ public class HopWorkflowFileType<T extends WorkflowMeta> extends HopFileTypeBase
       WorkflowMeta workflowMeta =
           new WorkflowMeta(variables, filename, hopGui.getMetadataProvider());
 
-      // Pass the MetaStore for reference lookups
+      // Show it in the editor
       //
-      workflowMeta.setMetadataProvider(hopGui.getMetadataProvider());
+      IHopFileTypeHandler typeHandler = HopGui.getExplorerPerspective().addWorkflow(workflowMeta);
 
       // Keep track of open...
       //
@@ -164,11 +156,9 @@ public class HopWorkflowFileType<T extends WorkflowMeta> extends HopFileTypeBase
       // Inform those that want to know about it that we loaded a pipeline
       //
       ExtensionPointHandler.callExtensionPoint(
-          hopGui.getLog(), variables, "WorkflowAfterOpen", workflowMeta);
+          hopGui.getLog(), variables, HopExtensionPoint.WorkflowAfterOpen.id, workflowMeta);
 
-      // Show it in the perspective
-      //
-      return perspective.addWorkflow(hopGui, workflowMeta, this);
+      return typeHandler;
     } catch (Exception e) {
       throw new HopException("Error opening workflow file '" + filename + "'", e);
     }
@@ -178,12 +168,7 @@ public class HopWorkflowFileType<T extends WorkflowMeta> extends HopFileTypeBase
   public IHopFileTypeHandler newFile(HopGui hopGui, IVariables parentVariableSpace)
       throws HopException {
     try {
-      // This file is created in the data orchestration perspective
-      //
-      HopDataOrchestrationPerspective perspective = HopGui.getDataOrchestrationPerspective();
-      perspective.activate();
-
-      // Create the empty pipeline
+      // Create the empty workflow
       //
       WorkflowMeta workflowMeta = new WorkflowMeta();
       workflowMeta.setName(BaseMessages.getString(PKG, "HopWorkflowFileType.New.Text"));
@@ -199,9 +184,19 @@ public class HopWorkflowFileType<T extends WorkflowMeta> extends HopFileTypeBase
       startMeta.setLocation(50, 50);
       workflowMeta.addAction(startMeta);
 
-      // Show it in the perspective
+      // Show it in the editor
       //
-      return perspective.addWorkflow(hopGui, workflowMeta, this);
+      IHopFileTypeHandler fileHandler = HopGui.getExplorerPerspective().addWorkflow(workflowMeta);
+
+      // Ensure the UI is updated to reflect the changed state
+      //
+      if (fileHandler instanceof HopGuiWorkflowGraph) {
+        ((HopGuiWorkflowGraph) fileHandler).updateGui();
+      }
+
+      HopGui.getExplorerPerspective().activate();
+
+      return fileHandler;
     } catch (Exception e) {
       throw new HopException("Error creating new workflow", e);
     }
@@ -259,7 +254,7 @@ public class HopWorkflowFileType<T extends WorkflowMeta> extends HopFileTypeBase
     newAction.setCategory("File");
     newAction.setCategoryOrder("1");
 
-    handlers.add(new GuiContextHandler(ACTION_ID_NEW_WORKFLOW, Arrays.asList(newAction)));
+    handlers.add(new GuiContextHandler(ACTION_ID_NEW_WORKFLOW, List.of(newAction)));
 
     return handlers;
   }
@@ -267,5 +262,16 @@ public class HopWorkflowFileType<T extends WorkflowMeta> extends HopFileTypeBase
   @Override
   public String getFileTypeImage() {
     return "ui/images/workflow.svg";
+  }
+
+  @Override
+  public ISearchable createSearchable(
+      String filename,
+      String locationDescription,
+      IVariables variables,
+      IHopMetadataProvider metadataProvider)
+      throws HopException {
+    WorkflowMeta workflowMeta = new WorkflowMeta(variables, filename, metadataProvider);
+    return new HopGuiWorkflowSearchable(locationDescription, workflowMeta);
   }
 }

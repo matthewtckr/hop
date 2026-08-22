@@ -16,10 +16,11 @@
  */
 package org.apache.hop.www;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.Serial;
 import java.nio.charset.StandardCharsets;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 import org.apache.commons.io.IOUtils;
 import org.apache.hop.core.annotations.HopServerServlet;
 import org.apache.hop.core.exception.HopException;
@@ -31,8 +32,7 @@ import org.json.simple.parser.ParseException;
 
 @HopServerServlet(id = "registerPipeline", name = "Add a pipeline to the server")
 public class RegisterPipelineServlet extends BaseWorkflowServlet {
-
-  private static final long serialVersionUID = 468054102740138751L;
+  @Serial private static final long serialVersionUID = 468054102740138751L;
   public static final String CONTEXT_PATH = "/hop/registerPipeline";
 
   @Override
@@ -53,13 +53,18 @@ public class RegisterPipelineServlet extends BaseWorkflowServlet {
     // Parse the XML, create a pipeline configuration
     PipelineConfiguration pipelineConfiguration = PipelineConfiguration.fromXml(xml);
 
-    IPipelineEngine<PipelineMeta> pipeline = createPipeline(pipelineConfiguration);
+    try {
+      IPipelineEngine<PipelineMeta> pipeline =
+          createPipeline(pipelineConfiguration, HopServerAdmission.parseMaxConcurrent(request));
 
-    String message =
-        "Pipeline '"
-            + pipeline.getPipelineMeta().getName()
-            + "' was added to HopServer with id "
-            + pipeline.getContainerId();
-    return new WebResult(WebResult.STRING_OK, message, pipeline.getContainerId());
+      String message =
+          "Pipeline '"
+              + pipeline.getPipelineMeta().getName()
+              + "' was added to HopServer with id "
+              + pipeline.getContainerId();
+      return new WebResult(WebResult.STRING_OK, message, pipeline.getContainerId());
+    } catch (HopServerAtCapacityException e) {
+      return new WebResult(HopServerAdmission.RESULT_AT_CAPACITY, e.getMessage());
+    }
   }
 }

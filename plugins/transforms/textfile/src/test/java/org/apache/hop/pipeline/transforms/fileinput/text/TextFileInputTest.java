@@ -17,8 +17,8 @@
 
 package org.apache.hop.pipeline.transforms.fileinput.text;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -29,6 +29,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.commons.io.IOUtils;
@@ -37,6 +38,7 @@ import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.IRowSet;
 import org.apache.hop.core.exception.HopFileException;
+import org.apache.hop.core.file.TextFileInputField;
 import org.apache.hop.core.fileinput.FileInputList;
 import org.apache.hop.core.logging.ILogChannel;
 import org.apache.hop.core.playlist.FilePlayListAll;
@@ -46,34 +48,35 @@ import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.core.util.Assert;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.core.vfs.HopVfs;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.PipelineTestingUtil;
 import org.apache.hop.pipeline.transform.TransformMeta;
 import org.apache.hop.pipeline.transform.errorhandling.AbstractFileErrorHandler;
 import org.apache.hop.pipeline.transform.errorhandling.IFileErrorHandler;
-import org.apache.hop.pipeline.transforms.file.BaseFileField;
 import org.apache.hop.pipeline.transforms.file.IBaseFileInputReader;
 import org.apache.hop.pipeline.transforms.file.IBaseFileInputTransformControl;
 import org.apache.hop.ui.pipeline.transform.common.TextFileLineUtil;
 import org.apache.hop.utils.TestUtils;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.mockito.Mockito;
 
-public class TextFileInputTest {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+class TextFileInputTest {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
-  @BeforeClass
-  public static void initHop() throws Exception {
+  @BeforeAll
+  static void initHop() throws Exception {
     HopEnvironment.init();
   }
 
   private static InputStreamReader getInputStreamReader(String data)
       throws UnsupportedEncodingException {
-    return new InputStreamReader(new ByteArrayInputStream(data.getBytes(("UTF-8"))));
+    return new InputStreamReader(new ByteArrayInputStream(data.getBytes(StandardCharsets.UTF_8)));
   }
 
   private static String getInputStreamReader(
@@ -93,7 +96,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void testGetLineDOS() throws HopFileException, UnsupportedEncodingException {
+  void testGetLineDOS() throws HopFileException, UnsupportedEncodingException {
     String input = "col1\tcol2\tcol3\r\ndata1\tdata2\tdata3\r\n";
     String expected = "col1\tcol2\tcol3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_DOS, "", "", false);
@@ -101,7 +104,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void testGetLineUnix() throws HopFileException, UnsupportedEncodingException {
+  void testGetLineUnix() throws HopFileException, UnsupportedEncodingException {
     String input = "col1\tcol2\tcol3\ndata1\tdata2\tdata3\n";
     String expected = "col1\tcol2\tcol3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_UNIX, "", "", false);
@@ -109,7 +112,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void testGetLineOSX() throws HopFileException, UnsupportedEncodingException {
+  void testGetLineOSX() throws HopFileException, UnsupportedEncodingException {
     String input = "col1\tcol2\tcol3\rdata1\tdata2\tdata3\r";
     String expected = "col1\tcol2\tcol3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_UNIX, "", "", false);
@@ -117,7 +120,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void testGetLineMixed() throws HopFileException, UnsupportedEncodingException {
+  void testGetLineMixed() throws HopFileException, UnsupportedEncodingException {
     String input = "col1\tcol2\tcol3\r\ndata1\tdata2\tdata3\r";
     String expected = "col1\tcol2\tcol3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_MIXED, "", "", false);
@@ -125,7 +128,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void DOSWithNoBreaksAndEnclosures() throws HopFileException, UnsupportedEncodingException {
+  void DOSWithNoBreaksAndEnclosures() throws HopFileException, UnsupportedEncodingException {
     String input = "col1\tcol2\tcol3\r\ndata1\tdata2\tdata3\r\n";
     String expected = "col1\tcol2\tcol3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_DOS, "", "", false);
@@ -134,8 +137,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void mixedWithNoBreaksAndEnclosures()
-      throws HopFileException, UnsupportedEncodingException {
+  void mixedWithNoBreaksAndEnclosures() throws HopFileException, UnsupportedEncodingException {
     String input = "col1\tcol2\tcol3\r\ndata1\tdata2\tdata3\r";
     String expected = "col1\tcol2\tcol3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_MIXED, "", "", false);
@@ -144,8 +146,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void UNIXWithNoBreaksAndEnclosures()
-      throws HopFileException, UnsupportedEncodingException {
+  void UNIXWithNoBreaksAndEnclosures() throws HopFileException, UnsupportedEncodingException {
     String input = "col1\tcol2\tcol3\ndata1\tdata2\tdata3\n";
     String expected = "col1\tcol2\tcol3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_UNIX, "", "", false);
@@ -154,7 +155,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void DOSWithBreaks() throws Exception {
+  void DOSWithBreaks() throws Exception {
     String input = "col1\tcol2\t'col3\r\ndata1'\r\ndata2\tdata3\r\n";
     String expected = "col1\tcol2\t'col3\r\ndata1'";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_DOS, "'", "", true);
@@ -163,7 +164,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void DOSWithBreaksAndEscape() throws Exception {
+  void DOSWithBreaksAndEscape() throws Exception {
     String input = "col1\tcol2\t?'col3\r\ndata1'\r\ndata2\tdata3\r\n";
     String expected = "col1\tcol2\t?'col3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_DOS, "'", "?", true);
@@ -172,7 +173,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void UNIXWithBreaks() throws Exception {
+  void UNIXWithBreaks() throws Exception {
     String input = "col1\tcol2\t'col3\ndata1'\ndata2\tdata3\n";
     String expected = "col1\tcol2\t'col3\ndata1'";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_UNIX, "'", "", true);
@@ -181,7 +182,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void UNIXWithBreaksAndEscape() throws Exception {
+  void UNIXWithBreaksAndEscape() throws Exception {
     String input = "col1\tcol2\t?'col3\ndata1'\ndata2\tdata3\n";
     String expected = "col1\tcol2\t?'col3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_UNIX, "'", "?", true);
@@ -190,7 +191,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void OSXWithNoBreaksAndEnclosures() throws HopFileException, UnsupportedEncodingException {
+  void OSXWithNoBreaksAndEnclosures() throws HopFileException, UnsupportedEncodingException {
     String input = "col1\tcol2\tcol3\rdata1\tdata2\tdata3\r";
     String expected = "col1\tcol2\tcol3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_UNIX, "", "", false);
@@ -199,7 +200,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void OSXWithBreaks() throws Exception {
+  void OSXWithBreaks() throws Exception {
     String input = "col1\tcol2\t'col3\rdata1'\rdata2\tdata3\r";
     String expected = "col1\tcol2\t'col3\rdata1'";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_UNIX, "'", "", true);
@@ -208,7 +209,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void OSXWithBreaksAndEscape() throws Exception {
+  void OSXWithBreaksAndEscape() throws Exception {
     String input = "col1\tcol2\t?'col3\rdata1'\rdata2\tdata3\r";
     String expected = "col1\tcol2\t?'col3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_UNIX, "'", "?", true);
@@ -217,7 +218,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void mixedWithBreaks() throws Exception {
+  void mixedWithBreaks() throws Exception {
     String input = "col1\tcol2\t'col3\r\ndata1'\ndata2\tdata3\r";
     String expected = "col1\tcol2\t'col3\ndata1'";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_MIXED, "'", "", true);
@@ -226,7 +227,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void mixedWithBreaksAndEscape() throws Exception {
+  void mixedWithBreaksAndEscape() throws Exception {
     String input = "col1\tcol2\t?'col3\r\ndata1'\ndata2\tdata3\r";
     String expected = "col1\tcol2\t?'col3";
     String output = getInputStreamReader(input, TextFileLineUtil.FILE_FORMAT_MIXED, "'", "?", true);
@@ -235,7 +236,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void mixedLongEnclosure() throws Exception {
+  void mixedLongEnclosure() throws Exception {
     String input = "col1\tcol2\tTEST_ENCLOSUREcol3\r\ndata1TEST_ENCLOSURE\ndata2\tdata3\r";
     String expected = "col1\tcol2\tTEST_ENCLOSUREcol3\ndata1TEST_ENCLOSURE";
     String output =
@@ -245,7 +246,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void mixedLongEnclosureAndLongEscape() throws Exception {
+  void mixedLongEnclosureAndLongEscape() throws Exception {
     String input =
         "col1\tcol2\tTEST_ESCAPETEST_ENCLOSUREcol3\r\ndata1TEST_ENCLOSURE\ndata2\tdata3\r";
     String expected = "col1\tcol2\tTEST_ESCAPETEST_ENCLOSUREcol3";
@@ -257,19 +258,18 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void mixedWithOneEnclosure() throws HopFileException, IOException {
+  void mixedWithOneEnclosure() throws HopFileException, IOException {
     String input = "col1\tcol2\t'col3\r\ndata1\r\ndata2\tdata3\r\n";
     InputStreamReader isr = getInputStreamReader(input);
     TextFileLineUtil.getLine(
         null, isr, TextFileLineUtil.FILE_FORMAT_MIXED, new StringBuilder(1000), "'", "", true);
 
-    assertFalse(
-        "Expect false as its at the end of the input not finding another Enclosure or Break",
-        isr.ready());
+    assertFalse(isr.ready());
   }
 
-  @Test(timeout = 100)
-  public void test_PDI695() throws HopFileException, UnsupportedEncodingException {
+  @Test
+  @Timeout(value = 100, unit = java.util.concurrent.TimeUnit.MILLISECONDS)
+  void test_PDI695() throws HopFileException, UnsupportedEncodingException {
     String inputDOS = "col1\tcol2\tcol3\r\ndata1\tdata2\tdata3\r\n";
     String inputUnix = "col1\tcol2\tcol3\ndata1\tdata2\tdata3\n";
     String inputOSX = "col1\tcol2\tcol3\rdata1\tdata2\tdata3\r";
@@ -287,7 +287,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void readWrappedInputWithoutHeaders() throws Exception {
+  void readWrappedInputWithoutHeaders() throws Exception {
     final String content =
         new StringBuilder()
             .append("r1c1")
@@ -300,8 +300,8 @@ public class TextFileInputTest {
     final String virtualFile = createVirtualFile("pdi-2607.txt", content);
 
     TextFileInputMeta meta = createMetaObject(field("col1"), field("col2"));
-    meta.content.lineWrapped = true;
-    meta.content.nrWraps = 1;
+    meta.getContent().setLineWrapped(true);
+    meta.getContent().setNrWraps(1);
 
     TextFileInputData data = createDataObject(virtualFile, ";", "col1", "col2");
 
@@ -321,10 +321,10 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void readInputWithMissedValues() throws Exception {
+  void readInputWithMissedValues() throws Exception {
     final String virtualFile = createVirtualFile("pdi-14172.txt", "1,1,1\n", "2,,2\n");
 
-    BaseFileField field2 = field("col2");
+    TextFileInputField field2 = field("col2");
     field2.setRepeated(true);
 
     TextFileInputMeta meta = createMetaObject(field("col1"), field2, field("col3"));
@@ -346,10 +346,10 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void readInputWithNonEmptyNullif() throws Exception {
+  void readInputWithNonEmptyNullif() throws Exception {
     final String virtualFile = createVirtualFile("pdi-14358.txt", "-,-\n");
 
-    BaseFileField col2 = field("col2");
+    TextFileInputField col2 = field("col2");
     col2.setNullString("-");
 
     TextFileInputMeta meta = createMetaObject(field("col1"), col2);
@@ -371,10 +371,10 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void readInputWithDefaultValues() throws Exception {
+  void readInputWithDefaultValues() throws Exception {
     final String virtualFile = createVirtualFile("pdi-14832.txt", "1,\n");
 
-    BaseFileField col2 = field("col2");
+    TextFileInputField col2 = field("col2");
     col2.setIfNullValue("DEFAULT");
 
     TextFileInputMeta meta = createMetaObject(field("col1"), col2);
@@ -396,7 +396,7 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void testErrorHandlerLineNumber() throws Exception {
+  void testErrorHandlerLineNumber() throws Exception {
     final String content =
         new StringBuilder()
             .append("123")
@@ -413,10 +413,10 @@ public class TextFileInputTest {
 
     TextFileInputMeta meta = createMetaObject(field("col1"));
 
-    meta.inputFields[0].setType(1);
-    meta.content.lineWrapped = false;
-    meta.content.nrWraps = 1;
-    meta.errorHandling.errorIgnored = true;
+    meta.getInputFields().get(0).setType(1);
+    meta.getContent().setLineWrapped(false);
+    meta.getContent().setNrWraps(1);
+    meta.getErrorHandling().setErrorIgnored(true);
     TextFileInputData data = createDataObject(virtualFile, ";", "col1");
     data.dataErrorLineHandler = Mockito.mock(IFileErrorHandler.class);
 
@@ -437,16 +437,16 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void testHandleOpenFileException() throws Exception {
+  void testHandleOpenFileException() throws Exception {
     final String content =
         new StringBuilder().append("123").append('\n').append("333\n").toString();
     final String virtualFile = createVirtualFile("pdi-16697.txt", content);
 
     TextFileInputMeta meta = createMetaObject(field("col1"));
 
-    meta.inputFields[0].setType(1);
-    meta.errorHandling.errorIgnored = true;
-    meta.errorHandling.skipBadFiles = true;
+    meta.getInputFields().getFirst().setType(1);
+    meta.getErrorHandling().setErrorIgnored(true);
+    meta.getErrorHandling().setSkipBadFiles(true);
 
     TextFileInputData data = createDataObject(virtualFile, ";", "col1");
     data.dataErrorLineHandler = Mockito.mock(IFileErrorHandler.class);
@@ -472,16 +472,16 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void test_PDI17117() throws Exception {
+  void test_PDI17117() throws Exception {
     final String virtualFile = createVirtualFile("pdi-14832.txt", "1,\n");
 
-    BaseFileField col2 = field("col2");
+    TextFileInputField col2 = field("col2");
     col2.setIfNullValue("DEFAULT");
 
     TextFileInputMeta meta = createMetaObject(field("col1"), col2);
 
-    meta.inputFiles.passingThruFields = true;
-    meta.inputFiles.acceptingFilenames = true;
+    meta.getFileInput().setPassingThruFields(true);
+    meta.getFileInput().setAcceptingFilenames(true);
     TextFileInputData data = createDataObject(virtualFile, ",", "col1", "col2");
 
     TextFileInput input =
@@ -523,9 +523,8 @@ public class TextFileInputTest {
   }
 
   @Test
-  public void testClose() throws Exception {
-
-    TextFileInputMeta mockTFIM = createMetaObject(null);
+  void testClose() throws Exception {
+    TextFileInputMeta mockTFIM = createMetaObject(new TextFileInputField("one"));
     String virtualFile = createVirtualFile("pdi-17267.txt", null);
     TextFileInputData mockTFID = createDataObject(virtualFile, ";", null);
     mockTFID.lineBuffer = new ArrayList<>();
@@ -554,16 +553,16 @@ public class TextFileInputTest {
     assertEquals(0, mockTFID.lineBuffer.size());
   }
 
-  private TextFileInputMeta createMetaObject(BaseFileField... fields) {
+  private TextFileInputMeta createMetaObject(TextFileInputField... fields) {
     TextFileInputMeta meta = new TextFileInputMeta();
-    meta.content.fileCompression = "None";
-    meta.content.fileType = "CSV";
-    meta.content.header = false;
-    meta.content.nrHeaderLines = -1;
-    meta.content.footer = false;
-    meta.content.nrFooterLines = -1;
+    meta.getContent().setFileCompression("None");
+    meta.getContent().setFileType("CSV");
+    meta.getContent().setHeader(false);
+    meta.getContent().setNrHeaderLines(-1);
+    meta.getContent().setFooter(false);
+    meta.getContent().setNrFooterLines(-1);
 
-    meta.inputFields = fields;
+    meta.getInputFields().addAll(List.of(fields));
     return meta;
   }
 
@@ -584,7 +583,7 @@ public class TextFileInputTest {
 
     data.dataErrorLineHandler = mock(IFileErrorHandler.class);
     data.fileFormatType = TextFileLineUtil.FILE_FORMAT_UNIX;
-    data.filterProcessor = new TextFileFilterProcessor(new TextFileFilter[0], new Variables());
+    data.filterProcessor = new TextFileFilterProcessor(List.of(), new Variables());
     data.filePlayList = new FilePlayListAll();
     return data;
   }
@@ -612,8 +611,8 @@ public class TextFileInputTest {
     TestUtils.getFileObject(path).delete();
   }
 
-  private static BaseFileField field(String name) {
-    return new BaseFileField(name, -1, -1);
+  private static TextFileInputField field(String name) {
+    return new TextFileInputField(name, -1, -1);
   }
 
   public static class TestTextFileInput extends TextFileInput {

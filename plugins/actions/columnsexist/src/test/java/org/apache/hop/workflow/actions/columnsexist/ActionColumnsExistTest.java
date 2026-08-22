@@ -25,10 +25,10 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /** Unit tests for column exist action. */
-public class ActionColumnsExistTest {
+class ActionColumnsExistTest {
 
   @Test
-  public void testSerialization() throws Exception {
+  void testSerialization() throws Exception {
     HopClientEnvironment.init();
     DatabaseMeta databaseMeta = new DatabaseMeta();
     databaseMeta.setName("unit-test-db");
@@ -40,7 +40,7 @@ public class ActionColumnsExistTest {
         ActionSerializationTestUtil.testSerialization(
             "/columns-exist-action.xml", ActionColumnsExist.class, provider);
 
-    Assertions.assertEquals("unit-test-db", action.getDatabaseMeta().getName());
+    Assertions.assertEquals("unit-test-db", action.getConnectionName());
     Assertions.assertEquals("SCHEMA", action.getSchemaName());
     Assertions.assertEquals("TABLE", action.getTableName());
     Assertions.assertEquals(2, action.getColumns().size());

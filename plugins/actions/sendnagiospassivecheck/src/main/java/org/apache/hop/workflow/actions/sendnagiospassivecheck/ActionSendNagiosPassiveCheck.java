@@ -138,12 +138,6 @@ public class ActionSendNagiosPassiveCheck extends ActionBase implements Cloneabl
     this("");
   }
 
-  @Override
-  public Object clone() {
-    ActionSendNagiosPassiveCheck je = (ActionSendNagiosPassiveCheck) super.clone();
-    return je;
-  }
-
   public static String getEncryptionModeDesc(int i) {
     if (i < 0 || i >= encryptionModeDesc.length) {
       return encryptionModeDesc[0];
@@ -160,7 +154,9 @@ public class ActionSendNagiosPassiveCheck extends ActionBase implements Cloneabl
 
   @Override
   public Result execute(Result previousResult, int nr) {
-    logBasic(BaseMessages.getString(PKG, "ActionSendNagiosPassiveCheck.Started", serverName));
+    if (isBasic()) {
+      logBasic(BaseMessages.getString(PKG, "ActionSendNagiosPassiveCheck.Started", serverName));
+    }
 
     Result result = previousResult;
     result.setNrErrors(1);

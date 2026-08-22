@@ -20,9 +20,10 @@ package org.apache.hop.pipeline.transforms.propertyinput;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.CheckResult;
+import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
 import org.apache.hop.core.annotations.Transform;
 import org.apache.hop.core.exception.HopException;
@@ -68,8 +69,6 @@ public class PropertyInputMeta extends BaseTransformMeta<PropertyInput, Property
       };
 
   public static final String[] RequiredFilesCode = new String[] {"N", "Y"};
-
-  public static final String DEFAULT_ENCODING = "UTF-8";
 
   private static final String YES = "Y";
 
@@ -165,40 +164,6 @@ public class PropertyInputMeta extends BaseTransformMeta<PropertyInput, Property
     inputFields = new ArrayList<>();
   }
 
-  public PropertyInputMeta(PropertyInputMeta m) {
-    this();
-    this.encoding = m.encoding;
-    this.fileType = m.fileType;
-    this.includingFilename = m.includingFilename;
-    this.resettingRowNumber = m.resettingRowNumber;
-    this.resolvingValueVariable = m.resolvingValueVariable;
-    this.filenameField = m.filenameField;
-    this.includeRowNumber = m.includeRowNumber;
-    this.rowNumberField = m.rowNumberField;
-    this.rowLimit = m.rowLimit;
-    this.fileField = m.fileField;
-    this.addResult = m.addResult;
-    this.dynamicFilenameField = m.dynamicFilenameField;
-    this.includeIniSection = m.includeIniSection;
-    this.iniSectionField = m.iniSectionField;
-    this.section = m.section;
-    this.shortFileFieldName = m.shortFileFieldName;
-    this.pathFieldName = m.pathFieldName;
-    this.hiddenFieldName = m.hiddenFieldName;
-    this.lastModificationTimeFieldName = m.lastModificationTimeFieldName;
-    this.uriNameFieldName = m.uriNameFieldName;
-    this.rootUriNameFieldName = m.rootUriNameFieldName;
-    this.extensionFieldName = m.extensionFieldName;
-    this.sizeFieldName = m.sizeFieldName;
-    m.files.forEach(f -> this.files.add(new PIFile(f)));
-    m.inputFields.forEach(f -> this.inputFields.add(new PIField(f)));
-  }
-
-  @Override
-  public PropertyInputMeta clone() {
-    return new PropertyInputMeta(this);
-  }
-
   @Override
   public void setDefault() {
     shortFileFieldName = null;
@@ -212,7 +177,7 @@ public class PropertyInputMeta extends BaseTransformMeta<PropertyInput, Property
 
     fileType = FileType.PROPERTY;
     section = "";
-    encoding = DEFAULT_ENCODING;
+    encoding = Const.UTF_8;
     includeIniSection = false;
     iniSectionField = "";
     resolvingValueVariable = false;

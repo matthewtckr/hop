@@ -17,11 +17,23 @@
 
 package org.apache.hop.databases.postgresql;
 
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.util.List;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
+import org.apache.hop.core.database.types.DatabaseTypes;
+import org.apache.hop.core.database.types.IDatabaseTypeRule;
+import org.apache.hop.core.database.types.IValueBinding;
+import org.apache.hop.core.database.types.StandardJdbcTypeMapper;
+import org.apache.hop.core.exception.HopValueException;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 
@@ -34,6 +46,108 @@ import org.apache.hop.core.row.IValueMeta;
     classLoaderGroup = "postgres-db")
 @GuiPlugin(id = "GUI-PostgreSQLDatabaseMeta")
 public class PostgreSqlDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  /**
+   * Postgres takes JSON and JSONB as a typed object rather than a string. Other databases reject
+   * {@link Types#OTHER}, which is why this cannot be the neutral handling.
+   */
+  private static final IValueBinding JSON_BINDING =
+      new IValueBinding() {
+        @Override
+        public Object read(
+            IDatabase database, IValueMeta valueMeta, ResultSet resultSet, int index) {
+          throw new UnsupportedOperationException("This binding only writes values");
+        }
+
+        @Override
+        public void write(
+            IDatabase database,
+            IValueMeta valueMeta,
+            PreparedStatement preparedStatement,
+            int index,
+            Object value)
+            throws SQLException, HopValueException {
+          Object json = valueMeta.getNativeDataType(value);
+          if (json == null) {
+            preparedStatement.setNull(index, Types.OTHER);
+          } else {
+            preparedStatement.setObject(index, json, Types.OTHER);
+          }
+        }
+      };
+
+  /**
+   * Postgres has column types, uuid and inet among them, that the driver will not take a plain
+   * string for, and will not take a null for at all without being told which type is meant. So the
+   * neutral handling of those values, which writes them as strings, cannot serve here.
+   *
+   * <p>Leaving the type unspecified hands the resolution to the server, which reads the string as
+   * whatever the column is: uuid or inet on Postgres, character varying on a Redshift that has
+   * neither.
+   */
+  private static final IValueBinding UNSPECIFIED_STRING_BINDING =
+      new IValueBinding() {
+        @Override
+        public Object read(
+            IDatabase database, IValueMeta valueMeta, ResultSet resultSet, int index) {
+          throw new UnsupportedOperationException("This binding only writes values");
+        }
+
+        @Override
+        public void write(
+            IDatabase database,
+            IValueMeta valueMeta,
+            PreparedStatement preparedStatement,
+            int index,
+            Object value)
+            throws SQLException, HopValueException {
+          String string = valueMeta.getString(value);
+          if (string == null) {
+            preparedStatement.setNull(index, Types.OTHER);
+          } else {
+            preparedStatement.setObject(index, string, Types.OTHER);
+          }
+        }
+      };
+
+  /** Visible so a dialect that derives from Postgres can prepend its own and keep these. */
+  public static final List<IDatabaseTypeRule> POSTGRES_TYPE_RULES =
+      DatabaseTypes.rules()
+          // The driver reports the widest a double can hold rather than a declared size.
+          .read(Types.DOUBLE)
+          .where(
+              (variables, databaseMeta, column) ->
+                  StandardJdbcTypeMapper.numericScale(column) >= 16
+                      && StandardJdbcTypeMapper.numericLength(column) >= 16)
+          .as(IValueMeta.TYPE_NUMBER, -1, -1)
+          // A numeric with no declared size means arbitrary precision.
+          .read(Types.NUMERIC)
+          .where(
+              (variables, databaseMeta, column) ->
+                  StandardJdbcTypeMapper.numericLength(column) == 0
+                      && StandardJdbcTypeMapper.numericScale(column) == 0)
+          .as(IValueMeta.TYPE_BIGNUMBER, -1, -1)
+          // An address is Types.OTHER, which the standard mapping takes as a string, so without
+          // this the value type Hop has for addresses never sees the column.
+          .readNative("INET")
+          .as(IValueMeta.TYPE_INET)
+          // Non-legacy applications are advised to use JSONB rather than JSON.
+          .write(IValueMeta.TYPE_JSON)
+          .as("JSONB")
+          .write(IValueMeta.TYPE_UUID)
+          .as("UUID")
+          .write(IValueMeta.TYPE_INET)
+          .as("INET")
+          .bind(IValueMeta.TYPE_JSON, JSON_BINDING)
+          .bind(IValueMeta.TYPE_UUID, UNSPECIFIED_STRING_BINDING)
+          .bind(IValueMeta.TYPE_INET, UNSPECIFIED_STRING_BINDING)
+          .build();
+
+  @Override
+  public List<IDatabaseTypeRule> getTypeRules() {
+    return POSTGRES_TYPE_RULES;
+  }
+
   private static final int GB_LIMIT = 1_073_741_824;
   public static final String CONST_ALTER_TABLE = "ALTER TABLE ";
 
@@ -74,6 +188,25 @@ public class PostgreSqlDatabaseMeta extends BaseDatabaseMeta implements IDatabas
   @Override
   public String getDriverClass() {
     return "org.postgresql.Driver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    // Only offer the PostgreSQL driver for databases that actually use it. Subclasses that use a
+    // different JDBC driver (CrateDB, Redshift, ...) override getDriverClass() and declare their
+    // own.
+    if (!"org.postgresql.Driver".equals(getDriverClass())) {
+      return null;
+    }
+    return DriverDownload.builder()
+        .mavenCoordinate("org.postgresql:postgresql")
+        .defaultVersion("42.7.11")
+        .licenseCategory("A")
+        .licenseName("BSD-2-Clause")
+        .licenseUrl("https://jdbc.postgresql.org/about/license/")
+        .vendor("PostgreSQL Global Development Group")
+        .vendorUrl("https://jdbc.postgresql.org/")
+        .build();
   }
 
   @Override
@@ -208,7 +341,7 @@ public class PostgreSqlDatabaseMeta extends BaseDatabaseMeta implements IDatabas
     return CONST_ALTER_TABLE
         + tableName
         + " ADD COLUMN "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -346,6 +479,9 @@ public class PostgreSqlDatabaseMeta extends BaseDatabaseMeta implements IDatabas
         } else {
           retval += "VARCHAR(" + length + ")";
         }
+        break;
+      case IValueMeta.TYPE_BINARY:
+        retval += "BYTEA";
         break;
       default:
         retval += " UNKNOWN";
@@ -1087,16 +1223,6 @@ public class PostgreSqlDatabaseMeta extends BaseDatabaseMeta implements IDatabas
   }
 
   @Override
-  public boolean isSupportsBooleanDataType() {
-    return true;
-  }
-
-  @Override
-  public boolean isSupportsTimestampDataType() {
-    return true;
-  }
-
-  @Override
   public boolean isSupportsGetBlob() {
     return false;
   }
@@ -1118,5 +1244,11 @@ public class PostgreSqlDatabaseMeta extends BaseDatabaseMeta implements IDatabas
   @Override
   public int getMaxTextFieldLength() {
     return GB_LIMIT;
+  }
+
+  @Override
+  public void addDefaultOptions() {
+    setSupportsBooleanDataType(true);
+    setSupportsTimestampDataType(true);
   }
 }

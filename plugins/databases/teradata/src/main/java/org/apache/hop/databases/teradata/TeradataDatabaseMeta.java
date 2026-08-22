@@ -17,13 +17,19 @@
 
 package org.apache.hop.databases.teradata;
 
+import java.sql.Types;
+import java.util.List;
 import java.util.Map;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
+import org.apache.hop.core.database.types.DatabaseTypes;
+import org.apache.hop.core.database.types.IDatabaseTypeRule;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.util.Utils;
@@ -33,9 +39,31 @@ import org.apache.hop.core.util.Utils;
     type = "TERADATA",
     typeDescription = "Teradata",
     image = "teradata.svg",
-    documentationUrl = "/database/databases/teradata.html")
+    documentationUrl = "/database/databases/teradata.html",
+    classLoaderGroup = "teradata-db")
 @GuiPlugin(id = "GUI-TeradataDatabaseMeta")
 public class TeradataDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  /** Teradata limits rows with TOP, between SELECT and the column list. */
+  @Override
+  public String getLimitClausePrefix(int nrRows) {
+    return " TOP " + nrRows;
+  }
+
+  private static final List<IDatabaseTypeRule> TYPE_RULES =
+      DatabaseTypes.rules()
+          // Hop marks "a date, not a timestamp" with a precision of one.
+          .read(Types.DATE, Types.TIME)
+          .as(IValueMeta.TYPE_DATE, -1, 1)
+          // Teradata has had a JSON type since 15.0.
+          .write(IValueMeta.TYPE_JSON)
+          .as("JSON")
+          .build();
+
+  @Override
+  public List<IDatabaseTypeRule> getTypeRules() {
+    return TYPE_RULES;
+  }
 
   public static final String CONST_INTEGER = "INTEGER";
 
@@ -63,6 +91,20 @@ public class TeradataDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
   @Override
   public String getDriverClass() {
     return "com.teradata.jdbc.TeraDriver";
+  }
+
+  @Override
+  @SuppressWarnings("java:S1313") // the driver version is not an IP address
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("com.teradata.jdbc:terajdbc")
+        .defaultVersion("20.00.00.58")
+        .licenseCategory("X")
+        .licenseName("Teradata JDBC Driver License Agreement")
+        .licenseUrl("https://downloads.teradata.com/download/connectivity/jdbc-driver")
+        .vendor("Teradata")
+        .vendorUrl("https://downloads.teradata.com/download/connectivity/jdbc-driver")
+        .build();
   }
 
   @Override
@@ -135,7 +177,7 @@ public class TeradataDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
     return "ALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -155,7 +197,8 @@ public class TeradataDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
     return "ALTER TABLE "
         + tableName
         + " MODIFY "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override

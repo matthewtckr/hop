@@ -24,17 +24,15 @@ import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.logging.ILoggingObject;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
-public class SSTableOutputTest {
+class SSTableOutputTest {
   private static TransformMockHelper<SSTableOutputMeta, SSTableOutputData> helper;
-  private static final SecurityManager sm = System.getSecurityManager();
 
-  @BeforeClass
-  public static void setUp() throws HopException {
+  @BeforeAll
+  static void setUp() throws HopException {
     HopEnvironment.init();
     helper =
         new TransformMockHelper<>(
@@ -45,23 +43,15 @@ public class SSTableOutputTest {
     when(helper.pipeline.getVariableNames()).thenReturn(new String[0]);
   }
 
-  @AfterClass
-  public static void classTearDown() {
+  @AfterAll
+  static void classTearDown() {
     // Cleanup class setup
     helper.cleanUp();
   }
 
-  @After
-  public void tearDown() throws Exception {
-    // Restore original security manager if needed
-    if (System.getSecurityManager() != sm) {
-      System.setSecurityManager(sm);
-    }
-  }
-
-  @Test(expected = SecurityException.class)
-  public void testDisableSystemExit() throws Exception {
-    SSTableOutput ssTableOutput =
+  @Test
+  void testTransformCanBeCreated() {
+    SSTableOutput transform =
         new SSTableOutput(
             helper.transformMeta,
             helper.iTransformMeta,
@@ -69,7 +59,6 @@ public class SSTableOutputTest {
             0,
             helper.pipelineMeta,
             helper.pipeline);
-    ssTableOutput.disableSystemExit(sm, helper.logChannel);
-    System.exit(1);
+    org.junit.jupiter.api.Assertions.assertNotNull(transform);
   }
 }

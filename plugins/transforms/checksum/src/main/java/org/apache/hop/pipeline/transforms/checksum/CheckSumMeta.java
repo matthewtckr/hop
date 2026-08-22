@@ -188,22 +188,28 @@ public class CheckSumMeta extends BaseTransformMeta<CheckSum, CheckSumData> {
       injectionKeyDescription = "CheckSum.Injection.RESULT_TYPE")
   private ResultType resultType;
 
+  @HopMetadataProperty(
+      key = "separator",
+      injectionKey = "SEPARATOR",
+      injectionKeyDescription = "CheckSum.Injection.SEPARATOR")
+  private String separator;
+
+  @HopMetadataProperty(
+      key = "prefix",
+      injectionKey = "PREFIX",
+      injectionKeyDescription = "CheckSum.Injection.PREFIX")
+  private String prefix;
+
+  @HopMetadataProperty(
+      key = "suffix",
+      injectionKey = "SUFFIX",
+      injectionKeyDescription = "CheckSum.Injection.SUFFIX")
+  private String suffix;
+
   public CheckSumMeta() {
     fields = new ArrayList<>();
     checkSumType = CheckSumType.CRC32;
     resultType = ResultType.STRING;
-  }
-
-  @Override
-  public CheckSumMeta clone() {
-    CheckSumMeta meta = new CheckSumMeta();
-    meta.checkSumType = checkSumType;
-    meta.resultFieldName = resultFieldName;
-    meta.resultType = resultType;
-    for (Field field : fields) {
-      meta.fields.add(new Field(field));
-    }
-    return meta;
   }
 
   @Override
@@ -221,14 +227,14 @@ public class CheckSumMeta extends BaseTransformMeta<CheckSum, CheckSumData> {
       if (checkSumType == CheckSumType.CRC32 || checkSumType == CheckSumType.ADLER32) {
         v = new ValueMetaInteger(variables.resolve(resultFieldName));
       } else {
-        switch (resultType) {
-          case BINARY:
-            v = new ValueMetaBinary(variables.resolve(resultFieldName));
-            break;
-          default:
-            v = new ValueMetaString(variables.resolve(resultFieldName));
-            break;
-        }
+        v =
+            switch (resultType) {
+              case BINARY -> new ValueMetaBinary(variables.resolve(resultFieldName));
+              default -> new ValueMetaString(variables.resolve(resultFieldName));
+            };
+      }
+      if (resultType == ResultType.BINARY && checkSumType == CheckSumType.MD5) {
+        v.setLength(16);
       }
       v.setOrigin(name);
       inputRowMeta.addValueMeta(v);
@@ -278,8 +284,7 @@ public class CheckSumMeta extends BaseTransformMeta<CheckSum, CheckSumData> {
       errorMessage = "";
 
       // Starting from selected fields in ...
-      for (int i = 0; i < fields.size(); i++) {
-        Field field = fields.get(i);
+      for (Field field : fields) {
         int idx = prev.indexOfValue(field.getName());
         if (idx < 0) {
           errorMessage += "\t\t" + field.getName() + Const.CR;
@@ -397,5 +402,53 @@ public class CheckSumMeta extends BaseTransformMeta<CheckSum, CheckSumData> {
    */
   public void setResultType(ResultType resultType) {
     this.resultType = resultType;
+  }
+
+  /**
+   * Gets separator
+   *
+   * @return value of separator
+   */
+  public String getSeparator() {
+    return separator;
+  }
+
+  /**
+   * @param separator The separator to set
+   */
+  public void setSeparator(String separator) {
+    this.separator = separator;
+  }
+
+  /**
+   * Gets prefix
+   *
+   * @return value of prefix
+   */
+  public String getPrefix() {
+    return prefix;
+  }
+
+  /**
+   * @param prefix The prefix to set
+   */
+  public void setPrefix(String prefix) {
+    this.prefix = prefix;
+  }
+
+  /**
+   * Gets suffix
+   *
+   * @return value of suffix
+   */
+  public String getSuffix() {
+    return suffix;
+  }
+
+  /**
+   * @param suffix The suffix to set
+   */
+  public void setSuffix(String suffix) {
+    this.suffix = suffix;
   }
 }

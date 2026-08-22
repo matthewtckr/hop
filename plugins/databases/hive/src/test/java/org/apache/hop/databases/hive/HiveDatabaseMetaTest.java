@@ -17,10 +17,10 @@
  */
 package org.apache.hop.databases.hive;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -52,32 +52,34 @@ import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.core.row.value.ValueMetaTimestamp;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
-import org.apache.hop.junit.rules.RestoreHopEnvironment;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class HiveDatabaseMetaTest {
+class HiveDatabaseMetaTest {
   HiveDatabaseMeta nativeMeta;
 
-  @ClassRule public static RestoreHopEnvironment env = new RestoreHopEnvironment();
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
-  @BeforeClass
-  public static void setUpBeforeClass() throws HopException {
+  @BeforeAll
+  static void setUpBeforeClass() throws HopException {
     PluginRegistry.addPluginType(ValueMetaPluginType.getInstance());
     PluginRegistry.addPluginType(DatabasePluginType.getInstance());
     PluginRegistry.init();
   }
 
-  @Before
-  public void setupBefore() {
+  @BeforeEach
+  void setupBefore() {
     nativeMeta = new HiveDatabaseMeta();
     nativeMeta.setAccessType(DatabaseMeta.TYPE_ACCESS_NATIVE);
+    nativeMeta.addDefaultOptions();
   }
 
   @Test
-  public void testSettings() {
+  void testSettings() {
     assertArrayEquals(new int[] {DatabaseMeta.TYPE_ACCESS_NATIVE}, nativeMeta.getAccessTypeList());
     assertEquals(10000, nativeMeta.getDefaultDatabasePort());
     assertTrue(nativeMeta.isSupportsAutoInc());
@@ -246,7 +248,7 @@ public class HiveDatabaseMetaTest {
   }
 
   @Test
-  public void testSqlStatements() {
+  void testSqlStatements() {
     assertEquals(" LIMIT 15", nativeMeta.getLimitClause(15));
     assertEquals("SELECT * FROM FOO LIMIT 0", nativeMeta.getSqlQueryFields("FOO"));
     assertEquals("SELECT * FROM FOO LIMIT 0", nativeMeta.getSqlTableExists("FOO"));
@@ -261,7 +263,7 @@ public class HiveDatabaseMetaTest {
             "FOO", new ValueMetaTimestamp("BAR"), "", false, "", false));
 
     assertEquals(
-        "ALTER TABLE FOO ADD BAR CHAR(1)",
+        "ALTER TABLE FOO ADD BAR BOOLEAN",
         nativeMeta.getAddColumnStatement("FOO", new ValueMetaBoolean("BAR"), "", false, "", false));
 
     assertEquals(
@@ -342,7 +344,7 @@ public class HiveDatabaseMetaTest {
         nativeMeta.getAddColumnStatement(
             "FOO", new ValueMetaNumber("BAR", 5, 7), "", false, "", false));
     assertEquals(
-        "ALTER TABLE FOO ADD BAR  UNKNOWN",
+        "ALTER TABLE FOO ADD BAR STRING",
         nativeMeta.getAddColumnStatement(
             "FOO", new ValueMetaInternetAddress("BAR"), "", false, "", false));
 
@@ -462,14 +464,14 @@ public class HiveDatabaseMetaTest {
   }
 
   @Test
-  public void testReleaseSavepoint() {
+  void testReleaseSavepoint() {
     assertFalse(nativeMeta.isReleaseSavepoint());
   }
 
   @Test
-  public void testSupportsSequence() {
+  void testSupportsSequence() {
     String dbType = nativeMeta.getClass().getSimpleName();
-    assertFalse(dbType, nativeMeta.isSupportsSequences());
+    assertFalse(nativeMeta.isSupportsSequences(), dbType);
     assertTrue(Utils.isEmpty(nativeMeta.getSqlListOfSequences()));
     assertEquals("", nativeMeta.getSqlSequenceExists("testSeq"));
     assertEquals("", nativeMeta.getSqlNextSequenceValue("testSeq"));
@@ -483,7 +485,7 @@ public class HiveDatabaseMetaTest {
   }
 
   @Test
-  public void testVarBinaryIsConvertedToStringType() throws Exception {
+  void testVarBinaryIsConvertedToStringType() throws Exception {
     ILoggingObject log = mock(ILoggingObject.class);
     PreparedStatement ps = mock(PreparedStatement.class);
     DatabaseMetaData dbMetaData = mock(DatabaseMetaData.class);

@@ -17,7 +17,7 @@
 
 package org.apache.hop.workflow.engine;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.logging.ILoggingObject;
 import org.apache.hop.core.plugins.IPlugin;
@@ -28,6 +28,7 @@ import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.config.IWorkflowEngineRunConfiguration;
 import org.apache.hop.workflow.config.WorkflowRunConfiguration;
 import org.apache.hop.workflow.engines.local.LocalWorkflowEngine;
+import org.apache.hop.workflow.engines.remote.RemoteWorkflowEngine;
 
 public class WorkflowEngineFactory {
 
@@ -106,6 +107,8 @@ public class WorkflowEngineFactory {
 
     if (workflowEngine instanceof LocalWorkflowEngine localWorkflowEngine) {
       localWorkflowEngine.setParentLoggingObject(parentLogging);
+    } else if (workflowEngine instanceof RemoteWorkflowEngine remoteWorkflowEngine) {
+      remoteWorkflowEngine.setParentLoggingObject(parentLogging);
     }
     workflowEngine.setWorkflowMeta(workflowMeta);
 

@@ -22,6 +22,13 @@ ORIGINDIR=$(pwd)
 BASEDIR=$(dirname "$0")
 cd "${BASEDIR}" || exit 1
 
+# Optional user-level env written by `hop setup` (does not override already-set variables)
+HOP_USER_ENV="${XDG_CONFIG_HOME:-${HOME}/.config}/hop/hop-env.sh"
+if [ -f "${HOP_USER_ENV}" ]; then
+  # shellcheck source=/dev/null
+  . "${HOP_USER_ENV}"
+fi
+
 # set java primary is HOP_JAVA_HOME fallback to JAVA_HOME or default java
 if [ -n "${HOP_JAVA_HOME}" ]; then
   _HOP_JAVA="${HOP_JAVA_HOME}/bin/java"
@@ -39,7 +46,7 @@ fi
 
 # optional line for attaching a debugger
 #
-#HOP_OPTIONS="${HOP_OPTIONS} -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006"
+#HOP_OPTIONS="${HOP_OPTIONS} -Xdebug -Xnoagent -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006"
 
 # Add HOP variables if they're set:
 #
@@ -63,6 +70,9 @@ fi
 if [ -n "${HOP_AES_ENCODER_KEY}" ]; then
   HOP_OPTIONS="${HOP_OPTIONS} -DHOP_AES_ENCODER_KEY=${HOP_AES_ENCODER_KEY}"
 fi
+if [ -n "${HOP_AES_ENCODER_KEY_FILE}" ]; then
+  HOP_OPTIONS="${HOP_OPTIONS} -DHOP_AES_ENCODER_KEY_FILE=${HOP_AES_ENCODER_KEY_FILE}"
+fi
 
 HOP_OPTIONS="${HOP_OPTIONS} -DHOP_PLATFORM_RUNTIME=Run -DHOP_AUTO_CREATE_CONFIG=Y -DHOP_PLATFORM_OS="$(uname -s)
 HOP_OPTIONS="${HOP_OPTIONS} --add-opens java.xml/jdk.xml.internal=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.lang.invoke=ALL-UNNAMED --add-opens java.base/java.lang.reflect=ALL-UNNAMED --add-opens java.base/java.io=ALL-UNNAMED --add-opens java.base/java.net=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.util.concurrent=ALL-UNNAMED --add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED --add-opens java.base/sun.nio.cs=ALL-UNNAMED --add-opens java.base/sun.security.action=ALL-UNNAMED --add-opens java.base/sun.util.calendar=ALL-UNNAMED --add-opens java.security.jgss/sun.security.krb5=ALL-UNNAMED --add-exports java.base/sun.nio.ch=ALL-UNNAMED"
@@ -75,21 +85,31 @@ Linux)
   if [ "${XDG_SESSION_TYPE}" = "wayland" ]; then
     export GDK_BACKEND=x11
   fi
+
+
   if "${_HOP_JAVA}" -XshowSettings:properties -version 2>&1 | grep -q "os.arch = aarch64"; then
-    CLASSPATH="lib/core/*:lib/beam/*:lib/swt/linux/arm64/*"
+    CLASSPATH="lib/core/*:lib/spark-client/*:lib/swt/linux/arm64/*"
   else
-    CLASSPATH="lib/core/*:lib/beam/*:lib/swt/linux/$(uname -m)/*"
+    CLASSPATH="lib/core/*:lib/spark-client/*:lib/swt/linux/$(uname -m)/*"
   fi
   ;;
 Darwin)
   if "${_HOP_JAVA}" -XshowSettings:properties -version 2>&1 | grep -q "os.arch = aarch64"; then
-    CLASSPATH="lib/core/*:lib/beam/*:lib/swt/osx/arm64/*"
+    CLASSPATH="lib/core/*:lib/spark-client/*:lib/swt/osx/arm64/*"
   else
-    CLASSPATH="lib/core/*:lib/beam/*:lib/swt/osx/x86_64/*"
+    CLASSPATH="lib/core/*:lib/spark-client/*:lib/swt/osx/x86_64/*"
   fi
   HOP_OPTIONS="${HOP_OPTIONS} -XstartOnFirstThread"
   ;;
 esac
+
+
+
+# Optional versioned Spark client pack replaces default lib/spark-client on the classpath.
+if [ -n "${HOP_SPARK_CLIENT_VERSION:-}" ] && [ -d "lib/spark-clients/${HOP_SPARK_CLIENT_VERSION}" ]; then
+  CLASSPATH=$(echo "${CLASSPATH}" | sed 's|lib/spark-client/\*||g')
+  CLASSPATH="${CLASSPATH}:lib/spark-clients/${HOP_SPARK_CLIENT_VERSION}/*"
+fi
 
 "${_HOP_JAVA}" ${HOP_OPTIONS} -Djava.library.path="${LIBPATH}" -classpath "${CLASSPATH}" org.apache.hop.run.HopRun "$@"
 EXITCODE=$?

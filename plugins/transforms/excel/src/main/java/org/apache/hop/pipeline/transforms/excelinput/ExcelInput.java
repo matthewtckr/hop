@@ -21,13 +21,16 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.TimeZone;
-import org.apache.commons.lang.StringUtils;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.IRowSet;
 import org.apache.hop.core.ResultFile;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopFileException;
+import org.apache.hop.core.exception.HopTransformException;
 import org.apache.hop.core.fileinput.FileInputList;
 import org.apache.hop.core.playlist.FilePlayListAll;
 import org.apache.hop.core.row.IValueMeta;
@@ -37,8 +40,11 @@ import org.apache.hop.core.spreadsheet.IKCell;
 import org.apache.hop.core.spreadsheet.IKSheet;
 import org.apache.hop.core.spreadsheet.KCellType;
 import org.apache.hop.core.util.EnvUtil;
+import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.lineage.LineageFileIoEmitter;
+import org.apache.hop.lineage.model.FileIoOperation;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.BaseTransform;
@@ -47,6 +53,9 @@ import org.apache.hop.pipeline.transform.errorhandling.CompositeFileErrorHandler
 import org.apache.hop.pipeline.transform.errorhandling.FileErrorHandlerContentLineNumber;
 import org.apache.hop.pipeline.transform.errorhandling.FileErrorHandlerMissingFiles;
 import org.apache.hop.pipeline.transform.errorhandling.IFileErrorHandler;
+import org.apache.hop.staticschema.metadata.SchemaDefinition;
+import org.apache.hop.staticschema.metadata.SchemaFieldDefinition;
+import org.apache.hop.staticschema.util.SchemaDefinitionUtil;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
 
 /** This class reads data from one or more Microsoft Excel files. */
@@ -482,6 +491,56 @@ public class ExcelInput extends BaseTransform<ExcelInputMeta, ExcelInputData> {
     }
   }
 
+  /**
+   * Resolves sheet entries that use regex patterns against the actual sheet names in the workbook.
+   * Non-regex entries are kept as-is; regex entries are expanded into all matching sheet names.
+   */
+  private void resolveSheetNamesFromRegex(ExcelInputData data) {
+    String[] allSheetNames = data.workbook.getSheetNames();
+    List<String> matchedNames = new ArrayList<>();
+    List<Integer> matchedStartRow = new ArrayList<>();
+    List<Integer> matchedStartCol = new ArrayList<>();
+
+    if (isDebug()) {
+      logDebug("resolveSheetNamesFromRegex: workbook has " + allSheetNames.length + " sheet(s)");
+      for (String n : allSheetNames) {
+        logDebug("  available sheet: [" + n + "]");
+      }
+    }
+
+    for (ExcelInputMeta.EISheet sheet : meta.getSheets()) {
+      if (sheet.isRegex()) {
+        String sheetNameRegex = resolve(sheet.getName());
+        logBasic("Sheet regex pattern: [" + sheetNameRegex + "]");
+        try {
+          Pattern pattern = Pattern.compile(sheetNameRegex);
+          for (String sheetName : allSheetNames) {
+            if (pattern.matcher(sheetName).matches()) {
+              logBasic("  -> matched: [" + sheetName + "]");
+              matchedNames.add(sheetName);
+              matchedStartRow.add(sheet.getStartRow());
+              matchedStartCol.add(sheet.getStartColumn());
+            }
+          }
+        } catch (PatternSyntaxException e) {
+          logError(
+              BaseMessages.getString(
+                  PKG, "ExcelInput.Error.InvalidSheetRegex", sheetNameRegex, e.getMessage()));
+        }
+      } else {
+        logBasic("Sheet exact name: [" + sheet.getName() + "]");
+        matchedNames.add(sheet.getName());
+        matchedStartRow.add(sheet.getStartRow());
+        matchedStartCol.add(sheet.getStartColumn());
+      }
+    }
+
+    logBasic("resolveSheetNamesFromRegex: " + matchedNames.size() + " sheet(s) selected");
+    data.sheetNames = matchedNames.toArray(new String[0]);
+    data.startRow = matchedStartRow.stream().mapToInt(Integer::intValue).toArray();
+    data.startColumn = matchedStartCol.stream().mapToInt(Integer::intValue).toArray();
+  }
+
   private void handleMissingFiles() throws HopException {
     List<FileObject> nonExistantFiles = data.files.getNonExistentFiles();
 
@@ -575,9 +634,24 @@ public class ExcelInput extends BaseTransform<ExcelInputMeta, ExcelInputData> {
                   PKG, "ExcelInput.Log.OpeningFile", "" + data.filenr + " : " + data.filename));
         }
 
+        Long excelLineageBytes = null;
+        try {
+          if (data.file.getType().hasContent()) {
+            excelLineageBytes = data.file.getContent().getSize();
+          }
+        } catch (Exception ignored) {
+          // optional for lineage
+        }
+        LineageFileIoEmitter.emitTransformFileIo(
+            this, FileIoOperation.READ, data.file, null, excelLineageBytes, true, null);
+
         data.workbook =
             WorkbookFactory.getWorkbook(
-                meta.getSpreadSheetType(), data.filename, meta.getEncoding(), variables);
+                meta.getSpreadSheetType(),
+                data.filename,
+                meta.getEncoding(),
+                Utils.resolvePassword(variables, meta.getPassword()),
+                variables);
 
         data.errorHandler.handleFile(data.file);
         // Start at the first sheet again...
@@ -593,13 +667,22 @@ public class ExcelInput extends BaseTransform<ExcelInputMeta, ExcelInputData> {
             data.startColumn[i] = data.defaultStartColumn;
             data.startRow[i] = data.defaultStartRow;
           }
+        } else if (meta.hasRegexSheets()) {
+          resolveSheetNamesFromRegex(data);
         }
       }
 
       boolean nextsheet = false;
 
+      // If no sheets were resolved (e.g. regex matched nothing), move to next file
+      if (data.sheetNames == null || data.sheetNames.length == 0) {
+        logBasic("No sheets selected for file [" + data.filename + "], skipping.");
+        jumpToNextFile();
+        return retval;
+      }
+
       // What sheet were we handling?
-      if (isDebug()) {
+      if (isDetailed()) {
         logDetailed(
             BaseMessages.getString(
                 PKG, "ExcelInput.Log.GetSheet", "" + data.filenr + "." + data.sheetnr));
@@ -832,7 +915,35 @@ public class ExcelInput extends BaseTransform<ExcelInputMeta, ExcelInputData> {
         return false;
       }
 
-      if (!meta.getEmptyFields().isEmpty()) {
+      // Override fields by schema
+      if (meta.isIgnoreFields()) {
+        meta.setFields(new ArrayList<>());
+        try {
+          SchemaDefinition loadedSchemaDefinition =
+              (new SchemaDefinitionUtil())
+                  .loadSchemaDefinition(metadataProvider, meta.getSchemaDefinition());
+          if (loadedSchemaDefinition != null) {
+            for (SchemaFieldDefinition schemaFieldDefinition :
+                loadedSchemaDefinition.getFieldDefinitions()) {
+              ExcelInputField excelInputField = new ExcelInputField();
+              excelInputField.setName(schemaFieldDefinition.getName());
+              excelInputField.setCurrencySymbol(schemaFieldDefinition.getCurrencySymbol());
+              excelInputField.setDecimalSymbol(schemaFieldDefinition.getDecimalSymbol());
+              excelInputField.setLength(schemaFieldDefinition.getLength());
+              excelInputField.setPrecision(schemaFieldDefinition.getPrecision());
+              excelInputField.setFormat(schemaFieldDefinition.getFormatMask());
+              excelInputField.setType(schemaFieldDefinition.getHopType());
+              excelInputField.setTrimType(
+                  IValueMeta.TrimType.lookupType(schemaFieldDefinition.getTrimType()));
+              meta.getFields().add(excelInputField);
+            }
+          }
+        } catch (HopTransformException e) {
+          // ignore any errors here.
+        }
+      }
+
+      if (!meta.getEmptyFields(metadataProvider).isEmpty()) {
         // Determine the maximum filename length...
         data.maxfilelength = -1;
 
@@ -845,9 +956,8 @@ public class ExcelInput extends BaseTransform<ExcelInputMeta, ExcelInputData> {
 
         // Determine the maximum sheet name length...
         data.maxsheetlength = -1;
-        if (!meta.readAllSheets()) {
+        if (!meta.readAllSheets() && !meta.hasRegexSheets()) {
           data.sheetNames = meta.getSheetsNames();
-          ;
           data.startColumn = meta.getSheetsStartColumns();
           data.startRow = meta.getSheetsStartRows();
         } else {

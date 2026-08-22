@@ -18,17 +18,18 @@
 
 package org.apache.hop.core;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.apache.hop.core.xml.XmlHandler;
 import org.apache.hop.metadata.serializer.xml.XmlMetadataUtil;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.w3c.dom.Node;
 
-public class NotePadMetaTest {
+class NotePadMetaTest {
 
   @Test
-  public void testSerialization() throws Exception {
+  void testSerialization() throws Exception {
 
     NotePadMeta note = new NotePadMeta();
     note.setNote("This is a test");
@@ -48,6 +49,8 @@ public class NotePadMetaTest {
     note.setBorderColorRed(250);
     note.setBorderColorGreen(251);
     note.setBorderColorBlue(252);
+    note.setMarkdown(true);
+    note.setNoteType(NotePadType.WARNING);
 
     String xml = note.getXml();
 
@@ -55,5 +58,7 @@ public class NotePadMetaTest {
     NotePadMeta copy = XmlMetadataUtil.deSerializeFromXml(notepadNode, NotePadMeta.class, null);
 
     assertEquals(xml, copy.getXml());
+    assertTrue(copy.isMarkdown());
+    assertEquals(NotePadType.WARNING, copy.getNoteType());
   }
 }

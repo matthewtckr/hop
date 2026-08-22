@@ -17,13 +17,10 @@
 
 package org.apache.hop.pipeline.transforms.propertyinput;
 
-import java.nio.charset.Charset;
-import java.util.ArrayList;
 import java.util.Iterator;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Props;
-import org.apache.hop.core.ResultFile;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.fileinput.FileInputList;
 import org.apache.hop.core.row.IRowMeta;
@@ -38,6 +35,7 @@ import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.PipelinePreviewFactory;
+import org.apache.hop.ui.core.ConstUi;
 import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.BaseDialog;
 import org.apache.hop.ui.core.dialog.EnterNumberDialog;
@@ -160,9 +158,6 @@ public class PropertyInputDialog extends BaseTransformDialog {
   private TextVar wExtensionFieldName;
   private TextVar wSizeFieldName;
 
-  private int middle;
-  private int margin;
-
   private boolean gotPreviousFields = false;
 
   public PropertyInputDialog(
@@ -176,52 +171,9 @@ public class PropertyInputDialog extends BaseTransformDialog {
 
   @Override
   public String open() {
-    Shell parent = getParent();
+    createShell(BaseMessages.getString(PKG, "PropertyInputDialog.DialogTitle"));
 
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
-    PropsUi.setLook(shell);
-    setShellImage(shell, input);
-
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = PropsUi.getFormMargin();
-    formLayout.marginHeight = PropsUi.getFormMargin();
-
-    shell.setLayout(formLayout);
-    shell.setText(BaseMessages.getString(PKG, "PropertyInputDialog.DialogTitle"));
-
-    middle = props.getMiddlePct();
-    margin = PropsUi.getMargin();
-
-    // Buttons at the bottom
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, e -> ok());
-    wPreview = new Button(shell, SWT.PUSH);
-    wPreview.setText(BaseMessages.getString(PKG, "PropertyInputDialog.Button.PreviewRows"));
-    wPreview.addListener(SWT.Selection, e -> preview());
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, e -> cancel());
-    setButtonPositions(new Button[] {wOk, wPreview, wCancel}, margin, null);
-
-    // TransformName line
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(BaseMessages.getString(PKG, "System.TransformName.Label"));
-    wlTransformName.setToolTipText(BaseMessages.getString(PKG, "System.TransformName.Tooltip"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.top = new FormAttachment(0, margin);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(middle, 0);
-    fdTransformName.top = new FormAttachment(0, margin);
-    fdTransformName.right = new FormAttachment(100, 0);
-    wTransformName.setLayoutData(fdTransformName);
+    buildButtonBar().ok(e -> ok()).preview(e -> preview()).cancel(e -> cancel()).build();
 
     wTabFolder = new CTabFolder(shell, SWT.BORDER);
     PropsUi.setLook(wTabFolder, Props.WIDGET_STYLE_TAB);
@@ -311,7 +263,7 @@ public class PropertyInputDialog extends BaseTransformDialog {
     PropsUi.setLook(wlFilename);
     FormData fdlFilename = new FormData();
     fdlFilename.left = new FormAttachment(0, 0);
-    fdlFilename.top = new FormAttachment(wOriginFiles, 2 * margin);
+    fdlFilename.top = new FormAttachment(wOriginFiles, margin);
     fdlFilename.right = new FormAttachment(middle, -margin);
     wlFilename.setLayoutData(fdlFilename);
 
@@ -524,7 +476,7 @@ public class PropertyInputDialog extends BaseTransformDialog {
     wlFileType.setLayoutData(fdlFileType);
     wFileType = new CCombo(wSettingsGroup, SWT.BORDER | SWT.READ_ONLY);
     wFileType.setEditable(true);
-    wFileType.setItems(ResultFile.FileType.getDescriptions());
+    wFileType.setItems(PropertyInputMeta.FileType.getDescriptions());
     PropsUi.setLook(wFileType);
     FormData fdFileType = new FormData();
     fdFileType.left = new FormAttachment(middle, 0);
@@ -936,9 +888,9 @@ public class PropertyInputDialog extends BaseTransformDialog {
 
     FormData fdTabFolder = new FormData();
     fdTabFolder.left = new FormAttachment(0, 0);
-    fdTabFolder.top = new FormAttachment(wTransformName, margin);
+    fdTabFolder.top = new FormAttachment(wSpacer, margin);
     fdTabFolder.right = new FormAttachment(100, 0);
-    fdTabFolder.bottom = new FormAttachment(wOk, -2 * margin);
+    fdTabFolder.bottom = new FormAttachment(100, -50);
     wTabFolder.setLayoutData(fdTabFolder);
 
     // Add listeners
@@ -1013,7 +965,7 @@ public class PropertyInputDialog extends BaseTransformDialog {
     input.setChanged(changed);
     activateFileField();
     wFields.optWidth(true);
-
+    focusTransformName();
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 
     return transformName;
@@ -1096,19 +1048,9 @@ public class PropertyInputDialog extends BaseTransformDialog {
     if (!gotEncodings) {
       gotEncodings = true;
 
-      wEncoding.removeAll();
-      ArrayList<Charset> values = new ArrayList<>(Charset.availableCharsets().values());
-      for (Charset charSet : values) {
-        wEncoding.add(charSet.displayName());
-      }
-
-      // Now select the default!
-      String defEncoding =
-          Const.getEnvironmentVariable("file.encoding", PropertyInputMeta.DEFAULT_ENCODING);
-      int idx = Const.indexOfString(defEncoding, wEncoding.getItems());
-      if (idx >= 0) {
-        wEncoding.select(idx);
-      }
+      String encoding = wEncoding.getText();
+      wEncoding.setItems(ConstUi.getEncodings());
+      wEncoding.setText(Const.NVL(encoding, ""));
     }
   }
 
@@ -1358,9 +1300,6 @@ public class PropertyInputDialog extends BaseTransformDialog {
     setIncludeFilename();
     setIncludeRowNum();
     setIncludeSection();
-
-    wTransformName.selectAll();
-    wTransformName.setFocus();
   }
 
   private void cancel() {
@@ -1390,7 +1329,7 @@ public class PropertyInputDialog extends BaseTransformDialog {
     transformName = wTransformName.getText(); // return value
 
     // copy info to PropertyInputMeta class (input)
-    in.setRowLimit(Const.toLong(wLimit.getText(), 0L));
+    in.setRowLimit(Const.toLongExpanded(wLimit.getText(), 0L));
     in.setIncludingFilename(wInclFilename.getSelection());
     in.setFilenameField(wInclFilenameField.getText());
     in.setIncludeRowNumber(wInclRowNum.getSelection());
@@ -1747,7 +1686,7 @@ public class PropertyInputDialog extends BaseTransformDialog {
 
     FormData fdAdditionalFieldsComp = new FormData();
     fdAdditionalFieldsComp.left = new FormAttachment(0, 0);
-    fdAdditionalFieldsComp.top = new FormAttachment(wTransformName, margin);
+    fdAdditionalFieldsComp.top = new FormAttachment(wSpacer, margin);
     fdAdditionalFieldsComp.right = new FormAttachment(100, 0);
     fdAdditionalFieldsComp.bottom = new FormAttachment(100, 0);
     wAdditionalFieldsComp.setLayoutData(fdAdditionalFieldsComp);

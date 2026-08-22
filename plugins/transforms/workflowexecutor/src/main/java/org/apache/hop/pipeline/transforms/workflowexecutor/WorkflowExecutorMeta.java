@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Map;
 import lombok.Getter;
 import lombok.Setter;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
@@ -31,7 +31,6 @@ import org.apache.hop.core.annotations.Transform;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopPluginException;
 import org.apache.hop.core.exception.HopTransformException;
-import org.apache.hop.core.exception.HopXmlException;
 import org.apache.hop.core.file.IHasFilename;
 import org.apache.hop.core.logging.LogChannel;
 import org.apache.hop.core.row.IRowMeta;
@@ -70,7 +69,7 @@ import org.w3c.dom.Node;
 /** Meta-data for the Workflow executor transform. */
 @Transform(
     id = "WorkflowExecutor",
-    image = "ui/images/workflowexecutor.svg",
+    image = "workflowexecutor.svg",
     name = "i18n::WorkflowExecutor.Name",
     description = "i18n::WorkflowExecutor.Description",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Flow",
@@ -84,13 +83,30 @@ public class WorkflowExecutorMeta
   private static final Class<?> PKG = WorkflowExecutorMeta.class;
 
   /** The name of the workflow run configuration to execute with */
-  @HopMetadataProperty(key = "run_configuration")
+  @HopMetadataProperty(
+      key = "run_configuration",
+      hopMetadataPropertyType = HopMetadataPropertyType.WORKFLOW_RUN_CONFIG)
   private String runConfigurationName;
+
+  /**
+   * Maximum time to wait for the child workflow to complete, in milliseconds. Empty or 0 means wait
+   * indefinitely.
+   */
+  @HopMetadataProperty(key = "wait_timeout")
+  private String waitTimeout;
 
   @HopMetadataProperty(
       key = "filename",
       hopMetadataPropertyType = HopMetadataPropertyType.WORKFLOW_FILE)
   private String filename;
+
+  /** Flag that indicate that workflow name is specified in a stream's field */
+  @HopMetadataProperty(key = "filenameInField")
+  private boolean filenameInField;
+
+  /** Name of the field containing the workflow file's name */
+  @HopMetadataProperty(key = "filenameField")
+  private String filenameField;
 
   /**
    * The number of input rows that are sent as result rows to the workflow in one go, defaults to
@@ -229,33 +245,21 @@ public class WorkflowExecutorMeta
     super(); // allocate BaseTransformMeta
   }
 
-  /**
-   * @deprecated keep for backwards compatibility
-   * @param transformNode the XML of the transform node
-   * @param metadataProvider the metadata provider
-   * @throws HopXmlException when unable to parse the XML
-   */
+  /** Added for backwards compatibility with older parameter style XML. */
   @Override
-  @Deprecated(since = "2.13")
-  public void loadXml(Node transformNode, IHopMetadataProvider metadataProvider)
-      throws HopXmlException {
-    try {
-      super.loadXml(transformNode, metadataProvider);
+  public void convertLegacyXml(Node node) throws HopException {
+    if (node == null) {
+      return;
+    }
 
-      // Load inherit_all_vars
-      //
-      String value =
-          XmlHandler.getTagValue(
-              XmlHandler.getSubNode(transformNode, "parameters"), "inherit_all_vars");
-      if (value != null) {
-        setInheritingAllVariables("Y".equalsIgnoreCase(value));
-      }
-
-    } catch (Exception e) {
-      throw new HopXmlException(
-          BaseMessages.getString(
-              PKG, "WorkflowExecutorMeta.Exception.ErrorLoadingJobExecutorDetailsFromXML"),
-          e);
+    // Load inherit_all_vars from the old nested location under <parameters>
+    Node parametersNode = XmlHandler.getSubNode(node, "parameters");
+    if (parametersNode == null) {
+      return;
+    }
+    String value = XmlHandler.getTagValue(parametersNode, "inherit_all_vars");
+    if (value != null) {
+      setInheritingAllVariables("Y".equalsIgnoreCase(value));
     }
   }
 
@@ -264,6 +268,7 @@ public class WorkflowExecutorMeta
     parameters = new ArrayList<>();
     resultRowsField = new ArrayList<>();
     inheritingAllVariables = true;
+    filenameInField = false;
 
     groupSize = "1";
     groupField = "";
@@ -297,88 +302,112 @@ public class WorkflowExecutorMeta
       IHopMetadataProvider metadataProvider)
       throws HopTransformException {
 
-    row.clear();
-
     if (nextTransform != null && nextTransform.equals(resultRowsTargetTransformMeta)) {
-      for (int i = 0; i < resultRowsField.size(); i++) {
+      row.clear();
+      for (WorkflowExecutorResultRows workflowExecutorResultRows : resultRowsField) {
         IValueMeta value;
         try {
           value =
               ValueMetaFactory.createValueMeta(
-                  resultRowsField.get(i).getName(),
-                  ValueMetaFactory.getIdForValueMeta(resultRowsField.get(i).getType()),
-                  resultRowsField.get(i).getLength(),
-                  resultRowsField.get(i).getPrecision());
+                  workflowExecutorResultRows.getName(),
+                  ValueMetaFactory.getIdForValueMeta(workflowExecutorResultRows.getType()),
+                  workflowExecutorResultRows.getLength(),
+                  workflowExecutorResultRows.getPrecision());
         } catch (HopPluginException e) {
-          value = new ValueMetaNone(resultRowsField.get(i).getName());
+          value = new ValueMetaNone(workflowExecutorResultRows.getName());
           value.setLength(
-              resultRowsField.get(i).getLength(), resultRowsField.get(i).getPrecision());
+              workflowExecutorResultRows.getLength(), workflowExecutorResultRows.getPrecision());
         }
+        value.setOrigin(origin);
         row.addValueMeta(value);
       }
     } else if (nextTransform != null && nextTransform.equals(resultFilesTargetTransformMeta)) {
+      row.clear();
       if (!Utils.isEmpty(resultFilesFileNameField)) {
         IValueMeta value = new ValueMetaString("filename", 255, 0);
+        value.setOrigin(origin);
         row.addValueMeta(value);
       }
     } else if (nextTransform != null && nextTransform.equals(executionResultTargetTransformMeta)) {
-      if (!Utils.isEmpty(executionTimeField)) {
-        IValueMeta value = new ValueMetaInteger(executionTimeField, 15, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionResultField)) {
-        IValueMeta value = new ValueMetaBoolean(executionResultField);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionNrErrorsField)) {
-        IValueMeta value = new ValueMetaInteger(executionNrErrorsField, 9, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionLinesReadField)) {
-        IValueMeta value = new ValueMetaInteger(executionLinesReadField, 9, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionLinesWrittenField)) {
-        IValueMeta value = new ValueMetaInteger(executionLinesWrittenField, 9, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionLinesInputField)) {
-        IValueMeta value = new ValueMetaInteger(executionLinesInputField, 9, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionLinesOutputField)) {
-        IValueMeta value = new ValueMetaInteger(executionLinesOutputField, 9, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionLinesRejectedField)) {
-        IValueMeta value = new ValueMetaInteger(executionLinesRejectedField, 9, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionLinesUpdatedField)) {
-        IValueMeta value = new ValueMetaInteger(executionLinesUpdatedField, 9, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionLinesDeletedField)) {
-        IValueMeta value = new ValueMetaInteger(executionLinesDeletedField, 9, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionFilesRetrievedField)) {
-        IValueMeta value = new ValueMetaInteger(executionFilesRetrievedField, 9, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionExitStatusField)) {
-        IValueMeta value = new ValueMetaInteger(executionExitStatusField, 3, 0);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionLogTextField)) {
-        IValueMeta value = new ValueMetaString(executionLogTextField);
-        value.setLargeTextField(true);
-        row.addValueMeta(value);
-      }
-      if (!Utils.isEmpty(executionLogChannelIdField)) {
-        IValueMeta value = new ValueMetaString(executionLogChannelIdField, 50, 0);
-        row.addValueMeta(value);
-      }
+      // Keep the incoming fields (e.g. filename from Get File Names) and append execution metrics.
+      addExecutionResultFields(row, origin);
+    } else {
+      row.clear();
+    }
+  }
+
+  /** Append execution-result value metas to the given row meta (does not clear existing fields). */
+  void addExecutionResultFields(IRowMeta row, String origin) {
+    if (!Utils.isEmpty(executionTimeField)) {
+      IValueMeta value = new ValueMetaInteger(executionTimeField, 15, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionResultField)) {
+      IValueMeta value = new ValueMetaBoolean(executionResultField);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionNrErrorsField)) {
+      IValueMeta value = new ValueMetaInteger(executionNrErrorsField, 9, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionLinesReadField)) {
+      IValueMeta value = new ValueMetaInteger(executionLinesReadField, 9, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionLinesWrittenField)) {
+      IValueMeta value = new ValueMetaInteger(executionLinesWrittenField, 9, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionLinesInputField)) {
+      IValueMeta value = new ValueMetaInteger(executionLinesInputField, 9, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionLinesOutputField)) {
+      IValueMeta value = new ValueMetaInteger(executionLinesOutputField, 9, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionLinesRejectedField)) {
+      IValueMeta value = new ValueMetaInteger(executionLinesRejectedField, 9, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionLinesUpdatedField)) {
+      IValueMeta value = new ValueMetaInteger(executionLinesUpdatedField, 9, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionLinesDeletedField)) {
+      IValueMeta value = new ValueMetaInteger(executionLinesDeletedField, 9, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionFilesRetrievedField)) {
+      IValueMeta value = new ValueMetaInteger(executionFilesRetrievedField, 9, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionExitStatusField)) {
+      IValueMeta value = new ValueMetaInteger(executionExitStatusField, 3, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionLogTextField)) {
+      IValueMeta value = new ValueMetaString(executionLogTextField);
+      value.setLargeTextField(true);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
+    }
+    if (!Utils.isEmpty(executionLogChannelIdField)) {
+      IValueMeta value = new ValueMetaString(executionLogChannelIdField, 50, 0);
+      value.setOrigin(origin);
+      row.addValueMeta(value);
     }
   }
 
@@ -419,20 +448,41 @@ public class WorkflowExecutorMeta
       IHopMetadataProvider metadataProvider,
       IVariables variables)
       throws HopException {
-    WorkflowMeta mappingWorkflowMeta = null;
+    return loadWorkflowMeta(executorMeta, null, metadataProvider, variables);
+  }
+
+  /**
+   * Loads child workflow metadata from a file.
+   *
+   * @param explicitWorkflowFilename when non-empty, this path is loaded and resolved instead of the
+   *     filename stored on {@code executorMeta}. Use when the workflow path is taken from an
+   *     incoming row at runtime so multiple transform copies must not mutate shared meta.
+   */
+  public static final synchronized WorkflowMeta loadWorkflowMeta(
+      WorkflowExecutorMeta executorMeta,
+      String explicitWorkflowFilename,
+      IHopMetadataProvider metadataProvider,
+      IVariables variables)
+      throws HopException {
+    String filenameToUse =
+        !Utils.isEmpty(explicitWorkflowFilename)
+            ? explicitWorkflowFilename
+            : executorMeta.getFilename();
 
     CurrentDirectoryResolver r = new CurrentDirectoryResolver();
     IVariables tmpSpace =
-        r.resolveCurrentDirectory(
-            variables, executorMeta.getParentTransformMeta(), executorMeta.getFilename());
+        r.resolveCurrentDirectory(variables, executorMeta.getParentTransformMeta(), filenameToUse);
 
-    String realFilename = tmpSpace.resolve(executorMeta.getFilename());
+    String realFilename = tmpSpace.resolve(filenameToUse);
+    if (variables != null) {
+      realFilename = variables.resolve(realFilename);
+    }
 
     // OK, load the meta-data from file...
     //
     // Don't set internal variables: they belong to the parent thread!
     //
-    mappingWorkflowMeta = new WorkflowMeta(variables, realFilename, metadataProvider);
+    WorkflowMeta mappingWorkflowMeta = new WorkflowMeta(variables, realFilename, metadataProvider);
     LogChannel.GENERAL.logDetailed(
         "Loaded workflow", "Workflow was loaded from XML file [" + realFilename + "]");
 
@@ -627,12 +677,15 @@ public class WorkflowExecutorMeta
     switch (index) {
       case 0:
         setExecutionResultTargetTransformMeta(transform);
+        setExecutionResultTargetTransform(transform.getName());
         break;
       case 1:
         setResultRowsTargetTransformMeta(transform);
+        setResultRowsTargetTransform(transform.getName());
         break;
       case 2:
         setResultFilesTargetTransformMeta(transform);
+        setResultFilesTargetTransform(transform.getName());
         break;
       default:
         break;
@@ -653,6 +706,19 @@ public class WorkflowExecutorMeta
         TransformMeta.findTransform(transforms, resultRowsTargetTransform);
     resultFilesTargetTransformMeta =
         TransformMeta.findTransform(transforms, resultFilesTargetTransform);
+
+    // Rebind TARGET streams: getTransformIOMeta() may have been created before names were
+    // resolved, leaving Stream.transformMeta null (Beam/Spark multi-target discovery).
+    List<IStream> targetStreams = getTransformIOMeta().getTargetStreams();
+    if (targetStreams.size() > 0) {
+      targetStreams.get(0).setTransformMeta(executionResultTargetTransformMeta);
+    }
+    if (targetStreams.size() > 1) {
+      targetStreams.get(1).setTransformMeta(resultRowsTargetTransformMeta);
+    }
+    if (targetStreams.size() > 2) {
+      targetStreams.get(2).setTransformMeta(resultFilesTargetTransformMeta);
+    }
   }
 
   @Override
@@ -706,8 +772,11 @@ public class WorkflowExecutorMeta
   @Override
   public boolean cleanAfterHopFromRemove() {
     setExecutionResultTargetTransformMeta(null);
+    setExecutionResultTargetTransform(null);
     setResultRowsTargetTransformMeta(null);
+    setResultRowsTargetTransform(null);
     setResultFilesTargetTransformMeta(null);
+    setResultFilesTargetTransform(null);
     return true;
   }
 
@@ -723,16 +792,24 @@ public class WorkflowExecutorMeta
     if (getExecutionResultTargetTransformMeta() != null
         && toTransformName.equals(getExecutionResultTargetTransformMeta().getName())) {
       setExecutionResultTargetTransformMeta(null);
+      setExecutionResultTargetTransform(null);
       hasChanged = true;
     } else if (getResultRowsTargetTransformMeta() != null
         && toTransformName.equals(getResultRowsTargetTransformMeta().getName())) {
       setResultRowsTargetTransformMeta(null);
+      setResultRowsTargetTransform(null);
       hasChanged = true;
     } else if (getResultFilesTargetTransformMeta() != null
         && toTransformName.equals(getResultFilesTargetTransformMeta().getName())) {
       setResultFilesTargetTransformMeta(null);
+      setResultFilesTargetTransform(null);
       hasChanged = true;
     }
     return hasChanged;
+  }
+
+  @Override
+  public boolean supportsDrillDown() {
+    return true;
   }
 }

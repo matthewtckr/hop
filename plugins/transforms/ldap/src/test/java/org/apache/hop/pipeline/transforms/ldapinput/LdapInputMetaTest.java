@@ -22,29 +22,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
-import org.apache.commons.lang.builder.EqualsBuilder;
-import org.apache.hop.core.HopEnvironment;
+import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.hop.core.exception.HopException;
-import org.apache.hop.core.plugins.PluginRegistry;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.transforms.loadsave.LoadSaveTester;
 import org.apache.hop.pipeline.transforms.loadsave.initializer.IInitializer;
-import org.apache.hop.pipeline.transforms.loadsave.validator.ArrayLoadSaveValidator;
 import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidator;
 import org.apache.hop.pipeline.transforms.loadsave.validator.IntLoadSaveValidator;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.apache.hop.pipeline.transforms.loadsave.validator.ListLoadSaveValidator;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class LdapInputMetaTest implements IInitializer<LdapInputMeta> {
+class LdapInputMetaTest implements IInitializer<LdapInputMeta> {
   LoadSaveTester<LdapInputMeta> loadSaveTester;
   Class<LdapInputMeta> testMetaClass = LdapInputMeta.class;
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
 
-  @Before
-  public void setUpLoadSave() throws Exception {
-    HopEnvironment.init();
-    PluginRegistry.init();
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
+
+  @BeforeEach
+  void setUpLoadSave() throws Exception {
     List<String> attributes =
         Arrays.asList(
             "useAuthentication",
@@ -74,11 +72,13 @@ public class LdapInputMetaTest implements IInitializer<LdapInputMeta> {
             "inputFields");
 
     Map<String, String> getterMap = new HashMap<>();
+    getterMap.put("paging", "isUsePaging");
     Map<String, String> setterMap = new HashMap<>();
+    setterMap.put("paging", "setUsePaging");
 
     Map<String, IFieldLoadSaveValidator<?>> attrValidatorMap = new HashMap<>();
     attrValidatorMap.put(
-        "inputFields", new ArrayLoadSaveValidator<>(new LDAPInputFieldLoadSaveValidator(), 5));
+        "inputFields", new ListLoadSaveValidator<>(new LDAPInputFieldLoadSaveValidator(), 5));
     attrValidatorMap.put(
         "searchScope", new IntLoadSaveValidator(LdapInputMeta.searchScopeCode.length));
 
@@ -104,7 +104,7 @@ public class LdapInputMetaTest implements IInitializer<LdapInputMeta> {
   }
 
   @Test
-  public void testSerialization() throws HopException {
+  void testSerialization() throws HopException {
     loadSaveTester.testSerialization();
   }
 
@@ -121,7 +121,7 @@ public class LdapInputMetaTest implements IInitializer<LdapInputMeta> {
       rtn.setName(UUID.randomUUID().toString());
       rtn.setTrimType(rand.nextInt(4));
       rtn.setPrecision(rand.nextInt(9));
-      rtn.setRepeated(rand.nextBoolean());
+      rtn.setRepeat(rand.nextBoolean());
       rtn.setLength(rand.nextInt(50));
       rtn.setType(rand.nextInt(7));
       rtn.setSortedKey(rand.nextBoolean());
@@ -148,7 +148,7 @@ public class LdapInputMetaTest implements IInitializer<LdapInputMeta> {
           .append(testObject.getCurrencySymbol(), another.getCurrencySymbol())
           .append(testObject.getDecimalSymbol(), another.getDecimalSymbol())
           .append(testObject.getGroupSymbol(), another.getGroupSymbol())
-          .append(testObject.isRepeated(), another.isRepeated())
+          .append(testObject.isRepeat(), another.isRepeat())
           .append(testObject.isSortedKey(), another.isSortedKey())
           .isEquals();
     }

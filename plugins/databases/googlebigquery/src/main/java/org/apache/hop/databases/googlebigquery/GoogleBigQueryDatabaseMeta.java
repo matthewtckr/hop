@@ -17,11 +17,14 @@
 
 package org.apache.hop.databases.googlebigquery;
 
+import java.util.List;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.DatabaseTypes;
+import org.apache.hop.core.database.types.IDatabaseTypeRule;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.util.StringUtil;
@@ -31,9 +34,22 @@ import org.apache.hop.i18n.BaseMessages;
     type = "GOOGLEBIGQUERY",
     typeDescription = "Google BigQuery",
     image = "bigquery.svg",
-    documentationUrl = "/database/databases/googlebigquery.html")
+    documentationUrl = "/database/databases/googlebigquery.html",
+    classLoaderGroup = "googlebigquery-db")
 @GuiPlugin(id = "GUI-GoogleBigQueryDatabaseMeta")
 public class GoogleBigQueryDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  private static final List<IDatabaseTypeRule> TYPE_RULES =
+      DatabaseTypes.rules()
+          // BigQuery has a JSON type.
+          .write(IValueMeta.TYPE_JSON)
+          .as("JSON")
+          .build();
+
+  @Override
+  public List<IDatabaseTypeRule> getTypeRules() {
+    return TYPE_RULES;
+  }
 
   private static final Class<?> PKG = GoogleBigQueryDatabaseMeta.class;
 
@@ -69,8 +85,6 @@ public class GoogleBigQueryDatabaseMeta extends BaseDatabaseMeta implements IDat
     String retval = "";
 
     String fieldname = v.getName();
-    int precision = v.getPrecision();
-
     if (addFieldName) {
       retval += fieldname + " ";
     }
@@ -90,19 +104,16 @@ public class GoogleBigQueryDatabaseMeta extends BaseDatabaseMeta implements IDat
         break;
 
       case IValueMeta.TYPE_NUMBER, IValueMeta.TYPE_INTEGER, IValueMeta.TYPE_BIGNUMBER:
-        if (type == IValueMeta.TYPE_INTEGER) {
-          // Integer values...
-          retval += "INT64";
-        } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-          // Fixed point value...
-          if (v.getLength() < 39) {
-            retval += "NUMERIC";
-          } else {
-            retval += "BIGNUMERIC";
+        switch (type) {
+          case IValueMeta.TYPE_INTEGER -> retval += "INT64";
+          case IValueMeta.TYPE_BIGNUMBER -> {
+            if (v.getLength() < 39) {
+              retval += "NUMERIC";
+            } else {
+              retval += "BIGNUMERIC";
+            }
           }
-        } else {
-          // Floating point value with double precision...
-          retval += "FLOAT64";
+          default -> retval += "FLOAT64";
         }
         break;
 
@@ -183,11 +194,6 @@ public class GoogleBigQueryDatabaseMeta extends BaseDatabaseMeta implements IDat
   @Override
   public boolean isSupportsTimeStampToDateConversion() {
     return false;
-  }
-
-  @Override
-  public boolean isSupportsBooleanDataType() {
-    return true;
   }
 
   @Override
@@ -339,5 +345,10 @@ public class GoogleBigQueryDatabaseMeta extends BaseDatabaseMeta implements IDat
   @Override
   public String getUnsupportedTableOutputMessage() {
     return BaseMessages.getString(PKG, "GoogleBigQueryDatabaseMeta.UnsupportedTableOutputMessage");
+  }
+
+  @Override
+  public void addDefaultOptions() {
+    setSupportsBooleanDataType(true);
   }
 }

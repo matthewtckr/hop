@@ -23,7 +23,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Set;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.metadata.api.IHopMetadata;
@@ -139,6 +139,21 @@ public class MultiMetadataSerializer<T extends IHopMetadata> implements IHopMeta
       set.addAll(provider.getSerializer(managedClass).listObjectNames());
     }
     return new ArrayList<>(set);
+  }
+
+  /** Same provider order as {@link #load(String)}: child providers override parent projects. */
+  @Override
+  public String readVirtualPath(String name) throws HopException {
+    List<IHopMetadataProvider> providers = multiProvider.getProviders();
+    ListIterator<IHopMetadataProvider> providerIterator = providers.listIterator(providers.size());
+    while (providerIterator.hasPrevious()) {
+      IHopMetadataProvider provider = providerIterator.previous();
+      IHopMetadataSerializer<T> serializer = provider.getSerializer(managedClass);
+      if (serializer.exists(name)) {
+        return serializer.readVirtualPath(name);
+      }
+    }
+    throw new HopException("Object '" + name + "' does not exist");
   }
 
   @Override

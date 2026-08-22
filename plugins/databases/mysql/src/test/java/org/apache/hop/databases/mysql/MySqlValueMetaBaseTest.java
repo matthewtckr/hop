@@ -17,8 +17,8 @@
 
 package org.apache.hop.databases.mysql;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -32,7 +32,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.Properties;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabasePluginType;
@@ -42,40 +42,39 @@ import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopPluginException;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.row.IValueMeta;
-import org.apache.hop.core.row.value.ValueMetaBase;
 import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.core.row.value.ValueMetaPluginType;
 import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
-import org.apache.hop.junit.rules.RestoreHopEnvironment;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class MySqlValueMetaBaseTest {
+class MySqlValueMetaBaseTest {
   protected static final String TEST_NAME = "TEST_NAME";
   protected static final String LOG_FIELD = "LOG_FIELD";
 
-  @ClassRule public static RestoreHopEnvironment env = new RestoreHopEnvironment();
-  ;
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
+
   private PreparedStatement preparedStatementMock = mock(PreparedStatement.class);
   private ResultSet resultSet;
   private DatabaseMeta databaseMeta;
   private IValueMeta valueMetaBase;
   private IVariables variables;
 
-  @BeforeClass
-  public static void setUpBeforeClass() throws HopException {
+  @BeforeAll
+  static void setUpBeforeClass() throws HopException {
     PluginRegistry.addPluginType(ValueMetaPluginType.getInstance());
     PluginRegistry.addPluginType(DatabasePluginType.getInstance());
     PluginRegistry.init();
-    // HopLogStore.init();
   }
 
-  @Before
-  public void setUp() throws HopPluginException {
+  @BeforeEach
+  void setUp() throws HopPluginException {
     valueMetaBase = ValueMetaFactory.createValueMeta(IValueMeta.TYPE_NONE);
     databaseMeta = spy(new DatabaseMeta());
     resultSet = mock(ResultSet.class);
@@ -90,7 +89,7 @@ public class MySqlValueMetaBaseTest {
   }
 
   @Test
-  public void test_Pdi_17126_mysql() throws Exception {
+  void test_Pdi_17126_mysql() throws Exception {
     String data = StringUtils.repeat("*", 10);
     initValueMeta(new MySqlDatabaseMeta(), DatabaseMeta.CLOB_LENGTH, data);
 
@@ -98,10 +97,10 @@ public class MySqlValueMetaBaseTest {
   }
 
   @Test
-  public void testGetValueFromSqlTypeBinaryMysql() throws Exception {
+  void testGetValueFromSqlTypeBinaryMysql() throws Exception {
 
     final int binaryColumnIndex = 1;
-    ValueMetaBase valueMetaBase = new ValueMetaBase();
+    IValueMeta valueMetaBase = ValueMetaFactory.createValueMeta(IValueMeta.TYPE_NONE);
     DatabaseMeta dbMeta = spy(new DatabaseMeta());
     IDatabase iDatabase = new MySqlDatabaseMeta();
     dbMeta.setIDatabase(iDatabase);
@@ -119,7 +118,7 @@ public class MySqlValueMetaBaseTest {
   }
 
   @Test
-  public void testMetdataPreviewSqlDoubleWithPrecisionGreaterThanLengthUsingMySqlVariant()
+  void testMetdataPreviewSqlDoubleWithPrecisionGreaterThanLengthUsingMySqlVariant()
       throws SQLException, HopDatabaseException {
     doReturn(Types.DOUBLE).when(resultSet).getInt("DATA_TYPE");
     doReturn(4).when(resultSet).getInt("COLUMN_SIZE");
@@ -134,7 +133,7 @@ public class MySqlValueMetaBaseTest {
   }
 
   @Test
-  public void testMetdataPreviewSqlTimeToHopIntegerUsingMySqlVariant()
+  void testMetdataPreviewSqlTimeToHopIntegerUsingMySqlVariant()
       throws SQLException, HopDatabaseException {
     doReturn(Types.TIME).when(resultSet).getInt("DATA_TYPE");
     doReturn(mock(MySqlDatabaseMeta.class)).when(databaseMeta).getIDatabase();
@@ -150,7 +149,7 @@ public class MySqlValueMetaBaseTest {
   }
 
   @Test
-  public void testMetdataPreviewSqlVarBinaryToHopBinaryUsingMySqlVariant()
+  void testMetdataPreviewSqlVarBinaryToHopBinaryUsingMySqlVariant()
       throws SQLException, HopDatabaseException {
     doReturn(Types.VARBINARY).when(resultSet).getInt("DATA_TYPE");
     doReturn(16).when(resultSet).getInt("COLUMN_SIZE");
@@ -162,7 +161,7 @@ public class MySqlValueMetaBaseTest {
   }
 
   @Test
-  public void testMetdataPreviewSqlDoubleToHopNumberUsingMySql()
+  void testMetdataPreviewSqlDoubleToHopNumberUsingMySql()
       throws SQLException, HopDatabaseException {
     doReturn(Types.DOUBLE).when(resultSet).getInt("DATA_TYPE");
     doReturn(22).when(resultSet).getInt("COLUMN_SIZE");

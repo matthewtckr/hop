@@ -34,6 +34,7 @@ import org.apache.commons.vfs2.FileName;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.HopEnvironment;
+import org.apache.hop.core.HopVersionProvider;
 import org.apache.hop.core.IExecutor;
 import org.apache.hop.core.IExtensionData;
 import org.apache.hop.core.Result;
@@ -58,6 +59,7 @@ import org.apache.hop.core.parameters.INamedParameterDefinitions;
 import org.apache.hop.core.parameters.INamedParameters;
 import org.apache.hop.core.parameters.NamedParameters;
 import org.apache.hop.core.parameters.UnknownParamException;
+import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.util.EnvUtil;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
@@ -70,12 +72,14 @@ import org.apache.hop.pipeline.IExecutionStartedListener;
 import org.apache.hop.pipeline.IExecutionStoppedListener;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
+import org.apache.hop.pipeline.engine.EngineCompatibilityChecker;
 import org.apache.hop.pipeline.engine.IPipelineEngine;
 import org.apache.hop.workflow.action.ActionMeta;
 import org.apache.hop.workflow.action.IAction;
 import org.apache.hop.workflow.actions.start.ActionStart;
 import org.apache.hop.workflow.config.WorkflowRunConfiguration;
 import org.apache.hop.workflow.engine.IWorkflowEngine;
+import org.apache.hop.workflow.engine.WorkflowEnginePluginType;
 
 /**
  * This class executes a workflow as defined by a WorkflowMeta object.
@@ -382,6 +386,57 @@ public abstract class Workflow extends Variables
 
       log.logBasic(BaseMessages.getString(PKG, CONST_WORKFLOW_STARTED));
 
+      // Engine-compatibility deep gate (backstop). The CLI/GUI surface-level gates fire before the
+      // run-config dialog, but nested executions (ActionWorkflow, WorkflowExecutor, ...) all funnel
+      // through executeFromStart without re-asking. This check refuses to start a workflow with
+      // UNSUPPORTED actions unless HOP_ALLOW_UNSUPPORTED is set. Skipped when the workflow is
+      // marked as engine-internal on the extension-data map.
+      Map<String, Object> wfExtData = getExtensionDataMap();
+      boolean isInternalWorkflow =
+          wfExtData != null
+              && wfExtData.get(Pipeline.EXTENSION_DATA_INTERNAL_PIPELINE_FLAG) != null;
+      if (!isInternalWorkflow) {
+        List<EngineCompatibilityChecker.Violation> compatViolations =
+            EngineCompatibilityChecker.checkWorkflow(workflowMeta, this);
+        if (!compatViolations.isEmpty()) {
+          String wfEngineId =
+              PluginRegistry.getInstance().getPluginId(WorkflowEnginePluginType.class, this);
+          String allowVar = getVariable(Const.HOP_ALLOW_UNSUPPORTED);
+          boolean allow =
+              allowVar != null
+                  && ("Y".equals(allowVar)
+                      || "y".equals(allowVar)
+                      || "true".equalsIgnoreCase(allowVar)
+                      || "1".equals(allowVar));
+          if (allow) {
+            log.logMinimal(
+                "Engine '"
+                    + wfEngineId
+                    + "' refuses "
+                    + compatViolations.size()
+                    + " action(s) in workflow '"
+                    + workflowMeta.getName()
+                    + "' — override via "
+                    + Const.HOP_ALLOW_UNSUPPORTED);
+            log.logMinimal(EngineCompatibilityChecker.formatViolations(compatViolations));
+          } else {
+            throw new HopException(
+                "Engine '"
+                    + wfEngineId
+                    + "' refuses "
+                    + compatViolations.size()
+                    + " action(s) in workflow '"
+                    + workflowMeta.getName()
+                    + "':\n"
+                    + EngineCompatibilityChecker.formatViolations(compatViolations)
+                    + "\nSet variable "
+                    + Const.HOP_ALLOW_UNSUPPORTED
+                    + "=Y, pass --allow-unsupported on the CLI, or choose \"Run anyway\" in the GUI"
+                    + " to override.");
+          }
+        }
+      }
+
       ExtensionPointHandler.callExtensionPoint(log, this, HopExtensionPoint.WorkflowStart.id, this);
 
       // Start the tracking...
@@ -679,6 +734,12 @@ public abstract class Workflow extends Variables
       return res;
     }
 
+    // Start this action!
+    if (log.isBasic()) {
+      log.logBasic(
+          BaseMessages.getString(PKG, "Workflow.Log.StartingAction", actionMeta.getName()));
+    }
+
     // if we didn't have a previous result, create one, otherwise, copy the content...
     //
     final Result newResult;
@@ -688,6 +749,8 @@ public abstract class Workflow extends Variables
     } else {
       prevResult = newResult();
     }
+
+    final String[] actionLogChannelHolder = new String[1];
 
     WorkflowExecutionExtension extension =
         new WorkflowExecutionExtension(this, prevResult, actionMeta, true);
@@ -740,6 +803,7 @@ public abstract class Workflow extends Variables
       final long start = System.currentTimeMillis();
 
       cloneAction.getLogChannel().logDetailed("Starting action");
+      actionLogChannelHolder[0] = cloneAction.getLogChannel().getLogChannelId();
       for (IActionListener actionListener : actionListeners) {
         actionListener.beforeExecution(this, actionMeta, cloneAction);
       }
@@ -752,11 +816,23 @@ public abstract class Workflow extends Variables
 
       // Action execution duration
       newResult.setElapsedTimeMillis(System.currentTimeMillis() - start);
+      newResult.setEntryNr(nr);
 
       activeActions.remove(actionMeta);
 
       for (IActionListener actionListener : actionListeners) {
         actionListener.afterExecution(this, actionMeta, cloneAction, newResult);
+      }
+
+      // Log action as finished as soon as its body has completed (action can no longer fail after
+      // this point)
+      if (log.isBasic()) {
+        log.logBasic(
+            BaseMessages.getString(
+                PKG,
+                "Workflow.Log.FinishedAction",
+                actionMeta.getName(),
+                newResult.isResult() + ""));
       }
 
       Thread.currentThread().setContextClassLoader(cl);
@@ -771,6 +847,14 @@ public abstract class Workflow extends Variables
 
       // Save this result as well...
       //
+      long actionBytesRead = 0;
+      long actionBytesWritten = 0;
+      if (Const.toBoolean(getVariable(Const.HOP_METRIC_DATA_VOLUME, "N"))) {
+        actionBytesRead = newResult.getBytesReadThisAction();
+        actionBytesWritten = newResult.getBytesWrittenThisAction();
+        newResult.setBytesReadThisAction(0);
+        newResult.setBytesWrittenThisAction(0);
+      }
       ActionResult jerAfter =
           new ActionResult(
               newResult,
@@ -778,7 +862,9 @@ public abstract class Workflow extends Variables
               BaseMessages.getString(PKG, CONST_ACTION_FINISHED),
               null,
               actionMeta.getName(),
-              resolve(actionMeta.getAction().getFilename()));
+              resolve(actionMeta.getAction().getFilename()),
+              actionBytesRead,
+              actionBytesWritten);
       workflowTracker.addWorkflowTracker(new WorkflowTracker(workflowMeta, jerAfter));
       synchronized (actionResults) {
         actionResults.add(jerAfter);
@@ -796,6 +882,8 @@ public abstract class Workflow extends Variables
 
     extension =
         new WorkflowExecutionExtension(this, prevResult, actionMeta, extension.executeAction);
+    extension.actionExecutionResult = newResult;
+    extension.actionLogChannelId = actionLogChannelHolder[0];
     ExtensionPointHandler.callExtensionPoint(
         log, this, HopExtensionPoint.WorkflowAfterActionExecution.id, extension);
 
@@ -825,7 +913,7 @@ public abstract class Workflow extends Variables
       if (hopMeta.isUnconditional()) {
         nextComment = BaseMessages.getString(PKG, "Workflow.Comment.FollowedUnconditional");
       } else {
-        if (newResult.getResult()) {
+        if (newResult.isResult()) {
           nextComment = BaseMessages.getString(PKG, "Workflow.Comment.FollowedSuccess");
         } else {
           nextComment = BaseMessages.getString(PKG, "Workflow.Comment.FollowedFailure");
@@ -838,19 +926,11 @@ public abstract class Workflow extends Variables
       // green or red, execute the next action...
       //
       if (hopMeta.isUnconditional()
-          || (actionMeta.isEvaluation() && (hopMeta.isEvaluation() == newResult.getResult()))) {
+          || (actionMeta.isEvaluation() && (hopMeta.isEvaluation() == newResult.isResult()))) {
 
         // If the next action is a join, only execute once
-        if (nextAction.isJoin()) {
-          if (activeActions.contains(nextAction)) {
-            continue;
-          }
-        }
-
-        // Start this next action!
-        if (log.isBasic()) {
-          log.logBasic(
-              BaseMessages.getString(PKG, "Workflow.Log.StartingAction", nextAction.getName()));
+        if (nextAction.isJoin() && activeActions.contains(nextAction)) {
+          continue;
         }
 
         // Pass along the previous result, perhaps the next workflow can use it...
@@ -870,8 +950,15 @@ public abstract class Workflow extends Variables
           Runnable runnable =
               () -> {
                 try {
+                  // Pass a previous result without rows to the parallel branch so that
+                  // branch-local result rows start from a clean slate but still inherit
+                  // metrics/files/etc.
+                  Result prevWithoutRows = newResult.lightClone();
+                  prevWithoutRows.setRows(null); // ensure rows are empty
+
                   Result threadResult =
-                      executeFromStart(nr + 1, newResult, nextAction, actionMeta, nextComment);
+                      executeFromStart(
+                          nr + 1, prevWithoutRows, nextAction, actionMeta, nextComment);
                   threadResults.add(threadResult);
                 } catch (Throwable e) {
                   log.logError(Const.getStackTracker(e));
@@ -904,14 +991,6 @@ public abstract class Workflow extends Variables
                 BaseMessages.getString(PKG, "Workflow.Log.UnexpectedError", nextAction.toString()),
                 e);
           }
-          if (log.isBasic()) {
-            log.logBasic(
-                BaseMessages.getString(
-                    PKG,
-                    "Workflow.Log.FinishedAction",
-                    nextAction.getName(),
-                    res.getResult() + ""));
-          }
         }
       }
     }
@@ -942,10 +1021,10 @@ public abstract class Workflow extends Variables
       }
     }
 
-    // Perhaps we don't have next transforms??
-    // In this case, return the previous result.
+    // Perhaps we don't have next actions??
+    // In this case, return the result of the action we just ran.
     if (res == null) {
-      res = prevResult;
+      res = newResult;
     }
 
     // See if there were any errors in the parallel execution
@@ -963,9 +1042,9 @@ public abstract class Workflow extends Variables
       throw threadExceptions.poll();
     }
 
-    // In parallel execution, we aggregate all the results, simply add them to
-    // the previous result...
-    //
+    // In parallel execution, aggregate full results from branches. Since we started each
+    // branch with no previous rows, any rows present here were produced by the branch and
+    // should be included in the final result.
     for (Result threadResult : threadResults) {
       res.add(threadResult);
     }
@@ -975,6 +1054,13 @@ public abstract class Workflow extends Variables
     //
     if (res.getNrErrors() > 0) {
       res.setResult(false);
+    }
+
+    // Toolbar / API stop sets the engine's stopped flag; the last completed action can still
+    // return a successful Result with stopped=false. Propagate stop into Result so consumers
+    // (e.g. transactional workflow commit/rollback) behave correctly.
+    if (isStopped() && res != null) {
+      res.setStopped(true);
     }
 
     return res;
@@ -1204,6 +1290,9 @@ public abstract class Workflow extends Variables
     } else {
       this.setVariable(Const.INTERNAL_VARIABLE_WORKFLOW_PARENT_ID, null);
     }
+
+    HopVersionProvider versionProvider = new HopVersionProvider();
+    setVariable(Const.HOP_VERSION, versionProvider.getVersion()[0]);
   }
 
   /**

@@ -18,20 +18,20 @@
 package org.apache.hop.pipeline.transforms.excelinput;
 
 import java.util.Arrays;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.row.RowMeta;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.pipeline.transforms.file.BaseFileField;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Ignore;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 
 /** Base class for all Fixed input transform tests. */
-@Ignore("No tests in abstract base class")
-public class BaseExcelParsingTest
-    extends BaseParsingTest<ExcelInputMeta, ExcelInputData, ExcelInput> {
+@Disabled("No tests in abstract base class")
+class BaseExcelParsingTest extends BaseParsingTest<ExcelInputMeta, ExcelInputData, ExcelInput> {
   /** Initialize transform info. */
-  @Before
-  public void before() {
+  @BeforeEach
+  void before() {
     inPrefix = '/' + this.getClass().getPackage().getName().replace('.', '/') + "/files/";
 
     meta = new ExcelInputMeta();
@@ -41,8 +41,8 @@ public class BaseExcelParsingTest
     data.outputRowMeta = new RowMeta();
   }
 
-  @After
-  public void after() {
+  @AfterEach
+  void after() {
     if (transform != null) {
       transform.dispose();
       transform = null;
@@ -74,6 +74,6 @@ public class BaseExcelParsingTest
   /** For BaseFileInput fields. */
   @Override
   protected void setFields(BaseFileField... fields) throws Exception {
-    throw new RuntimeException("Not implemented");
+    throw new HopRuntimeException("Not implemented");
   }
 }

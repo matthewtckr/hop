@@ -24,7 +24,7 @@ import java.util.Collections;
 import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.extension.ExtensionPointHandler;
 import org.apache.hop.core.extension.HopExtensionPoint;
@@ -187,10 +187,11 @@ public class MetadataManager<T extends IHopMetadata> {
       MetadataEditor<T> editor = this.createEditor(element);
       editor.setTitle(element.getName());
 
-      // Open this element in the metadata perspective if that one is active.
+      // Open this element in the metadata perspective if that one is active. The perspective is
+      // absent when it is switched off in disabledGuiElements.xml, and we fall back to the dialog.
       //
       MetadataPerspective perspective = HopGui.getMetadataPerspective();
-      if (perspective.isActive()) {
+      if (perspective != null && perspective.isActive()) {
         perspective.addEditor(editor);
         return false;
       } else {
@@ -220,6 +221,14 @@ public class MetadataManager<T extends IHopMetadata> {
   }
 
   public void editWithEditor(String name) {
+    editWithEditorAtIndex(name, -1);
+  }
+
+  /**
+   * Like {@link #editWithEditor(String)} but inserts the new tab at {@code tabIndex} instead of
+   * appending it. Pass {@code -1} to append at the end (same as {@link #editWithEditor}).
+   */
+  public void editWithEditorAtIndex(String name, int tabIndex) {
     if (name == null) {
       return;
     }
@@ -246,7 +255,7 @@ public class MetadataManager<T extends IHopMetadata> {
 
         initializeElementVariables(element);
 
-        perspective.addEditor(createEditor(element));
+        perspective.addEditor(createEditor(element), tabIndex);
       } else {
         perspective.setActiveEditor(editor);
       }
@@ -270,18 +279,32 @@ public class MetadataManager<T extends IHopMetadata> {
    * @return True if anything was deleted
    */
   public boolean deleteMetadata(String elementName) {
+    return deleteMetadata(elementName, false);
+  }
+
+  /**
+   * delete an element, optionally skipping the confirmation dialog (when the caller already
+   * confirmed, e.g. metadata perspective with reference check).
+   *
+   * @param elementName The name of the element to delete
+   * @param skipConfirmation When true, do not show the "Are you sure?" dialog
+   * @return True if anything was deleted
+   */
+  public boolean deleteMetadata(String elementName, boolean skipConfirmation) {
 
     if (StringUtils.isEmpty(elementName)) {
       return false;
     }
 
-    MessageBox confirmBox =
-        new MessageBox(HopGui.getInstance().getShell(), SWT.ICON_QUESTION | SWT.YES | SWT.NO);
-    confirmBox.setText("Delete?");
-    confirmBox.setMessage("Are you sure you want to delete element " + elementName + "?");
-    int anwser = confirmBox.open();
-    if ((anwser & SWT.YES) == 0) {
-      return false;
+    if (!skipConfirmation) {
+      MessageBox confirmBox =
+          new MessageBox(HopGui.getInstance().getShell(), SWT.ICON_QUESTION | SWT.YES | SWT.NO);
+      confirmBox.setText("Delete?");
+      confirmBox.setMessage("Are you sure you want to delete element " + elementName + "?");
+      int anwser = confirmBox.open();
+      if ((anwser & SWT.YES) == 0) {
+        return false;
+      }
     }
 
     try {
@@ -330,6 +353,14 @@ public class MetadataManager<T extends IHopMetadata> {
     metadata.setName(newName);
     serializer.save(metadata);
     serializer.delete(oldName);
+
+    // Notify listeners (auto-export, etc.) that metadata changed via rename
+    //
+    ExtensionPointHandler.callExtensionPoint(
+        HopGui.getInstance().getLog(),
+        variables,
+        HopExtensionPoint.HopGuiMetadataObjectUpdated.id,
+        metadata);
 
     return true;
   }
@@ -428,6 +459,8 @@ public class MetadataManager<T extends IHopMetadata> {
           element);
 
       MetadataEditor<T> editor = this.createEditor(element);
+      // Suggested default names from create-before hooks are not a persisted identity
+      editor.markAsNew();
 
       // Always open this in a separate dialog so that we block until we have a name for the new
       // element.
@@ -436,15 +469,9 @@ public class MetadataManager<T extends IHopMetadata> {
       MetadataEditorDialog dialog =
           new MetadataEditorDialog(HopGui.getInstance().getShell(), editor);
 
+      // MetadataEditor.save() already fires HopGuiMetadataObjectCreated on success
       String name = dialog.open();
-      if (name != null) {
-        ExtensionPointHandler.callExtensionPoint(
-            HopGui.getInstance().getLog(),
-            variables,
-            HopExtensionPoint.HopGuiMetadataObjectCreated.id,
-            element);
-      }
-      return element;
+      return name != null ? element : null;
     } catch (Exception e) {
       new ErrorDialog(
           HopGui.getInstance().getShell(), CONST_ERROR, "Error editing new metadata element", e);
@@ -470,13 +497,29 @@ public class MetadataManager<T extends IHopMetadata> {
           element);
 
       MetadataEditor<T> editor = this.createEditor(element);
+      // Suggested default names from create-before hooks are not a persisted identity
+      editor.markAsNew();
       editor.setTitle(
           BaseMessages.getString(
               PKG,
               "MetadataManager.New.Label",
               TranslateUtil.translate(this.getManagedName(), managedClass)));
 
-      MetadataPerspective.getInstance().addEditor(editor);
+      // The metadata perspective is absent when it is switched off in disabledGuiElements.xml.
+      // There is no editor tab to open then, so we edit the new element in a dialog instead.
+      //
+      MetadataPerspective perspective = HopGui.getMetadataPerspective();
+      if (perspective == null) {
+        // MetadataEditor.save() already fires HopGuiMetadataObjectCreated on success
+        MetadataEditorDialog dialog = new MetadataEditorDialog(hopGui.getActiveShell(), editor);
+        if (dialog.open() == null) {
+          return null;
+        }
+        return element;
+      }
+
+      perspective.activate();
+      perspective.addEditor(editor);
 
       return element;
     } catch (Exception e) {

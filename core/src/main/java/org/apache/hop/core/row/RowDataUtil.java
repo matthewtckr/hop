@@ -19,7 +19,7 @@ package org.apache.hop.core.row;
 
 /**
  * This class of static methods can be used to manipulate rows: add, delete, resize, etc... That
- * way, when we want to go for a metadata driven system with hiding deletes, over sized arrays etc,
+ * way, when we want to go for a metadata driven system with hiding deletes, over sized arrays etc.,
  * we can change these methods to find occurrences.
  *
  * <p>For example, a transform adding a field to the row should always call
@@ -143,6 +143,7 @@ public class RowDataUtil {
    * @param two The second array
    * @return a new Array containing all elements from one and two after one another
    */
+  @SuppressWarnings("javabugs:S2259") // callers always pass both row arrays
   public static Object[] addRowData(Object[] one, int sourceLength, Object[] two) {
     Object[] result = resizeArray(one, sourceLength + two.length);
 

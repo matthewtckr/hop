@@ -20,7 +20,7 @@ package org.apache.hop.pipeline.transforms.script;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.annotations.Transform;
 import org.apache.hop.core.exception.HopPluginException;
@@ -43,7 +43,7 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     name = "Script",
     description = "Executes scripts for JSR-223 Script Engines",
     categoryDescription = "Scripting",
-    keywords = "script,scripting,groovy,python,javascript,ecmascript,ruby",
+    keywords = "script,groovy,python,javascript,ruby",
     documentationUrl = "/pipeline/transforms/script.html")
 public class ScriptMeta extends BaseTransformMeta<Script, ScriptData> implements ITransformMeta {
   private static final Class<?> PKG = ScriptMeta.class;
@@ -60,18 +60,6 @@ public class ScriptMeta extends BaseTransformMeta<Script, ScriptData> implements
   public ScriptMeta() {
     scripts = new ArrayList<>();
     fields = new ArrayList<>();
-  }
-
-  public ScriptMeta(ScriptMeta m) {
-    this();
-    this.languageName = m.languageName;
-    m.scripts.forEach(s -> this.scripts.add(new SScript(s)));
-    m.fields.forEach(f -> this.fields.add(new SField(f)));
-  }
-
-  @Override
-  public ScriptMeta clone() {
-    return new ScriptMeta(this);
   }
 
   @Override

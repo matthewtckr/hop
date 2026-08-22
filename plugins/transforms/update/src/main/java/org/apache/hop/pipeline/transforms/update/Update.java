@@ -19,7 +19,7 @@ package org.apache.hop.pipeline.transforms.update;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
-import org.apache.commons.lang.ArrayUtils;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.Database;
 import org.apache.hop.core.database.DatabaseMeta;
@@ -60,17 +60,17 @@ public class Update extends BaseTransform<UpdateMeta, UpdateData> {
     Object[] outputRow = row;
     Object[] add;
 
-    // Create the output row and copy the input values
-    if (!Utils.isEmpty(meta.getIgnoreFlagField())) { // add flag field!
+    // Create the output row and copy the input values. add flag field!
+    if (!Utils.isEmpty(meta.getIgnoreFlagField())) {
 
       outputRow = new Object[data.outputRowMeta.size()];
-      for (int i = 0; i < rowMeta.size(); i++) {
-        outputRow[i] = row[i];
+      if (rowMeta.size() >= 0) {
+        System.arraycopy(row, 0, outputRow, 0, rowMeta.size());
       }
     }
 
     // OK, now do the lookup.
-    // We need the lookupvalues for that.
+    // We need the lookup values for that.
     Object[] lookupRow = new Object[data.lookupParameterRowMeta.size()];
     int lookupIndex = 0;
 
@@ -159,11 +159,11 @@ public class Update extends BaseTransform<UpdateMeta, UpdateData> {
       } else {
         for (int i = 0; i < data.valuenrs.length; i++) {
           IValueMeta valueMeta = rowMeta.getValueMeta(data.valuenrs[i]);
-          Object rowvalue = row[data.valuenrs[i]];
+          Object rowValue = row[data.valuenrs[i]];
           IValueMeta returnValueMeta = returnRowMeta.getValueMeta(i);
-          Object retvalue = add[i];
+          Object retValue = add[i];
 
-          if (returnValueMeta.compare(retvalue, valueMeta, rowvalue) != 0) {
+          if (returnValueMeta.compare(retValue, valueMeta, rowValue) != 0) {
             update = true;
           }
         }
@@ -358,7 +358,20 @@ public class Update extends BaseTransform<UpdateMeta, UpdateData> {
     return true;
   }
 
-  public void setLookup(IRowMeta rowMeta) throws HopDatabaseException {
+  /**
+   * The lookup keys drive the WHERE clause of both the lookup SELECT and the UPDATE. Without a
+   * single key we would generate a statement ending in a dangling WHERE, so fail with a
+   * configuration error instead of letting the database report invalid SQL.
+   */
+  private void verifyLookupKeys() throws HopTransformException {
+    if (meta.getLookupField().getLookupKeys().isEmpty()) {
+      throw new HopTransformException(BaseMessages.getString(PKG, "Update.Exception.NoKeyFields"));
+    }
+  }
+
+  public void setLookup(IRowMeta rowMeta) throws HopException {
+    verifyLookupKeys();
+
     data.lookupParameterRowMeta = new RowMeta();
     data.lookupReturnRowMeta = new RowMeta();
 
@@ -437,7 +450,9 @@ public class Update extends BaseTransform<UpdateMeta, UpdateData> {
   }
 
   // Lookup certain fields in a table
-  public void prepareUpdate(IRowMeta rowMeta) throws HopDatabaseException {
+  public void prepareUpdate(IRowMeta rowMeta) throws HopException {
+    verifyLookupKeys();
+
     DatabaseMeta databaseMeta = getPipelineMeta().findDatabase(meta.getConnection(), variables);
     data.updateParameterRowMeta = new RowMeta();
 

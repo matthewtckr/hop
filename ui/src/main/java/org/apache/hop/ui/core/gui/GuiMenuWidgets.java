@@ -23,16 +23,23 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
+import org.apache.hop.core.gui.plugin.GuiPluginType;
 import org.apache.hop.core.gui.plugin.GuiRegistry;
 import org.apache.hop.core.gui.plugin.key.KeyboardShortcut;
 import org.apache.hop.core.gui.plugin.menu.GuiMenuItem;
 import org.apache.hop.core.logging.LogChannel;
+import org.apache.hop.core.plugins.IPlugin;
+import org.apache.hop.core.plugins.PluginRegistry;
+import org.apache.hop.core.security.HopSecurity;
 import org.apache.hop.ui.core.ConstUi;
 import org.apache.hop.ui.hopgui.file.IHopFileType;
+import org.apache.hop.ui.hopgui.file.IHopFileTypeHandler;
+import org.apache.hop.ui.hopgui.perspective.IHopPerspective;
 import org.apache.hop.ui.util.EnvironmentUtils;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.MenuItem;
 import org.eclipse.swt.widgets.Shell;
@@ -49,6 +56,61 @@ public class GuiMenuWidgets extends BaseGuiWidgets {
     this.menuItemMap = new HashMap<>();
     this.shortcutMap = new HashMap<>();
     this.menuEnabledMap = new HashMap<>();
+  }
+
+  /** Pre-create shortcut plugin instances so their shortcuts work before menu is used. */
+  public void ensureShortcutPluginInstancesRegistered() {
+    GuiRegistry guiRegistry = GuiRegistry.getInstance();
+    PluginRegistry pluginRegistry = PluginRegistry.getInstance();
+    for (String className : guiRegistry.getShortCutsMap().keySet()) {
+      try {
+        IPlugin plugin =
+            pluginRegistry.getPlugins(GuiPluginType.class).stream()
+                .filter(p -> p.getClassMap().values().contains(className))
+                .findFirst()
+                .orElse(null);
+        if (plugin == null) {
+          continue;
+        }
+        ClassLoader classLoader = pluginRegistry.getClassLoader(plugin);
+        if (canPreRegister(classLoader, className)) {
+          findGuiPluginInstance(classLoader, className, instanceId);
+        }
+      } catch (Exception e) {
+        LogChannel.UI.logDebug(
+            "Could not pre-register shortcut plugin instance for "
+                + className
+                + ": "
+                + e.getMessage());
+      }
+    }
+  }
+
+  /**
+   * A shortcut owner can only be pre-created when a fresh instance is harmless. Perspectives and
+   * SWT controls are created by their owner and register themselves with {@link
+   * org.apache.hop.ui.hopgui.HopGuiKeyHandler} when they do: creating one here would leave a
+   * second, never initialized copy behind which handles keys and menu items it has no widgets for.
+   * Anything without a public no-argument constructor is created by its owner as well.
+   *
+   * @param classLoader the class loader of the GUI plugin
+   * @param className the class owning one or more keyboard shortcuts
+   * @return true if an instance can safely be created up front
+   */
+  static boolean canPreRegister(ClassLoader classLoader, String className) {
+    try {
+      Class<?> guiPluginClass = classLoader.loadClass(className);
+      if (IHopPerspective.class.isAssignableFrom(guiPluginClass)
+          || Control.class.isAssignableFrom(guiPluginClass)) {
+        return false;
+      }
+      guiPluginClass.getConstructor();
+      return true;
+    } catch (Exception e) {
+      // Can't be loaded or has no default constructor: it's created together with its owner.
+      //
+      return false;
+    }
   }
 
   public void createMenuWidgets(String root, Shell shell, Menu parent) {
@@ -95,22 +157,7 @@ public class GuiMenuWidgets extends BaseGuiWidgets {
       }
 
       menuItem = new MenuItem(parentMenu, SWT.PUSH);
-      menuItem.setText(guiMenuItem.getLabel());
-      if (StringUtils.isNotEmpty(guiMenuItem.getImage())) {
-        menuItem.setImage(
-            GuiResource.getInstance()
-                .getImage(
-                    guiMenuItem.getImage(),
-                    guiMenuItem.getClassLoader(),
-                    ConstUi.SMALL_ICON_SIZE,
-                    ConstUi.SMALL_ICON_SIZE));
-      }
-
-      setMenuItemKeyboardShortcut(menuItem, guiMenuItem);
-      if (StringUtils.isNotEmpty(guiMenuItem.getToolTip())
-          && !EnvironmentUtils.getInstance().isWeb()) {
-        menuItem.setToolTipText(guiMenuItem.getToolTip());
-      }
+      initMenuItem(menuItem, guiMenuItem);
 
       // Call the method to which the GuiWidgetElement annotation belongs.
       //
@@ -120,14 +167,19 @@ public class GuiMenuWidgets extends BaseGuiWidgets {
             try {
               executeMenuItem(guiMenuItem, instanceId);
             } catch (Exception ex) {
+              Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+              String msg = cause.getMessage();
+              if (msg == null || msg.isEmpty()) {
+                msg = cause.getClass().getSimpleName();
+              }
               LogChannel.UI.logError(
                   "Unable to call method "
                       + guiMenuItem.getListenerMethod()
                       + " in singleton "
                       + guiMenuItem.getListenerClassName()
                       + " : "
-                      + ex.getMessage(),
-                  e);
+                      + msg,
+                  ex);
             }
           });
 
@@ -140,25 +192,20 @@ public class GuiMenuWidgets extends BaseGuiWidgets {
       Menu menu = parentMenu;
       if (guiMenuItem.getId() != null) {
         menuItem = new MenuItem(parentMenu, SWT.CASCADE);
-        menuItem.setText(Const.NVL(guiMenuItem.getLabel(), ""));
-        setMenuItemKeyboardShortcut(menuItem, guiMenuItem);
-        if (StringUtils.isNotEmpty(guiMenuItem.getToolTip())
-            && !EnvironmentUtils.getInstance().isWeb()) {
-          menuItem.setToolTipText(guiMenuItem.getToolTip());
-        }
+        initMenuItem(menuItem, guiMenuItem);
+
         menu = new Menu(shell, SWT.DROP_DOWN);
         menuItem.setMenu(menu);
         menuItemMap.put(guiMenuItem.getId(), menuItem);
         menuEnabledMap.put(guiMenuItem.getId(), true);
       }
 
-      // Add the children to this menu...
-      //
-
       // Sort the children as well.  It gets chaotic otherwise
       //
       Collections.sort(children);
 
+      // Add the children to this menu...
+      //
       for (GuiMenuItem child : children) {
         addMenuWidgets(root, shell, menu, child);
       }
@@ -173,7 +220,28 @@ public class GuiMenuWidgets extends BaseGuiWidgets {
     menuMethod.invoke(parentObject);
   }
 
-  private void setMenuItemKeyboardShortcut(MenuItem menuItem, GuiMenuItem guiMenuItem) {
+  /**
+   * Initializes a menu item by setting its properties such as label, image, shortcuts, and tooltip
+   * based on the corresponding GuiMenuItem instance.
+   *
+   * @param menuItem The MenuItem object that needs to be initialized.
+   * @param guiMenuItem The GuiMenuItem containing configuration data for the menu item.
+   */
+  private void initMenuItem(MenuItem menuItem, GuiMenuItem guiMenuItem) {
+    // Set label
+    menuItem.setText(Const.NVL(guiMenuItem.getLabel(), ""));
+
+    // Set image
+    if (StringUtils.isNotEmpty(guiMenuItem.getImage())) {
+      menuItem.setImage(
+          GuiResource.getInstance()
+              .getImage(
+                  guiMenuItem.getImage(),
+                  guiMenuItem.getClassLoader(),
+                  ConstUi.SMALL_ICON_SIZE,
+                  ConstUi.SMALL_ICON_SIZE));
+    }
+
     // See if there's a shortcut worth mentioning...
     //
     KeyboardShortcut shortcut =
@@ -182,8 +250,15 @@ public class GuiMenuWidgets extends BaseGuiWidgets {
                 guiMenuItem.getListenerClassName(), guiMenuItem.getListenerMethod(), Const.isOSX());
     if (shortcut != null) {
       appendShortCut(menuItem, shortcut);
-      menuItem.setAccelerator(getAccelerator(shortcut));
+      // Do not set menu accelerators; keyboard shortcuts are handled only by HopGuiKeyHandler
+      // so the correct context (focus) is used. Menu still shows shortcut text for discoverability.
       shortcutMap.put(guiMenuItem.getId(), shortcut);
+    }
+
+    // Set tooltip if available and not in web environment
+    if (StringUtils.isNotEmpty(guiMenuItem.getToolTip())
+        && !EnvironmentUtils.getInstance().isWeb()) {
+      menuItem.setToolTipText(guiMenuItem.getToolTip());
     }
   }
 
@@ -210,74 +285,7 @@ public class GuiMenuWidgets extends BaseGuiWidgets {
   }
 
   public static String getShortcutString(KeyboardShortcut shortcut) {
-    String s = shortcut.toString();
-    if (StringUtils.isEmpty(s) || s.endsWith("+")) {
-      // Unknown characters from the SWT library
-      // We'll handle the special cases here.
-      //
-      int keyCode = shortcut.getKeyCode();
-      if (keyCode == SWT.BS) {
-        return s + "Backspace";
-      }
-      if (keyCode == SWT.ESC) {
-        return s + "Esc";
-      }
-      if (keyCode == SWT.DEL) {
-        return s + "Delete";
-      }
-      if (keyCode == SWT.ARROW_LEFT) {
-        return s + "Left";
-      }
-      if (keyCode == SWT.ARROW_RIGHT) {
-        return s + "Right";
-      }
-      if (keyCode == SWT.ARROW_UP) {
-        return s + "Up";
-      }
-      if (keyCode == SWT.ARROW_DOWN) {
-        return s + "Down";
-      }
-      if (keyCode == SWT.HOME) {
-        return s + "Home";
-      }
-      if (keyCode == SWT.F1) {
-        return s + "F1";
-      }
-      if (keyCode == SWT.F2) {
-        return s + "F2";
-      }
-      if (keyCode == SWT.F3) {
-        return s + "F3";
-      }
-      if (keyCode == SWT.F4) {
-        return s + "F4";
-      }
-      if (keyCode == SWT.F5) {
-        return s + "F5";
-      }
-      if (keyCode == SWT.F6) {
-        return s + "F6";
-      }
-      if (keyCode == SWT.F7) {
-        return s + "F7";
-      }
-      if (keyCode == SWT.F8) {
-        return s + "F8";
-      }
-      if (keyCode == SWT.F9) {
-        return s + "F9";
-      }
-      if (keyCode == SWT.F10) {
-        return s + "F10";
-      }
-      if (keyCode == SWT.F11) {
-        return s + "F11";
-      }
-      if (keyCode == SWT.F12) {
-        return s + "F12";
-      }
-    }
-    return s;
+    return ShortcutDisplayUtil.getShortcutDisplayString(shortcut);
   }
 
   /**
@@ -288,6 +296,30 @@ public class GuiMenuWidgets extends BaseGuiWidgets {
    */
   public MenuItem findMenuItem(String id) {
     return menuItemMap.get(id);
+  }
+
+  /**
+   * Find the menu item with the given ID and remove it from the menu, together with the separator
+   * that was created in front of it. Use this for menu items which simply don't apply to the
+   * environment we're running in.
+   *
+   * @param id The ID to look for
+   */
+  public void removeMenuItem(String id) {
+    MenuItem menuItem = menuItemMap.remove(id);
+    menuEnabledMap.remove(id);
+    if (menuItem == null || menuItem.isDisposed()) {
+      return;
+    }
+    Menu parentMenu = menuItem.getParent();
+    int index = parentMenu.indexOf(menuItem);
+    if (index > 0) {
+      MenuItem previousItem = parentMenu.getItem(index - 1);
+      if ((previousItem.getStyle() & SWT.SEPARATOR) != 0) {
+        previousItem.dispose();
+      }
+    }
+    menuItem.dispose();
   }
 
   public KeyboardShortcut findKeyboardShortcut(String id) {
@@ -320,7 +352,12 @@ public class GuiMenuWidgets extends BaseGuiWidgets {
    * @return The menu item or null if nothing is found
    */
   public MenuItem enableMenuItem(IHopFileType fileType, String id, String permission) {
-    return enableMenuItem(fileType, id, permission, true);
+    return enableMenuItem(fileType, null, id, permission, true);
+  }
+
+  public MenuItem enableMenuItem(
+      IHopFileType fileType, IHopFileTypeHandler handler, String id, String permission) {
+    return enableMenuItem(fileType, handler, id, permission, true);
   }
 
   /**
@@ -335,11 +372,26 @@ public class GuiMenuWidgets extends BaseGuiWidgets {
    */
   public MenuItem enableMenuItem(
       IHopFileType fileType, String id, String permission, boolean active) {
-    MenuItem menuItem = menuItemMap.get(id);
+    return enableMenuItem(fileType, null, id, permission, active);
+  }
 
-    boolean hasCapability = fileType.hasCapability(permission);
-    boolean enable = hasCapability && active;
-    if (menuItem != null && enable != menuItem.isEnabled()) {
+  /**
+   * Enable or disable menu item based on capability. When handler is non-null, uses handler's
+   * hasCapability (so handlers can disable e.g. Save for binary raw view); otherwise uses file
+   * type.
+   */
+  public MenuItem enableMenuItem(
+      IHopFileType fileType,
+      IHopFileTypeHandler handler,
+      String id,
+      String permission,
+      boolean active) {
+    MenuItem menuItem = menuItemMap.get(id);
+    boolean hasCapability =
+        handler != null ? handler.hasCapability(permission) : fileType.hasCapability(permission);
+    // File-type capability AND runtime state AND session RBAC (Hop Web roles)
+    boolean enable = hasCapability && active && HopSecurity.allowsCapability(permission);
+    if (menuItem != null && !menuItem.isDisposed() && enable != menuItem.isEnabled()) {
       menuItem.setEnabled(enable);
     }
     menuEnabledMap.put(id, enable);

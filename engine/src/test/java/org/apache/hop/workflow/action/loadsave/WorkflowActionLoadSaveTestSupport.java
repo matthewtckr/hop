@@ -21,25 +21,21 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidator;
 import org.apache.hop.workflow.action.IAction;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
+@ExtendWith(RestoreHopEngineEnvironmentExtension.class)
 public abstract class WorkflowActionLoadSaveTestSupport<T extends IAction> {
 
   protected LoadSaveTester<T> tester;
 
-  @BeforeClass
-  public static void setUpBeforeClass() throws HopException {
-    HopEnvironment.init();
-  }
-
-  @Before
-  public void setUp() throws Exception {
+  @BeforeEach
+  void setUp() throws Exception {
     List<String> attributes = listAttributes();
     List<String> ignoreAttributes = ignoreAttributes();
     Map<String, String> getters = createGettersMap();
@@ -59,7 +55,7 @@ public abstract class WorkflowActionLoadSaveTestSupport<T extends IAction> {
   }
 
   @Test
-  public void testSerialization() throws HopException {
+  void testSerialization() throws HopException {
     tester.testSerialization();
   }
 

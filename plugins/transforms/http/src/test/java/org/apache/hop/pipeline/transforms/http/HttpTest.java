@@ -17,103 +17,124 @@
 
 package org.apache.hop.pipeline.transforms.http;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doCallRealMethod;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
 
-import java.io.ByteArrayInputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
-import org.apache.hop.core.logging.ILogChannel;
-import org.apache.hop.core.row.IRowMeta;
-import org.apache.hop.core.util.HttpClientManager;
-import org.apache.http.Header;
-import org.apache.http.HttpHost;
-import org.apache.http.HttpRequest;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.entity.BasicHttpEntity;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.protocol.HttpContext;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
-import org.junit.Test;
-import org.mockito.MockedStatic;
+import java.nio.charset.StandardCharsets;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.core5.http.Header;
+import org.apache.hc.core5.http.io.entity.StringEntity;
+import org.apache.hc.core5.http.message.BasicHeader;
+import org.apache.hop.core.Const;
+import org.apache.hop.core.exception.HopTransformException;
+import org.apache.hop.pipeline.PipelineMeta;
+import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
+import org.apache.hop.pipeline.transform.BaseTransform;
+import org.apache.hop.pipeline.transform.TransformMeta;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.junit.jupiter.api.Test;
 
-public class HttpTest {
+class HttpTest {
 
-  private static MockedStatic<HttpClientManager> mockedHttpClientManager;
+  private Http newTransform(String encoding) {
+    TransformMeta transformMeta = new TransformMeta();
+    transformMeta.setName("HttpTest");
+    PipelineMeta pipelineMeta = new PipelineMeta();
+    pipelineMeta.setName("HttpTest");
+    pipelineMeta.addTransform(transformMeta);
 
-  private final ILogChannel log = mock(ILogChannel.class);
-  private final IRowMeta rmi = mock(IRowMeta.class);
-  private final HttpData data = mock(HttpData.class);
-  private final HttpMeta meta = mock(HttpMeta.class);
-  private final Http http = mock(Http.class);
+    HttpMeta meta = new HttpMeta();
+    meta.setEncoding(encoding);
 
-  private final String DATA =
-      "This is the description, there's some HTML here, like &lt;strong&gt;this&lt;/strong&gt;. "
-          + "Sometimes this text is another language that might contain these characters:\n"
-          + "&lt;p&gt;é, è, ô, ç, à, ê, â.&lt;/p&gt; They can, of course, come in uppercase as well: &lt;p&gt;É, È Ô, Ç, À,"
-          + " Ê, Â&lt;/p&gt;. UTF-8 handles this well.";
+    HttpData data = new HttpData();
+    data.realUrl = "http://localhost/test";
 
-  @Before
-  public void setup() throws Exception {
-    HttpClientManager.HttpClientBuilderFacade builder =
-        mock(HttpClientManager.HttpClientBuilderFacade.class);
+    return new Http(transformMeta, meta, data, 0, pipelineMeta, new LocalPipelineEngine());
+  }
 
-    HttpClientManager manager = mock(HttpClientManager.class);
-    doReturn(builder).when(manager).createBuilder();
+  @Test
+  void extractHeaderStringAggregatesDuplicateHeaders() throws Exception {
+    Header[] headers = {
+      new BasicHeader("X-Test", "first"),
+      new BasicHeader("X-Test", "second"),
+      new BasicHeader("Content-Type", "application/json")
+    };
 
-    CloseableHttpClient client = mock(CloseableHttpClient.class);
-    doReturn(client).when(builder).build();
+    JSONObject headerJson = (JSONObject) new JSONParser().parse(invokeExtractHeaderString(headers));
 
+    assertEquals("application/json", headerJson.get("Content-Type"));
+    assertTrue(headerJson.get("X-Test") instanceof JSONArray);
+    assertEquals("first", ((JSONArray) headerJson.get("X-Test")).get(0));
+    assertEquals("second", ((JSONArray) headerJson.get("X-Test")).get(1));
+  }
+
+  @Test
+  void handResponseReadsBodyAndTracksDataVolumeIn() throws Exception {
+    Http http = newTransform(Const.UTF_8);
     CloseableHttpResponse response = mock(CloseableHttpResponse.class);
-    doReturn(response)
-        .when(client)
-        .execute(any(HttpHost.class), any(HttpRequest.class), any(HttpContext.class));
+    String payload = "hello http";
+    doReturn(new StringEntity(payload, StandardCharsets.UTF_8)).when(response).getEntity();
 
-    BasicHttpEntity entity = new BasicHttpEntity();
-    entity.setContent(new ByteArrayInputStream(DATA.getBytes()));
-    doReturn(entity).when(response).getEntity();
-    mockedHttpClientManager.when(HttpClientManager::getInstance).thenReturn(manager);
+    String body = invokeHandResponse(http, HttpURLConnection.HTTP_OK, response);
 
-    doReturn(false).when(meta).isUrlInField();
-    doReturn("body").when(meta).getFieldName();
-
-    doReturn(false).when(log).isDetailed();
-
-    doCallRealMethod().when(http).callHttpService(any(IRowMeta.class), any(Object[].class));
-    doReturn(HttpURLConnection.HTTP_OK)
-        .when(http)
-        .requestStatusCode(any(CloseableHttpResponse.class));
-    doReturn(new Header[0]).when(http).searchForHeaders(any(CloseableHttpResponse.class));
+    assertEquals(payload, body);
+    assertEquals(
+        (long) payload.getBytes(StandardCharsets.UTF_8).length, getLongField(http, "dataVolumeIn"));
   }
 
-  @BeforeClass
-  public static void setUpStaticMocks() {
-    mockedHttpClientManager = mockStatic(HttpClientManager.class);
-  }
-
-  @AfterClass
-  public static void tearDownStaticMocks() {
-    mockedHttpClientManager.close();
-  }
-
-  @Ignore("This test needs to be reviewed")
   @Test
-  public void callHttpServiceWithUTF8Encoding() throws Exception {
-    doReturn("UTF-8").when(meta).getEncoding();
-    assertEquals(DATA, http.callHttpService(rmi, new Object[] {0})[0]);
+  void handResponseReturnsEmptyStringForNoContent() throws Exception {
+    Http http = newTransform(Const.UTF_8);
+    CloseableHttpResponse response = mock(CloseableHttpResponse.class);
+
+    String body = invokeHandResponse(http, HttpURLConnection.HTTP_NO_CONTENT, response);
+
+    assertEquals("", body);
   }
 
-  @Ignore("This test needs to be reviewed")
   @Test
-  public void callHttpServiceWithoutEncoding() throws Exception {
-    doReturn(null).when(meta).getEncoding();
-    assertNotEquals(DATA, http.callHttpService(rmi, new Object[] {0})[0]);
+  void handResponseThrowsForUnauthorizedStatus() {
+    Http http = newTransform(Const.UTF_8);
+    CloseableHttpResponse response = mock(CloseableHttpResponse.class);
+
+    assertThrows(
+        HopTransformException.class,
+        () -> invokeHandResponse(http, HttpURLConnection.HTTP_UNAUTHORIZED, response));
+  }
+
+  private static String invokeHandResponse(
+      Http http, int statusCode, CloseableHttpResponse response) throws Exception {
+    Method method =
+        http.getClass().getDeclaredMethod("handResponse", int.class, CloseableHttpResponse.class);
+    method.setAccessible(true);
+    try {
+      return (String) method.invoke(http, statusCode, response);
+    } catch (InvocationTargetException e) {
+      if (e.getCause() instanceof Exception exception) {
+        throw exception;
+      }
+      throw e;
+    }
+  }
+
+  private static String invokeExtractHeaderString(Header[] headers) throws Exception {
+    Method method = Http.class.getDeclaredMethod("extractHeaderString", Header[].class);
+    method.setAccessible(true);
+    return (String) method.invoke(null, (Object) headers);
+  }
+
+  private static Long getLongField(Object target, String fieldName) throws Exception {
+    Field field = BaseTransform.class.getDeclaredField(fieldName);
+    field.setAccessible(true);
+    return (Long) field.get(target);
   }
 }

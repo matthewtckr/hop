@@ -17,6 +17,10 @@
 
 package org.apache.hop.core.logging;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -25,63 +29,50 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.apache.hop.core.util.Utils;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
-@Ignore("This test needs to be reviewed")
-public class LogChannelTest {
-
+class LogChannelTest {
   private MockedStatic<Utils> mockedUtils;
-
   private MockedStatic<HopLogStore> mockedHopLogStore;
-
   private MockedStatic<LoggingRegistry> mockedLoggingRegistry;
-
   private MockedStatic<DefaultLogLevel> mockedDefaultLogLevel;
 
   private LogChannel logChannel;
-  private final String logChannelSubject = "pdi";
-  private final String channelId = "1234-5678-abcd-efgh";
 
   private LogLevel logLevel;
   private ILogMessage logMsgInterface;
   private LogChannelFileWriterBuffer logChFileWriterBuffer;
 
-  @Before
-  public void setUp() {
-    LogLevel logLevelStatic = Mockito.mock(LogLevel.class);
-    mockedDefaultLogLevel.when(DefaultLogLevel::getLogLevel).thenReturn(LogLevel.BASIC);
+  @BeforeEach
+  void setUp() {
+    mockedUtils = Mockito.mockStatic(Utils.class);
+    mockedHopLogStore = Mockito.mockStatic(HopLogStore.class);
+    mockedLoggingRegistry = Mockito.mockStatic(LoggingRegistry.class);
+    mockedDefaultLogLevel = Mockito.mockStatic(DefaultLogLevel.class);
 
     logChFileWriterBuffer = mock(LogChannelFileWriterBuffer.class);
 
     LoggingRegistry regInstance = mock(LoggingRegistry.class);
-    Mockito.when(regInstance.registerLoggingSource(logChannelSubject)).thenReturn(channelId);
-    Mockito.when(regInstance.getLogChannelFileWriterBuffer(channelId))
-        .thenReturn(logChFileWriterBuffer);
+    String logChannelSubject = "pdi";
+    String channelId = "1234-5678-abcd-efgh";
+    when(regInstance.registerLoggingSource(logChannelSubject)).thenReturn(channelId);
+    when(regInstance.getLogChannelFileWriterBuffer(channelId)).thenReturn(logChFileWriterBuffer);
     mockedLoggingRegistry.when(LoggingRegistry::getInstance).thenReturn(regInstance);
 
     logLevel = Mockito.mock(LogLevel.class);
 
     logMsgInterface = mock(ILogMessage.class);
-    Mockito.when(logMsgInterface.getLevel()).thenReturn(logLevel);
+    when(logMsgInterface.getLevel()).thenReturn(logLevel);
 
     logChannel = new LogChannel(logChannelSubject);
   }
 
-  @Before
-  public void setUpStaticMocks() {
-    mockedUtils = Mockito.mockStatic(Utils.class);
-    mockedHopLogStore = Mockito.mockStatic(HopLogStore.class);
-    mockedLoggingRegistry = Mockito.mockStatic(LoggingRegistry.class);
-    mockedDefaultLogLevel = Mockito.mockStatic(DefaultLogLevel.class);
-  }
-
-  @After
-  public void tearDownStaticMocks() {
+  @AfterEach
+  void tearDownStaticMocks() {
     mockedDefaultLogLevel.closeOnDemand();
     mockedLoggingRegistry.closeOnDemand();
     mockedHopLogStore.closeOnDemand();
@@ -89,8 +80,9 @@ public class LogChannelTest {
   }
 
   @Test
-  public void testPrintlnWithNullLogChannelFileWriterBuffer() {
+  void testPrintlnWithNullLogChannelFileWriterBuffer() {
     when(logLevel.isVisible(any(LogLevel.class))).thenReturn(true);
+    logChannel.setFilter("");
 
     LoggingBuffer loggingBuffer = mock(LoggingBuffer.class);
     mockedHopLogStore.when(HopLogStore::getAppender).thenReturn(loggingBuffer);
@@ -101,14 +93,14 @@ public class LogChannelTest {
   }
 
   @Test
-  public void testPrintlnLogNotVisible() {
+  void testPrintlnLogNotVisible() {
     when(logLevel.isVisible(any(LogLevel.class))).thenReturn(false);
     logChannel.println(logMsgInterface, LogLevel.BASIC);
     verify(logChFileWriterBuffer, times(0)).addEvent(any(HopLoggingEvent.class));
   }
 
   @Test
-  public void testPrintMessageFiltered() {
+  void testPrintMessageFiltered() {
     LogLevel logLevelFil = Mockito.mock(LogLevel.class);
     when(logLevelFil.isError()).thenReturn(false);
 
@@ -121,5 +113,28 @@ public class LogChannelTest {
     logChannel.setFilter("b");
     logChannel.println(logMsgInterfaceFil, LogLevel.BASIC);
     verify(logChFileWriterBuffer, times(0)).addEvent(any(HopLoggingEvent.class));
+  }
+
+  @Test
+  void testPrintlnWithThrowableBumpsLevelPreRendersTraceAndReleasesThrowable() {
+    LoggingBuffer loggingBuffer = mock(LoggingBuffer.class);
+    mockedHopLogStore.when(HopLogStore::getAppender).thenReturn(loggingBuffer);
+    logChannel.setFilter("");
+
+    LogMessage message = new LogMessage("Boom", "1234-5678-abcd-efgh", LogLevel.BASIC);
+    IllegalStateException failure = new IllegalStateException("kaboom");
+
+    logChannel.println(message, failure, LogLevel.ERROR);
+
+    // Surfaced at ERROR level so error scanners/counters still detect it.
+    assertEquals(LogLevel.ERROR, message.getLevel());
+    // Live throwable released so the buffered event does not retain the exception object graph.
+    assertNull(message.getThrowable());
+    // Pre-rendered trace survives for text/buffer consumers (console, file, GUI log browser).
+    assertNotNull(message.getStackTrace());
+    assertTrue(message.getStackTrace().contains("IllegalStateException"));
+    assertTrue(message.getStackTrace().contains("kaboom"));
+    // A single combined event is emitted instead of the legacy two-event path.
+    verify(loggingBuffer, times(1)).addLogggingEvent(any(HopLoggingEvent.class));
   }
 }

@@ -17,18 +17,18 @@
 
 package org.apache.hop.www;
 
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.Serial;
 import java.util.UUID;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.annotations.HopServerServlet;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.logging.LogChannelFileWriter;
-import org.apache.hop.core.logging.LoggingObjectType;
 import org.apache.hop.core.logging.SimpleLoggingObject;
 import org.apache.hop.core.util.FileUtil;
 import org.apache.hop.core.vfs.HopVfs;
@@ -41,9 +41,15 @@ import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.engine.IPipelineEngine;
 import org.apache.hop.pipeline.engine.PipelineEngineFactory;
 
-@HopServerServlet(id = "addPipeline", name = "Add a pipeline for execution")
+/**
+ * @deprecated Use {@link RegisterPipelineServlet} ({@code /hop/registerPipeline}) instead. This
+ *     endpoint is no longer called by the remote pipeline engine and will be removed in a future
+ *     release.
+ */
+@Deprecated(since = "2.18.0")
+@HopServerServlet(id = "addPipeline", name = "Add a pipeline for execution (deprecated)")
 public class AddPipelineServlet extends BaseHttpServlet implements IHopServerPlugin {
-  private static final long serialVersionUID = -6850701762586992604L;
+  @Serial private static final long serialVersionUID = -6850701762586992604L;
 
   public static final String CONTEXT_PATH = "/hop/addPipeline";
 
@@ -59,6 +65,9 @@ public class AddPipelineServlet extends BaseHttpServlet implements IHopServerPlu
     if (isJettyMode() && !request.getRequestURI().startsWith(CONTEXT_PATH)) {
       return;
     }
+    if (refuseIfShuttingDown(response)) {
+      return;
+    }
 
     if (log.isDebug()) {
       logDebug("Addition of pipeline requested");
@@ -66,8 +75,14 @@ public class AddPipelineServlet extends BaseHttpServlet implements IHopServerPlu
 
     boolean useXML = "Y".equalsIgnoreCase(request.getParameter("xml"));
 
-    PrintWriter out = response.getWriter();
-    BufferedReader in = request.getReader();
+    PrintWriter out = getSafeWriter(response);
+    if (out == null) {
+      return;
+    }
+    BufferedReader in = getSafeReader(request, response);
+    if (in == null) {
+      return;
+    }
     if (log.isDetailed()) {
       logDetailed("Encoding: " + request.getCharacterEncoding());
     }
@@ -107,9 +122,8 @@ public class AddPipelineServlet extends BaseHttpServlet implements IHopServerPlu
 
       String serverObjectId = UUID.randomUUID().toString();
       SimpleLoggingObject servletLoggingObject =
-          new SimpleLoggingObject(CONTEXT_PATH, LoggingObjectType.HOP_SERVER, null);
-      servletLoggingObject.setContainerObjectId(serverObjectId);
-      servletLoggingObject.setLogLevel(pipelineExecutionConfiguration.getLogLevel());
+          getServletLogging(
+              CONTEXT_PATH, serverObjectId, pipelineExecutionConfiguration.getLogLevel());
 
       IHopMetadataProvider metadataProvider =
           new MultiMetadataProvider(

@@ -40,7 +40,8 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     image = "creditcardvalidator.svg",
     name = "i18n::CreditCardValidator.Name",
     description = "i18n::CreditCardValidator.Description",
-    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Utility",
+    categoryDescription =
+        "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Validation",
     keywords = "i18n::CreditCardValidatorMeta.keyword",
     documentationUrl = "/pipeline/transforms/creditcardvalidator.html")
 public class CreditCardValidatorMeta
@@ -66,19 +67,6 @@ public class CreditCardValidatorMeta
 
   public CreditCardValidatorMeta() {
     super(); // allocate BaseTransformMeta
-  }
-
-  public CreditCardValidatorMeta(CreditCardValidatorMeta m) {
-    this.fieldName = m.fieldName;
-    this.cardType = m.cardType;
-    this.notValidMessage = m.notValidMessage;
-    this.resultFieldName = m.resultFieldName;
-    this.onlyDigits = m.onlyDigits;
-  }
-
-  @Override
-  public CreditCardValidatorMeta clone() {
-    return new CreditCardValidatorMeta(this);
   }
 
   @Override

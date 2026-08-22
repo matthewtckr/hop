@@ -30,7 +30,9 @@ import org.apache.hop.core.plugins.IPlugin;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
 import org.apache.hop.pipeline.PipelineMeta;
+import org.apache.hop.ui.hopgui.PaletteEngineFilter;
 import org.apache.hop.ui.hopgui.context.BaseGuiContextHandler;
+import org.apache.hop.ui.hopgui.context.GuiActionFavorites;
 import org.apache.hop.ui.hopgui.context.IGuiContextHandler;
 import org.apache.hop.ui.hopgui.file.pipeline.HopGuiPipelineGraph;
 
@@ -75,39 +77,57 @@ public class HopGuiPipelineContext extends BaseGuiContextHandler implements IGui
       }
     }
 
-    // Also add all the transform creation actions...
+    // Also add all the transform creation actions, optionally filtered by the user-selected
+    // design engine (UNSUPPORTED transforms are hidden; SUPPORTED and UNKNOWN stay visible).
     //
+    PaletteEngineFilter filter = PaletteEngineFilter.forPipelineDesign();
     PluginRegistry registry = PluginRegistry.getInstance();
     List<IPlugin> transformPlugins = registry.getPlugins(TransformPluginType.class);
     for (IPlugin transformPlugin : transformPlugins) {
+      if (!filter.isPluginAllowed(transformPlugin)) {
+        continue;
+      }
+      String pluginId = transformPlugin.getIds()[0];
+      boolean favorite = GuiActionFavorites.isFavorite(GuiActionFavorites.Kind.TRANSFORM, pluginId);
       GuiAction createTransformAction =
           new GuiAction(
-              "pipeline-graph-create-transform-" + transformPlugin.getIds()[0],
+              GuiActionFavorites.createId(GuiActionFavorites.Kind.TRANSFORM, pluginId),
               GuiActionType.Create,
               transformPlugin.getName(),
-              transformPlugin.getDescription(),
+              GuiActionFavorites.tooltipWithFavoriteHint(
+                  transformPlugin.getDescription(), favorite),
               transformPlugin.getImageFile(),
               (shiftClicked, controlClicked, t) ->
                   pipelineGraph.pipelineTransformDelegate.newTransform(
                       pipelineMeta,
-                      transformPlugin.getIds()[0],
+                      pluginId,
                       transformPlugin.getName(),
                       transformPlugin.getDescription(),
                       controlClicked,
                       true,
                       click));
       createTransformAction.getKeywords().addAll(Arrays.asList(transformPlugin.getKeywords()));
+      // Also search on the English name/category/keywords for non-English locales (issue #2633)
+      createTransformAction
+          .getKeywords()
+          .addAll(Arrays.asList(transformPlugin.getEnglishKeywords()));
       createTransformAction.setCategory(transformPlugin.getCategory());
       createTransformAction.setCategoryOrder(
           "9999_" + transformPlugin.getCategory()); // sort alphabetically
       try {
         createTransformAction.setClassLoader(registry.getClassLoader(transformPlugin));
       } catch (HopPluginException e) {
-        LogChannel.UI.logError(
-            "Unable to get classloader for transform plugin " + transformPlugin.getIds()[0], e);
+        LogChannel.UI.logError("Unable to get classloader for transform plugin " + pluginId, e);
       }
       createTransformAction.getKeywords().add(transformPlugin.getCategory());
       actions.add(createTransformAction);
+
+      // Duplicate under Favorites when the user marked this transform as favorite (issue #3526)
+      if (favorite) {
+        actions.add(
+            GuiActionFavorites.createFavoriteAction(
+                createTransformAction, GuiActionFavorites.Kind.TRANSFORM, pluginId));
+      }
     }
 
     return actions;

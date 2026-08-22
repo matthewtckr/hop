@@ -22,12 +22,14 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import lombok.Getter;
 import lombok.Setter;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.exception.HopDatabaseException;
 import org.apache.hop.core.gui.plugin.GuiElementType;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
@@ -41,7 +43,8 @@ import org.apache.hop.metadata.api.HopMetadataProperty;
 @DatabaseMetaPlugin(
     type = "SINGLESTORE",
     typeDescription = "SingleStore (MemSQL)",
-    documentationUrl = "/database/databases/singlestore.html")
+    documentationUrl = "/database/databases/singlestore.html",
+    classLoaderGroup = "singlestore-db")
 @GuiPlugin(id = "GUI-SingleStoreDatabaseMeta")
 public class SingleStoreDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   public static final String CONST_ALTER_TABLE = "ALTER TABLE ";
@@ -89,6 +92,19 @@ public class SingleStoreDatabaseMeta extends BaseDatabaseMeta implements IDataba
   @Override
   public String getDriverClass() {
     return "com.singlestore.jdbc.Driver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("com.singlestore:singlestore-jdbc-client")
+        .defaultVersion("1.2.11")
+        .licenseCategory("X")
+        .licenseName("LGPL-2.1")
+        .licenseUrl("https://github.com/memsql/S2-JDBC-Connector/blob/main/LICENSE")
+        .vendor("SingleStore")
+        .vendorUrl("https://docs.singlestore.com/")
+        .build();
   }
 
   @Override
@@ -199,7 +215,8 @@ public class SingleStoreDatabaseMeta extends BaseDatabaseMeta implements IDataba
     return CONST_ALTER_TABLE
         + tableName
         + " ADD COLUMN "
-        + getFieldDefinition(v, tk, pk, useAutoIncrement, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoIncrement, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -225,14 +242,6 @@ public class SingleStoreDatabaseMeta extends BaseDatabaseMeta implements IDataba
   }
 
   /**
-   * @return true if the database supports a boolean, bit, logical
-   */
-  @Override
-  public boolean isSupportsBooleanDataType() {
-    return true;
-  }
-
-  /**
    * Generates the SQL statement to modify a column in the specified table
    *
    * @param tableName The table to add
@@ -254,7 +263,8 @@ public class SingleStoreDatabaseMeta extends BaseDatabaseMeta implements IDataba
     return "ALTER TABLE "
         + tableName
         + " MODIFY "
-        + getFieldDefinition(v, tk, pk, useAutoIncrement, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoIncrement, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -350,7 +360,11 @@ public class SingleStoreDatabaseMeta extends BaseDatabaseMeta implements IDataba
         }
         break;
       case IValueMeta.TYPE_BINARY:
-        fieldClause += "VARBINARY";
+        if (length > 0) {
+          fieldClause += "BINARY(" + length + ")";
+        } else {
+          fieldClause += "VARBINARY";
+        }
         break;
       default:
         fieldClause += " UNKNOWN";
@@ -735,6 +749,8 @@ public class SingleStoreDatabaseMeta extends BaseDatabaseMeta implements IDataba
   @Override
   public void addDefaultOptions() {
     addExtraOption(getPluginId(), "defaultFetchSize", "500");
+    setSupportsTimestampDataType(true);
+    setSupportsBooleanDataType(true);
   }
 
   @Override
@@ -745,10 +761,5 @@ public class SingleStoreDatabaseMeta extends BaseDatabaseMeta implements IDataba
   @Override
   public int getMaxTextFieldLength() {
     return Integer.MAX_VALUE;
-  }
-
-  @Override
-  public boolean isSupportsTimestampDataType() {
-    return true;
   }
 }

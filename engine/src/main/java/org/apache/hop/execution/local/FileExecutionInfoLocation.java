@@ -29,7 +29,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.commons.vfs2.FileType;
 import org.apache.commons.vfs2.FileTypeSelector;
@@ -41,6 +41,7 @@ import org.apache.hop.core.gui.plugin.GuiWidgetElement;
 import org.apache.hop.core.json.HopJson;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.vfs.HopVfs;
+import org.apache.hop.execution.DefaultExecutionSelector;
 import org.apache.hop.execution.Execution;
 import org.apache.hop.execution.ExecutionData;
 import org.apache.hop.execution.ExecutionInfoLocation;
@@ -48,6 +49,7 @@ import org.apache.hop.execution.ExecutionState;
 import org.apache.hop.execution.ExecutionType;
 import org.apache.hop.execution.IExecutionInfoLocation;
 import org.apache.hop.execution.IExecutionMatcher;
+import org.apache.hop.execution.IExecutionSelector;
 import org.apache.hop.execution.plugin.ExecutionInfoLocationPlugin;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
@@ -80,20 +82,34 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
   @HopMetadataProperty
   protected String rootFolder;
 
+  @GuiWidgetElement(
+      id = "createParentFolder",
+      order = "015",
+      parentId = ExecutionInfoLocation.GUI_PLUGIN_ELEMENT_PARENT_ID,
+      type = GuiElementType.CHECKBOX,
+      toolTip = "i18n::LocalExecutionInfoLocation.CreateParentFolder.Tooltip",
+      label = "i18n::LocalExecutionInfoLocation.CreateParentFolder.Label")
+  @HopMetadataProperty
+  protected boolean createParentFolder;
+
   private IVariables variables;
 
-  public FileExecutionInfoLocation() {}
+  public FileExecutionInfoLocation() {
+    this.createParentFolder = true;
+  }
 
   public FileExecutionInfoLocation(String rootFolder) {
     this.pluginId = "local-folder";
     this.pluginName = "File location";
     this.rootFolder = rootFolder;
+    this.createParentFolder = true;
   }
 
   public FileExecutionInfoLocation(FileExecutionInfoLocation location) {
     this.pluginId = location.pluginId;
     this.pluginName = location.pluginName;
     this.rootFolder = location.rootFolder;
+    this.createParentFolder = location.createParentFolder;
   }
 
   public FileExecutionInfoLocation clone() {
@@ -104,11 +120,28 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
   public void initialize(IVariables variables, IHopMetadataProvider metadataProvider)
       throws HopException {
     this.variables = variables;
+
+    if (createParentFolder && StringUtils.isNotEmpty(rootFolder)) {
+      String actualRootFolder = variables.resolve(rootFolder);
+      try {
+        FileObject folder = HopVfs.getFileObject(actualRootFolder, variables);
+        if (!folder.exists()) {
+          folder.createFolder();
+        }
+      } catch (Exception e) {
+        throw new HopException("Error creating root folder " + actualRootFolder, e);
+      }
+    }
   }
 
   @Override
   public synchronized void close() throws HopException {
     // Nothing to close
+  }
+
+  @Override
+  public void clearCaches() {
+    // Nothing to clear
   }
 
   @Override
@@ -129,11 +162,12 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
 
       // Create the folder(s) of the parent:
       //
-      HopVfs.getFileObject(registrationFileName).getParent().createFolder();
+      HopVfs.getFileObject(registrationFileName, variables).getParent().createFolder();
 
       // Write the execution information to disk...
       //
-      try (OutputStream outputStream = HopVfs.getOutputStream(registrationFileName, false)) {
+      try (OutputStream outputStream =
+          HopVfs.getOutputStream(registrationFileName, false, variables)) {
         ObjectMapper mapper = HopJson.newMapper();
         mapper.writerWithDefaultPrettyPrinter().writeValue(outputStream, execution);
       }
@@ -154,7 +188,7 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
 
       // Delete the folder and everything in it
       //
-      FileObject executionFolder = HopVfs.getFileObject(getSubFolder(executionId));
+      FileObject executionFolder = HopVfs.getFileObject(getSubFolder(executionId), variables);
       for (FileObject child : executionFolder.getChildren()) {
         child.delete();
       }
@@ -222,9 +256,9 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
 
       // Create the folder(s) of the parent if needed:
       //
-      HopVfs.getFileObject(updateFilename).getParent().createFolder();
+      HopVfs.getFileObject(updateFilename, variables).getParent().createFolder();
 
-      try (OutputStream outputStream = HopVfs.getOutputStream(updateFilename, false)) {
+      try (OutputStream outputStream = HopVfs.getOutputStream(updateFilename, false, variables)) {
         ObjectMapper mapper = HopJson.newMapper();
         mapper.writerWithDefaultPrettyPrinter().writeValue(outputStream, executionState);
       }
@@ -233,7 +267,7 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
       //
       if (saveLoggingToFile) {
         String logFilename = getLogFilename(executionState);
-        try (OutputStream outputStream = HopVfs.getOutputStream(logFilename, false)) {
+        try (OutputStream outputStream = HopVfs.getOutputStream(logFilename, false, variables)) {
           outputStream.write(loggingText.getBytes(StandardCharsets.UTF_8));
         }
       }
@@ -252,10 +286,10 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
       throws HopException {
     try {
       String updateFilename = getUpdateFilename(executionId);
-      if (!HopVfs.fileExists(updateFilename)) {
+      if (!HopVfs.fileExists(updateFilename, variables)) {
         return null;
       }
-      try (InputStream inputStream = HopVfs.getInputStream(updateFilename)) {
+      try (InputStream inputStream = HopVfs.getInputStream(updateFilename, variables)) {
         ObjectMapper mapper = HopJson.newMapper();
         ExecutionState executionState = mapper.readValue(inputStream, ExecutionState.class);
 
@@ -295,13 +329,13 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
     try {
       // If there's a separate log file we'll read everything from there.
       String logFilename = getLogFilename(executionState);
-      if (HopVfs.fileExists(logFilename)) {
+      if (HopVfs.fileExists(logFilename, variables)) {
         // Only read the first part of the file, if a size limit was set.
         //
         try (Reader reader =
             new BufferedReader(
                 new InputStreamReader(
-                    HopVfs.getInputStream(logFilename), StandardCharsets.UTF_8))) {
+                    HopVfs.getInputStream(logFilename, variables), StandardCharsets.UTF_8))) {
           StringBuilder log = new StringBuilder();
           int c;
           while ((c = reader.read()) != -1 && (sizeLimit <= 0 || sizeLimit > log.length())) {
@@ -340,7 +374,7 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
       //
       String dataFilename = getDataFilename(data);
 
-      try (OutputStream outputStream = HopVfs.getOutputStream(dataFilename, false)) {
+      try (OutputStream outputStream = HopVfs.getOutputStream(dataFilename, false, variables)) {
         ObjectMapper mapper = HopJson.newMapper();
         mapper.writerWithDefaultPrettyPrinter().writeValue(outputStream, data);
       }
@@ -359,7 +393,7 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
 
       List<FileObject> subFolders = new ArrayList<>();
 
-      FileObject folder = HopVfs.getFileObject(variables.resolve(rootFolder));
+      FileObject folder = HopVfs.getFileObject(variables.resolve(rootFolder), variables);
       if (!folder.exists()) {
         return Collections.emptyList();
       }
@@ -426,7 +460,7 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
       // For a Beam pipeline to find child transforms.
       //
       String suffix = CONST_DATA_JSON;
-      FileObject folderObject = HopVfs.getFileObject(getSubFolder(parentExecutionId));
+      FileObject folderObject = HopVfs.getFileObject(getSubFolder(parentExecutionId), variables);
 
       // In this folder we have a number of files ending with CONST_DATA_JSON
       for (FileObject child : folderObject.getChildren()) {
@@ -456,7 +490,7 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
     try {
       // Look in the pipeline executions
       //
-      try (FileObject folder = HopVfs.getFileObject(getSubFolder(executionId))) {
+      try (FileObject folder = HopVfs.getFileObject(getSubFolder(executionId), variables)) {
         if (folder == null || !folder.exists()) {
           // No Execution info to be found
           return null;
@@ -492,6 +526,11 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
       throw new HopException(
           "Error finding child executions for parent ID " + parentExecutionId, e);
     }
+  }
+
+  @Override
+  public List<String> findExecutionIDs(IExecutionSelector pruner) throws HopException {
+    return DefaultExecutionSelector.findExecutionIDs(this, pruner);
   }
 
   @Override
@@ -549,7 +588,7 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
   public synchronized ExecutionData getExecutionData(String parentExecutionId, String executionId)
       throws HopException {
     try {
-      try (FileObject folder = HopVfs.getFileObject(getSubFolder(parentExecutionId))) {
+      try (FileObject folder = HopVfs.getFileObject(getSubFolder(parentExecutionId), variables)) {
         if (!folder.exists()) {
           return null;
         }
@@ -633,6 +672,14 @@ public class FileExecutionInfoLocation implements IExecutionInfoLocation {
 
   public void setRootFolder(String rootFolder) {
     this.rootFolder = rootFolder;
+  }
+
+  public boolean isCreateParentFolder() {
+    return createParentFolder;
+  }
+
+  public void setCreateParentFolder(boolean createParentFolder) {
+    this.createParentFolder = createParentFolder;
   }
 
   private static class ExecutionIdAndDate {

@@ -35,6 +35,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Savepoint;
 import java.sql.Statement;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -42,10 +43,13 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
-import org.apache.commons.lang.StringUtils;
+import lombok.Getter;
+import lombok.Setter;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Counter;
@@ -56,10 +60,15 @@ import org.apache.hop.core.IProgressMonitor;
 import org.apache.hop.core.Result;
 import org.apache.hop.core.RowMetaAndData;
 import org.apache.hop.core.database.map.DatabaseConnectionMap;
+import org.apache.hop.core.database.types.DatabaseColumn;
+import org.apache.hop.core.database.types.DatabaseTypeMapper;
+import org.apache.hop.core.database.types.IValueBinding;
+import org.apache.hop.core.database.types.ServerInfo;
 import org.apache.hop.core.encryption.Encr;
 import org.apache.hop.core.exception.HopDatabaseBatchException;
 import org.apache.hop.core.exception.HopDatabaseException;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.exception.HopValueException;
 import org.apache.hop.core.extension.ExtensionPointHandler;
 import org.apache.hop.core.extension.HopExtensionPoint;
@@ -88,6 +97,7 @@ import org.apache.hop.core.row.value.ValueMetaNone;
 import org.apache.hop.core.row.value.ValueMetaNumber;
 import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.core.row.value.ValueMetaTimestamp;
+import org.apache.hop.core.util.EnvUtil;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
@@ -103,7 +113,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
 
   private static final Map<String, Set<String>> registeredDrivers = new HashMap<>();
 
-  private final DatabaseMeta databaseMeta;
+  @Getter private final DatabaseMeta databaseMeta;
 
   private static final String DATA_SERVICES_PLUGIN_ID = "HopThin";
   private static final String CONST_INOUT = "INOUT";
@@ -118,15 +128,23 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
   private static final String CONST_ERROR_UPDATING_BATCH = "Error updating batch";
 
   private int rowlimit;
+
+  /**
+   * When positive, applied to statements created in {@link #openQuery(String, IRowMeta, Object[],
+   * int, boolean)} via {@link Statement#setQueryTimeout(int)} (whole seconds). Zero leaves the JDBC
+   * driver default (typically unlimited). Intended for short-lived GUI preview connections.
+   */
+  private int statementQueryTimeoutSeconds;
+
   private int commitsize;
 
-  private Connection connection;
+  @Getter @Setter private Connection connection;
 
   private Statement selStmt;
   private PreparedStatement pstmt;
-  private PreparedStatement prepStatementLookup;
-  private PreparedStatement prepStatementUpdate;
-  private PreparedStatement prepStatementInsert;
+  @Getter private PreparedStatement prepStatementLookup;
+  @Getter private PreparedStatement prepStatementUpdate;
+  @Getter private PreparedStatement prepStatementInsert;
   private PreparedStatement pstmtSeq;
   private CallableStatement cstmt;
 
@@ -134,31 +152,38 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
 
   private IRowMeta rowMeta;
 
+  /**
+   * The result row metadata derived by {@link #openQuery(PreparedStatement, IRowMeta, Object[])},
+   * cached together with the prepared statement it was derived from. A prepared statement always
+   * returns the same result layout, so transforms which re-execute the same statement once per
+   * incoming row (Database Join) do not have to rebuild it for every single row.
+   */
+  private PreparedStatement openQueryStatement;
+
+  private IRowMeta openQueryRowMeta;
+
   private int written;
 
   private final ILogChannel log;
   private final ILoggingObject parentLoggingObject;
   private static final String TABLES_META_DATA_TABLE_NAME = "TABLE_NAME";
 
-  /**
-   * Number of times a connection was opened using this object. Only used in the context of a
-   * database connection map
-   */
-  private volatile int opened;
+  @Getter private volatile int opened;
 
-  /** The copy is equal to opened at the time of creation. */
-  private volatile int copy;
+  @Getter private volatile int copy;
 
-  private String connectionGroup;
-  private String partitionId;
+  @Getter @Setter private String connectionGroup;
+  @Getter @Setter private String partitionId;
 
   private IVariables variables = new Variables();
 
   private LogLevel logLevel = DefaultLogLevel.getLogLevel();
 
-  private String containerObjectId;
+  @Setter private String containerObjectId;
 
-  private int nrExecutedCommits;
+  @Getter @Setter private int nrExecutedCommits;
+
+  private SshTunnelManager sshTunnelManager;
 
   private static final List<IValueMeta> valueMetaPluginClasses;
 
@@ -169,9 +194,10 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
           valueMetaPluginClasses,
           (o1, o2) ->
               // Reverse the sort list
-              (Integer.valueOf(o1.getType()).compareTo(Integer.valueOf(o2.getType()))) * -1);
+              (Integer.valueOf(o1.getType()).compareTo(o2.getType())) * -1);
     } catch (Exception e) {
-      throw new RuntimeException("Unable to get list of instantiated value meta plugin classes", e);
+      throw new HopRuntimeException(
+          "Unable to get list of instantiated value meta plugin classes", e);
     }
   }
 
@@ -199,6 +225,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
     dbmd = null;
 
     rowlimit = 0;
+    statementQueryTimeoutSeconds = 0;
 
     written = 0;
 
@@ -208,7 +235,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       ExtensionPointHandler.callExtensionPoint(
           log, variables, HopExtensionPoint.DatabaseCreated.id, this);
     } catch (Exception e) {
-      throw new RuntimeException(
+      throw new HopRuntimeException(
           "Error calling extension point while creating database connection", e);
     }
 
@@ -234,23 +261,6 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
   }
 
   /**
-   * Allows for the injection of a "life" connection, generated by a piece of software outside of
-   * Hop.
-   *
-   * @param connection
-   */
-  public void setConnection(Connection connection) {
-    this.connection = connection;
-  }
-
-  /**
-   * @return Returns the connection.
-   */
-  public Connection getConnection() {
-    return connection;
-  }
-
-  /**
    * Set the maximum number of records to retrieve from a query.
    *
    * @param rows
@@ -260,24 +270,20 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
   }
 
   /**
-   * @return Returns the prepStatementInsert.
+   * Sets the JDBC {@link Statement#setQueryTimeout(int)} (seconds) for statements opened by {@link
+   * #openQuery(String, IRowMeta, Object[], int, boolean)} until {@link #disconnect()}. Use {@code
+   * 0} to use the driver default.
+   *
+   * @param seconds query timeout in whole seconds; values {@code < 0} are treated as {@code 0}
    */
-  public PreparedStatement getPrepStatementInsert() {
-    return prepStatementInsert;
+  public void setStatementQueryTimeoutSeconds(int seconds) {
+    this.statementQueryTimeoutSeconds = Math.max(0, seconds);
   }
 
-  /**
-   * @return Returns the prepStatementLookup.
-   */
-  public PreparedStatement getPrepStatementLookup() {
-    return prepStatementLookup;
-  }
-
-  /**
-   * @return Returns the prepStatementUpdate.
-   */
-  public PreparedStatement getPrepStatementUpdate() {
-    return prepStatementUpdate;
+  private void applyStatementQueryTimeout(Statement statement) throws SQLException {
+    if (statement != null && statementQueryTimeoutSeconds > 0) {
+      statement.setQueryTimeout(statementQueryTimeoutSeconds);
+    }
   }
 
   /**
@@ -396,8 +402,24 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
         PluginRegistry.getInstance()
             .getPlugin(DatabasePluginType.class, databaseMeta.getIDatabase());
 
+    if (log.isDetailed()) {
+      log.logDetailed("Loading JDBC driver class '" + classname + "'");
+    }
+
     try {
       synchronized (DriverManager.class) {
+        // Force the JDBC 4 driver ServiceLoader scan to run here, while we hold the lock.
+        //
+        // DriverManager only performs that scan once, lazily, the first time a connection is
+        // opened. It instantiates every java.sql.Driver on the classpath, not just the one we
+        // need. If that happens in DriverManager.getConnection() below, it runs unsynchronized
+        // with the driver class loading of another transform's init thread: both threads then
+        // initialize the same driver class hierarchy from opposite ends and deadlock on the
+        // class initialization monitors, hanging the pipeline. Doing it here makes the scan
+        // happen exactly once, single threaded, before any driver class can be initialized by
+        // another route.
+        DriverManager.getDrivers();
+
         ClassLoader classLoader = PluginRegistry.getInstance().getClassLoader(plugin);
         Class<?> driverClass = classLoader.loadClass(classname);
 
@@ -435,7 +457,15 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
     }
 
     try {
-      String url = resolve(databaseMeta.getURL(this));
+      // Open SSH tunnel if configured
+      String url;
+      if (databaseMeta.isSshTunnelEnabled() && !Utils.isEmpty(databaseMeta.getSshTunnelHost())) {
+        sshTunnelManager = new SshTunnelManager();
+        int localPort = sshTunnelManager.openTunnel(this, databaseMeta, log);
+        url = buildSshTunnelUrl(localPort);
+      } else {
+        url = resolve(databaseMeta.getURL(this));
+      }
       log.logDebug("Connecting to database using URL: " + url);
 
       String username = resolve(databaseMeta.getUsername());
@@ -444,12 +474,22 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
 
       Properties properties = databaseMeta.getConnectionProperties(this);
 
+      int connectionTimeout = applyLoginTimeout();
+
+      if (log.isDetailed()) {
+        log.logDetailed(
+            "Opening JDBC connection..."
+                + (connectionTimeout > 0 ? " (login timeout " + connectionTimeout + "s)" : ""));
+      }
+
       if (databaseMeta.supportsOptionsInURL()) {
         if (!Utils.isEmpty(username) || !Utils.isEmpty(password)) {
           // Allow for empty username with given password, in this case username must be given with
           // one variables
           properties.put("user", Const.NVL(username, " "));
           properties.put("password", Const.NVL(password, ""));
+          // Deprecated path. Building the URL is the dialect's job; this is here only because a
+          // BaseDatabaseMeta subclass cannot resolve variables. It moves once it can.
           if (databaseMeta.getIDatabase().isMsSqlServerNativeVariant()) {
             // Handle MSSQL Instance name. Would rather this was handled in the dialect
             // but cannot (without refactor) get to variablespace for variable substitution from
@@ -474,9 +514,102 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
 
         connection = DriverManager.getConnection(url, properties);
       }
+
+      if (log.isDetailed()) {
+        log.logDetailed("JDBC connection opened successfully");
+      }
+
+      applyNetworkTimeout();
     } catch (Exception e) {
       throw new HopDatabaseException(
           "Error connecting to database: (using class " + classname + ")", e);
+    }
+  }
+
+  /**
+   * Builds the JDBC URL used to connect through an open SSH tunnel. The tunnel forwards a
+   * dynamically allocated local port to the remote database, so the URL always points at {@code
+   * localhost}.
+   *
+   * <p>When a manual JDBC URL is configured it is used as-is (it may reference {@code
+   * ${sshTunnel.localPort}} to inject the dynamically allocated port, for example inside a complex
+   * Oracle TCPS descriptor). Otherwise the standard URL is generated from the database dialect
+   * using {@code localhost} and the forwarded port. The port variable is resolved against a child
+   * variable space so it does not leak into the shared parent space.
+   *
+   * @param localPort the local port opened by the SSH tunnel
+   * @return the resolved JDBC URL pointing at the local end of the tunnel
+   * @throws HopDatabaseException if the standard URL cannot be generated
+   */
+  String buildSshTunnelUrl(int localPort) throws HopDatabaseException {
+    IVariables tunnelVariables = new Variables();
+    tunnelVariables.initializeFrom(this);
+    tunnelVariables.setVariable(
+        SshTunnelManager.VARIABLE_SSH_TUNNEL_LOCAL_PORT, String.valueOf(localPort));
+
+    String manualUrl = databaseMeta.getManualUrl();
+    if (!Utils.isEmpty(manualUrl)) {
+      // The manual URL points to the local end of the tunnel (localhost) and may reference
+      // ${sshTunnel.localPort} for the dynamically assigned port.
+      return tunnelVariables.resolve(manualUrl);
+    }
+
+    // Build the URL from the database dialect using the tunnel endpoint (localhost + forwarded
+    // port).
+    String tunnelUrl =
+        databaseMeta
+            .getIDatabase()
+            .getURL(
+                "localhost",
+                String.valueOf(localPort),
+                tunnelVariables.resolve(databaseMeta.getDatabaseName()));
+    return tunnelVariables.resolve(tunnelUrl);
+  }
+
+  /**
+   * Apply the default login/connection timeout ({@link Const#HOP_DATABASE_CONNECTION_TIMEOUT}, in
+   * seconds) via {@link DriverManager#setLoginTimeout(int)}. This is a JVM-wide setting that bounds
+   * how long the driver waits while establishing a connection; the default is 30 seconds and a
+   * value of 0 leaves the current default in place. The setting is advisory - some JDBC drivers
+   * ignore it in favor of their own connection options.
+   *
+   * @return the resolved connection timeout in seconds
+   */
+  int applyLoginTimeout() {
+    int connectionTimeout = Const.toInt(getVariable(Const.HOP_DATABASE_CONNECTION_TIMEOUT), 30);
+    if (connectionTimeout > 0) {
+      DriverManager.setLoginTimeout(connectionTimeout);
+    }
+    return connectionTimeout;
+  }
+
+  /**
+   * Apply the default network/socket timeout ({@link Const#HOP_DATABASE_SOCKET_TIMEOUT}, in
+   * seconds) to the freshly opened connection via {@link
+   * Connection#setNetworkTimeout(java.util.concurrent.Executor, int)}. This bounds reads on an
+   * already-established connection. A value of 0 (default) leaves it unbounded. Drivers that do not
+   * support the operation are ignored - an optional timeout must never fail the connection.
+   */
+  void applyNetworkTimeout() {
+    int socketTimeout = Const.toInt(getVariable(Const.HOP_DATABASE_SOCKET_TIMEOUT), 0);
+    if (socketTimeout <= 0 || connection == null) {
+      return;
+    }
+    try {
+      // Execute the driver's timeout callback inline; no extra thread pool to leak.
+      connection.setNetworkTimeout(command -> command.run(), socketTimeout * 1000);
+      if (log.isDetailed()) {
+        log.logDetailed(
+            "Applied network/socket timeout of " + socketTimeout + "s to the connection");
+      }
+    } catch (Exception e) {
+      if (log.isDetailed()) {
+        log.logDetailed(
+            "Unable to apply network/socket timeout ("
+                + socketTimeout
+                + "s); driver may not support it: "
+                + e.getMessage());
+      }
     }
   }
 
@@ -488,6 +621,8 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
 
   /** Disconnect from the database and close all open prepared statements. */
   public synchronized void disconnect() {
+    openQueryStatement = null;
+    openQueryRowMeta = null;
     if (connection == null) {
       return; // Nothing to do...
     }
@@ -587,6 +722,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
                 + hde.getMessage());
         log.logError(Const.getStackTracker(hde));
       }
+      statementQueryTimeoutSeconds = 0;
     }
   }
 
@@ -608,6 +744,14 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       }
     } catch (SQLException e) {
       throw new HopDatabaseException("Error disconnecting from database '" + this + "'", e);
+    } finally {
+      // Close SSH tunnel after JDBC connection is closed.
+      // This must be here (not in disconnect()) because grouped connections
+      // use closeConnectionOnly() directly and would otherwise leak tunnels.
+      if (sshTunnelManager != null) {
+        sshTunnelManager.closeTunnel(log);
+        sshTunnelManager = null;
+      }
     }
   }
 
@@ -620,6 +764,8 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
     // Canceling statements only if we're not streaming results on MySQL with
     // the v3 driver
     //
+    // Deprecated path. A driver quirk, not a column type: the dialect should answer whether
+    // cancelling is safe while streaming, rather than core naming the vendor.
     if (databaseMeta.isMySqlVariant()
         && databaseMeta.isStreamingResults()
         && getDatabaseMetaData().getDriverMajorVersion() == 3) {
@@ -827,11 +973,24 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
 
   public void closePreparedStatement(PreparedStatement ps) throws HopDatabaseException {
     if (ps != null) {
+      forgetOpenQueryRowMeta(ps);
       try {
         ps.close();
       } catch (SQLException e) {
         throw new HopDatabaseException("Error closing prepared statement", e);
       }
+    }
+  }
+
+  /**
+   * Drop the cached {@link #openQueryRowMeta} when the statement it was derived from is closed. A
+   * driver is free to hand out the same statement object again for different SQL afterwards, so the
+   * cached layout must not survive it.
+   */
+  private void forgetOpenQueryRowMeta(PreparedStatement ps) {
+    if (ps == openQueryStatement) {
+      openQueryStatement = null;
+      openQueryRowMeta = null;
     }
   }
 
@@ -907,7 +1066,22 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
 
   public void setValue(PreparedStatement ps, IValueMeta v, Object object, int pos)
       throws HopDatabaseException {
-
+    // Asked here rather than inside ValueMetaBase, so that a value type which handles its own
+    // writing still gets the binding its database declared.
+    IDatabase iDatabase = databaseMeta.getIDatabase();
+    IValueBinding binding = DatabaseTypeMapper.getBinding(iDatabase, v);
+    if (binding != null) {
+      try {
+        binding.write(iDatabase, v, ps, pos, object);
+        return;
+      } catch (UnsupportedOperationException e) {
+        // A binding declared for reading only. Writing is whatever it was before the binding
+        // existed, which is the value type's own handling below.
+      } catch (SQLException | HopValueException e) {
+        throw new HopDatabaseException(
+            "Unable to write value '" + v.getName() + "' to the prepared statement", e);
+      }
+    }
     v.setPreparedStatementValue(databaseMeta, ps, pos, object);
   }
 
@@ -1013,7 +1187,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       try {
         rs = pstmtSeq.executeQuery();
         if (rs.next()) {
-          retval = Long.valueOf(rs.getLong(1));
+          retval = rs.getLong(1);
         }
       } finally {
         if (rs != null) {
@@ -1541,12 +1715,14 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
         log.snap(Metrics.METRIC_DATABASE_PREPARE_SQL_STOP, databaseMeta.getName());
 
         log.snap(Metrics.METRIC_DATABASE_SQL_VALUES_START, databaseMeta.getName());
-        setValues(params, data); // set the dates etc!
+        setValues(params, data); // set the dates etc.
         log.snap(Metrics.METRIC_DATABASE_SQL_VALUES_STOP, databaseMeta.getName());
 
         if (canWeSetFetchSize(pstmt)) {
           int maxRows = pstmt.getMaxRows();
           int fs = Const.FETCH_SIZE <= maxRows ? maxRows : Const.FETCH_SIZE;
+          // Deprecated path. How large a fetch this driver tolerates belongs to the dialect,
+          // alongside isFetchSizeSupported.
           if (databaseMeta.isMySqlVariant()) {
             setMysqlFetchSize(pstmt, fs, maxRows);
           } else {
@@ -1560,6 +1736,8 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
           pstmt.setMaxRows(rowlimit);
         }
 
+        applyStatementQueryTimeout(pstmt);
+
         log.snap(Metrics.METRIC_DATABASE_EXECUTE_SQL_START, databaseMeta.getName());
         res = pstmt.executeQuery();
         log.snap(Metrics.METRIC_DATABASE_EXECUTE_SQL_STOP, databaseMeta.getName());
@@ -1570,6 +1748,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
         if (canWeSetFetchSize(selStmt)) {
           int fs =
               Const.FETCH_SIZE <= selStmt.getMaxRows() ? selStmt.getMaxRows() : Const.FETCH_SIZE;
+          // Deprecated path. The streaming fetch size a driver wants belongs to the dialect.
           if (databaseMeta.getIDatabase().isMySqlVariant() && databaseMeta.isStreamingResults()) {
             selStmt.setFetchSize(Integer.MIN_VALUE);
           } else {
@@ -1581,6 +1760,8 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
           selStmt.setMaxRows(rowlimit);
         }
 
+        applyStatementQueryTimeout(selStmt);
+
         log.snap(Metrics.METRIC_DATABASE_EXECUTE_SQL_START, databaseMeta.getName());
         res = selStmt.executeQuery(databaseMeta.stripCR(sql));
         log.snap(Metrics.METRIC_DATABASE_EXECUTE_SQL_STOP, databaseMeta.getName());
@@ -1591,6 +1772,8 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       // to get the length of a String field. So, on MySQL, we ingore the length
       // of Strings in result rows.
       //
+      // Deprecated path. Whether reported string lengths can be trusted is a driver property,
+      // so the dialect should say so rather than core recognising MySQL.
       rowMeta = getRowInfo(res.getMetaData(), databaseMeta.isMySqlVariant(), lazyConversion);
     } catch (SQLException ex) {
       throw new HopDatabaseException("An error occurred executing SQL: " + Const.CR + sql, ex);
@@ -1605,6 +1788,8 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
 
   private boolean canWeSetFetchSize(Statement statement) throws SQLException {
     return databaseMeta.isFetchSizeSupported()
+        // Deprecated path. Which drivers accept a fetch size is a capability, and the two named
+        // here should answer it themselves.
         && (statement.getMaxRows() > 0
             || databaseMeta.getIDatabase().isPostgresVariant()
             || (databaseMeta.isMySqlVariant() && databaseMeta.isStreamingResults()));
@@ -1626,6 +1811,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
         int maxRows = ps.getMaxRows();
         int fs = Const.FETCH_SIZE <= maxRows ? maxRows : Const.FETCH_SIZE;
         // mysql have some restriction on fetch size assignment
+        // Deprecated path. See setMysqlFetchSize: a fetch size restriction the dialect should own.
         if (databaseMeta.isMySqlVariant()) {
           setMysqlFetchSize(ps, fs, maxRows);
         } else {
@@ -1649,9 +1835,19 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       // to get the length of a String field. So, on MySQL, we ignore the length
       // of Strings in result rows.
       //
-      log.snap(Metrics.METRIC_DATABASE_GET_ROW_META_START, databaseMeta.getName());
-      rowMeta = getRowInfo(res.getMetaData(), databaseMeta.isMySqlVariant(), false);
-      log.snap(Metrics.METRIC_DATABASE_GET_ROW_META_STOP, databaseMeta.getName());
+      // A prepared statement always returns the same result layout, so the row metadata only has to
+      // be derived the first time we see this statement. Rebuilding it on every execution costs one
+      // plugin class load per column and dominates transforms which execute the statement once per
+      // incoming row, such as Database Join.
+      //
+      if (ps != openQueryStatement || openQueryRowMeta == null) {
+        log.snap(Metrics.METRIC_DATABASE_GET_ROW_META_START, databaseMeta.getName());
+        // Deprecated path. Same reported-length question as in openQuery above.
+        openQueryRowMeta = getRowInfo(res.getMetaData(), databaseMeta.isMySqlVariant(), false);
+        openQueryStatement = ps;
+        log.snap(Metrics.METRIC_DATABASE_GET_ROW_META_STOP, databaseMeta.getName());
+      }
+      rowMeta = openQueryRowMeta;
     } catch (SQLException ex) {
       throw new HopDatabaseException("ERROR executing query", ex);
     } catch (Exception e) {
@@ -1913,12 +2109,15 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
     IDatabase iDatabase = databaseMeta.getIDatabase();
 
     // Exasol does not support explicit handling of indexes
+    // Deprecated path. Whether a database has indexes at all belongs in its own DDL, next to
+    // the other index handling.
     if (iDatabase.isExasolVariant()) {
       return "";
     }
 
     crIndex.append("CREATE ");
 
+    // Deprecated path. Whether a technical key implies a unique index is dialect DDL.
     if (unique || (tk && iDatabase.isSybaseVariant())) {
       crIndex.append("UNIQUE ");
     }
@@ -2104,6 +2303,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
           try {
             fields = getQueryFieldsFallback(sql, param, inform, data);
           } catch (HopDatabaseException ignore) {
+            // Do nothing
           }
         }
       }
@@ -2164,25 +2364,19 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       String comments = columns.getString("REMARKS");
       String type = columns.getString("SOURCE_DATA_TYPE");
       int size = columns.getInt("COLUMN_SIZE");
-      if (type.equals("Integer") || type.equals("Long")) {
-        valueMeta = new ValueMetaInteger();
-      } else if (type.equals("BigDecimal") || type.equals("BigNumber")) {
-        valueMeta = new ValueMetaBigNumber();
-      } else if (type.equals("Double") || type.equals("Number")) {
-        valueMeta = new ValueMetaNumber();
-      } else if (type.equals("String")) {
-        valueMeta = new ValueMetaString();
-      } else if (type.equals("Date")) {
-        valueMeta = new ValueMetaDate();
-      } else if (type.equals("Boolean")) {
-        valueMeta = new ValueMetaBoolean();
-      } else if (type.equals("Binary")) {
-        valueMeta = new ValueMetaBinary();
-      } else if (type.equals("Timestamp")) {
-        valueMeta = new ValueMetaTimestamp();
-      } else if (type.equals("Internet Address")) {
-        valueMeta = new ValueMetaInternetAddress();
-      }
+      valueMeta =
+          switch (type) {
+            case "Integer", "Long" -> new ValueMetaInteger();
+            case "BigDecimal", "BigNumber" -> new ValueMetaBigNumber();
+            case "Double", "Number" -> new ValueMetaNumber();
+            case "String" -> new ValueMetaString();
+            case "Date" -> new ValueMetaDate();
+            case "Boolean" -> new ValueMetaBoolean();
+            case "Binary" -> new ValueMetaBinary();
+            case "Timestamp" -> new ValueMetaTimestamp();
+            case "Internet Address" -> new ValueMetaInternetAddress();
+            default -> valueMeta;
+          };
       if (valueMeta != null) {
         valueMeta.setName(name);
         valueMeta.setComments(comments);
@@ -2217,12 +2411,16 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       if ((inform == null
               // Hack for MSSQL jtds 1.2 when using xxx NOT IN yyy we have to use a
               // prepared statement (see BugID 3214)
+              // Deprecated path. A jtds driver bug, which the dialect should declare rather than
+              // core
+              // recognising the vendor.
               && databaseMeta.getIDatabase().isMsSqlServerVariant())
           || databaseMeta.getIDatabase().isSupportsResultSetMetadataRetrievalOnly()) {
         selStmt =
             connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
         try {
           if (databaseMeta.isFetchSizeSupported() && selStmt.getMaxRows() >= 1) {
+            // Deprecated path. Another fetch size restriction belonging to the dialect.
             if (databaseMeta.getIDatabase().isMySqlVariant()) {
               selStmt.setFetchSize(Integer.MIN_VALUE);
             } else {
@@ -2299,6 +2497,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
         selStmt = null;
       }
       if (pstmt != null) {
+        forgetOpenQueryRowMeta(pstmt);
         pstmt.close();
         pstmt = null;
       }
@@ -2341,38 +2540,45 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
     }
   }
 
-  private IValueMeta getValueFromSqlType(
-      ResultSetMetaData rm, int i, boolean ignoreLength, boolean lazyConversion)
-      throws HopDatabaseException, SQLException {
-    // TODO If we do lazy conversion, we need to find out about the encoding
-    //
+  private static boolean ddlCompatible =
+      Const.toBoolean(EnvUtil.getSystemProperty(Const.HOP_DB_DDL_COMPATIBLE, "false"));
 
-    // Extract the name from the result set meta data...
+  private IValueMeta getValueFromSqlType(
+      ResultSetMetaData rm, int columnIndex, boolean ignoreLength, boolean lazyConversion)
+      throws HopDatabaseException, SQLException {
+    // Extract the name from the result set metadata...
     //
     String name;
+    // Deprecated path. getLegacyColumnName is already on the dialect; only the decision to
+    // call it is still made by vendor name, and the dialect can make that too.
     if (databaseMeta.isMySqlVariant()) {
-      name = databaseMeta.getIDatabase().getLegacyColumnName(getDatabaseMetaData(), rm, i);
+      name =
+          databaseMeta.getIDatabase().getLegacyColumnName(getDatabaseMetaData(), rm, columnIndex);
     } else {
-      name = rm.getColumnName(i);
+      name = rm.getColumnName(columnIndex);
     }
 
     // Check the name, sometimes it's empty.
     //
     if (Utils.isEmpty(name) || Const.onlySpaces(name)) {
-      name = "Field" + (i + 1);
+      name = "Field" + (columnIndex + 1);
     }
 
-    // Ask all the value meta types if they want to handle the SQL type.
-    // The first to reply something gets the workflow...
-    //
-    IValueMeta valueMeta = null;
-    for (IValueMeta valueMetaClass : valueMetaPluginClasses) {
-      IValueMeta v =
-          valueMetaClass.getValueFromSqlType(
-              this, databaseMeta, name, rm, i, ignoreLength, lazyConversion);
-      if (v != null) {
-        valueMeta = v;
-        break;
+    IValueMeta valueMeta;
+    if (ddlCompatible) {
+      // Classic approach is to ask all value metadata data types for advice
+      // on which data type the database column maps to best.
+      //
+      valueMeta =
+          getDataTypeFromAllValueMetaLegacy(rm, columnIndex, ignoreLength, lazyConversion, name);
+    } else {
+      // Map obvious JDBC types to Hop data types first, then fall back to value meta plugins
+      // for specialized types (UUID, INET, JSON, and so on).
+      //
+      valueMeta = getDataTypeFromKnownSqlType(rm, columnIndex, ignoreLength, lazyConversion, name);
+      if (valueMeta == null) {
+        valueMeta =
+            getDataTypeFromAllValueMetaLegacy(rm, columnIndex, ignoreLength, lazyConversion, name);
       }
     }
 
@@ -2384,8 +2590,44 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
         "Unable to handle database column '"
             + name
             + "', on column index "
-            + i
+            + columnIndex
             + " : not a handled data type");
+  }
+
+  /**
+   * Map well-known JDBC {@link Types} values to Hop value metadata. Returns {@code null} when the
+   * SQL type is not one of the standard mappings so that specialized value meta plugins can handle
+   * it.
+   *
+   * <p>The dialect-specific branches this used to carry are the dialects' own rules now, so this
+   * asks {@link DatabaseTypeMapper}: the dialect's rules first, then the standard JDBC mapping.
+   */
+  private IValueMeta getDataTypeFromKnownSqlType(
+      ResultSetMetaData rm,
+      int columnIndex,
+      boolean ignoreLength,
+      boolean lazyConversion,
+      String name)
+      throws HopDatabaseException, SQLException {
+    DatabaseColumn column = DatabaseColumn.of(rm, columnIndex, name);
+    return DatabaseTypeMapper.getValueMeta(
+        this, databaseMeta, column, ignoreLength, lazyConversion);
+  }
+
+  private IValueMeta getDataTypeFromAllValueMetaLegacy(
+      ResultSetMetaData rm, int i, boolean ignoreLength, boolean lazyConversion, String name)
+      throws HopDatabaseException {
+    IValueMeta valueMeta = null;
+    for (IValueMeta valueMetaClass : valueMetaPluginClasses) {
+      IValueMeta v =
+          valueMetaClass.getValueFromSqlType(
+              this, databaseMeta, name, rm, i, ignoreLength, lazyConversion);
+      if (v != null) {
+        valueMeta = v;
+        break;
+      }
+    }
+    return valueMeta;
   }
 
   public boolean absolute(ResultSet rs, int position) throws HopDatabaseException {
@@ -2937,6 +3179,44 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
   }
 
   /**
+   * Tells the dialect what the driver says about the server behind this connection.
+   *
+   * <p>A dialect covers every version of its database, but a type does not: SQL Server grew a JSON
+   * type in 2025 and Oracle in 21c, so the same dialect connected to an older server must write
+   * something else. The dialect decides that from the version and type list gathered here, which
+   * beats asking the user to tick a box for each type.
+   *
+   * <p>Read once per connection, and only when a definition is about to be generated, so nothing
+   * pays for it on the row paths. A driver that cannot answer leaves the declared types standing.
+   */
+  private void loadServerInfo() {
+    IDatabase iDatabase = databaseMeta.getIDatabase();
+    if (iDatabase.getServerInfo() != null || connection == null) {
+      return;
+    }
+    int majorVersion = -1;
+    int minorVersion = -1;
+    Set<String> typeNames = new HashSet<>();
+    try {
+      DatabaseMetaData metaData = connection.getMetaData();
+      majorVersion = metaData.getDatabaseMajorVersion();
+      minorVersion = metaData.getDatabaseMinorVersion();
+      try (ResultSet resultSet = metaData.getTypeInfo()) {
+        while (resultSet.next()) {
+          String typeName = resultSet.getString("TYPE_NAME");
+          if (typeName != null) {
+            typeNames.add(typeName.trim().toUpperCase(Locale.ROOT));
+          }
+        }
+      }
+    } catch (Exception e) {
+      // Not knowing is the same as not being told: the declared types stand.
+      log.logDebug("Unable to read the server version or its column types from the driver", e);
+    }
+    iDatabase.setServerInfo(new ServerInfo(majorVersion, minorVersion, typeNames));
+  }
+
+  /**
    * Generates SQL
    *
    * @param tableName the table name or schema/table combination: this needs to be quoted properly
@@ -2955,6 +3235,9 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       boolean useAutoIncrement,
       String pk,
       boolean semicolon) {
+    // Ask the driver about the server before spelling any type out. See loadServerInfo.
+    loadServerInfo();
+
     StringBuilder retval = new StringBuilder();
     IDatabase iDatabase = databaseMeta.getIDatabase();
     retval.append(iDatabase.getCreateTableStatement());
@@ -2969,7 +3252,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       }
 
       IValueMeta v = fields.getValueMeta(i);
-      retval.append(databaseMeta.getFieldDefinition(v, tk, pk, useAutoIncrement));
+      retval.append(databaseMeta.getFieldDefinition(this, v, tk, pk, useAutoIncrement));
     }
     // At the end, before the closing of the statement, we might need to add
     // some constraints...
@@ -2986,11 +3269,6 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
 
     retval.append(databaseMeta.getIDatabase().getDataTablespaceDDL(variables, databaseMeta));
 
-    if (pk == null && tk == null && databaseMeta.getIDatabase().isNeoviewVariant()) {
-      retval.append("NO PARTITION"); // use this as a default when no pk/tk is
-      // there, otherwise you get an error
-    }
-
     if (semicolon) {
       retval.append(";");
     }
@@ -3006,6 +3284,9 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       String pk,
       boolean semicolon)
       throws HopDatabaseException {
+    // Ask the driver about the server before spelling any type out. See loadServerInfo.
+    loadServerInfo();
+
     StringBuilder retval = new StringBuilder();
 
     // Get the fields that are in the table now:
@@ -3059,8 +3340,10 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
       IValueMeta desiredField = fields.getValueMeta(i);
       IValueMeta currentField = tabFields.searchValueMeta(desiredField.getName());
       if (desiredField != null && currentField != null) {
-        String desiredDDL = databaseMeta.getFieldDefinition(desiredField, tk, pk, useAutoIncrement);
-        String currentDDL = databaseMeta.getFieldDefinition(currentField, tk, pk, useAutoIncrement);
+        String desiredDDL =
+            databaseMeta.getFieldDefinition(this, desiredField, tk, pk, useAutoIncrement);
+        String currentDDL =
+            databaseMeta.getFieldDefinition(this, currentField, tk, pk, useAutoIncrement);
 
         boolean mod = !desiredDDL.equalsIgnoreCase(currentDDL);
         if (mod) {
@@ -3214,35 +3497,25 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
         int sqltype = pmd.getParameterType(i);
         int length = pmd.getPrecision(i);
         int precision = pmd.getScale(i);
-        IValueMeta val;
-
-        switch (sqltype) {
-          case java.sql.Types.CHAR, java.sql.Types.VARCHAR:
-            val = new ValueMetaString(name);
-            break;
-          case java.sql.Types.BIGINT,
-              java.sql.Types.INTEGER,
-              java.sql.Types.NUMERIC,
-              java.sql.Types.SMALLINT,
-              java.sql.Types.TINYINT:
-            val = new ValueMetaInteger(name);
-            break;
-          case java.sql.Types.DECIMAL,
-              java.sql.Types.DOUBLE,
-              java.sql.Types.FLOAT,
-              java.sql.Types.REAL:
-            val = new ValueMetaNumber(name);
-            break;
-          case java.sql.Types.DATE, java.sql.Types.TIME, java.sql.Types.TIMESTAMP:
-            val = new ValueMetaDate(name);
-            break;
-          case java.sql.Types.BOOLEAN, java.sql.Types.BIT:
-            val = new ValueMetaBoolean(name);
-            break;
-          default:
-            val = new ValueMetaNone(name);
-            break;
-        }
+        IValueMeta val =
+            switch (sqltype) {
+              case java.sql.Types.CHAR, java.sql.Types.VARCHAR -> new ValueMetaString(name);
+              case java.sql.Types.BIGINT,
+                      java.sql.Types.INTEGER,
+                      java.sql.Types.NUMERIC,
+                      java.sql.Types.SMALLINT,
+                      java.sql.Types.TINYINT ->
+                  new ValueMetaInteger(name);
+              case java.sql.Types.DECIMAL,
+                      java.sql.Types.DOUBLE,
+                      java.sql.Types.FLOAT,
+                      java.sql.Types.REAL ->
+                  new ValueMetaNumber(name);
+              case java.sql.Types.DATE, java.sql.Types.TIME, java.sql.Types.TIMESTAMP ->
+                  new ValueMetaDate(name);
+              case java.sql.Types.BOOLEAN, java.sql.Types.BIT -> new ValueMetaBoolean(name);
+              default -> new ValueMetaNone(name);
+            };
 
         if (val.isNumeric() && (length > 18 || precision > 18)) {
           val = new ValueMetaBigNumber(name);
@@ -3250,12 +3523,8 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
 
         par.addValueMeta(val);
       }
-    } catch (AbstractMethodError e) {
+    } catch (AbstractMethodError | Exception e) {
       // Oops: probably the database or JDBC doesn't support it.
-      return null;
-    } catch (SQLException e) {
-      return null;
-    } catch (Exception e) {
       return null;
     }
 
@@ -3335,7 +3604,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
           // A "select max(x)" on a table with no matching rows will return
           // null.
           if (tmp != null) {
-            previous = tmp.longValue();
+            previous = tmp;
           } else {
             previous = 0L;
           }
@@ -3345,14 +3614,14 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
                   + schemaTable);
         }
         counter = new Counter(previous + 1, 1);
-        nextValue = Long.valueOf(counter.getAndNext());
+        nextValue = counter.getAndNext();
 
         Counters.getInstance().setCounter(lookup, counter);
       } else {
         throw new HopDatabaseException("Couldn't find maximum key value from table " + schemaTable);
       }
     } else {
-      nextValue = Long.valueOf(counter.getAndNext());
+      nextValue = counter.getAndNext();
     }
 
     return nextValue;
@@ -3495,14 +3764,12 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
    */
   public List<Object[]> getFirstRows(String tableName, int limit, IProgressMonitor monitor)
       throws HopDatabaseException {
-    String sql = "SELECT";
-    if (databaseMeta.getIDatabase().isNeoviewVariant()) {
-      sql += " [FIRST " + limit + "]";
-    } else if (databaseMeta.getIDatabase().isSybaseIQVariant()) {
-      // improve support for Sybase IQ
-      sql += " TOP " + limit + " ";
-    }
-    sql += " * FROM " + tableName;
+    // How a database limits rows is its own syntax, so it is asked rather than recognised here.
+    // Some put the clause directly after SELECT and others at the end of the statement, so both
+    // are asked for. The row count is capped while reading in any case, so a dialect offering
+    // neither simply fetches a little more than it needs.
+    String prefix = limit > 0 ? databaseMeta.getLimitClausePrefix(limit) : "";
+    String sql = "SELECT" + prefix + " * FROM " + tableName;
 
     if (limit > 0) {
       sql += databaseMeta.getLimitClause(limit);
@@ -3984,13 +4251,6 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
   }
 
   /**
-   * @return Returns the databaseMeta.
-   */
-  public DatabaseMeta getDatabaseMeta() {
-    return databaseMeta;
-  }
-
-  /**
    * Lock a tables in the database for write operations
    *
    * @param tableNames The tables to lock. These need to be the appropriately quoted fully qualified
@@ -4037,52 +4297,10 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
   }
 
   /**
-   * @return the opened
-   */
-  public int getOpened() {
-    return opened;
-  }
-
-  /**
    * @param opened the opened to set
    */
   public synchronized void setOpened(int opened) {
     this.opened = opened;
-  }
-
-  /**
-   * @return the connectionGroup
-   */
-  public String getConnectionGroup() {
-    return connectionGroup;
-  }
-
-  /**
-   * @param connectionGroup the connectionGroup to set
-   */
-  public void setConnectionGroup(String connectionGroup) {
-    this.connectionGroup = connectionGroup;
-  }
-
-  /**
-   * @return the partitionId
-   */
-  public String getPartitionId() {
-    return partitionId;
-  }
-
-  /**
-   * @param partitionId the partitionId to set
-   */
-  public void setPartitionId(String partitionId) {
-    this.partitionId = partitionId;
-  }
-
-  /**
-   * @return the copy
-   */
-  public int getCopy() {
-    return copy;
   }
 
   /**
@@ -4182,16 +4400,16 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
         Object v = null;
         switch (resulttype) {
           case IValueMeta.TYPE_BOOLEAN:
-            v = Boolean.valueOf(cstmt.getBoolean(pos));
+            v = cstmt.getBoolean(pos);
             break;
           case IValueMeta.TYPE_NUMBER:
-            v = Double.valueOf(cstmt.getDouble(pos));
+            v = cstmt.getDouble(pos);
             break;
           case IValueMeta.TYPE_BIGNUMBER:
             v = cstmt.getBigDecimal(pos);
             break;
           case IValueMeta.TYPE_INTEGER:
-            v = Long.valueOf(cstmt.getLong(pos));
+            v = cstmt.getLong(pos);
             break;
           case IValueMeta.TYPE_STRING:
             v = cstmt.getString(pos);
@@ -4227,16 +4445,16 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
           Object v = null;
           switch (argtype[i]) {
             case IValueMeta.TYPE_BOOLEAN:
-              v = Boolean.valueOf(cstmt.getBoolean(pos + i));
+              v = cstmt.getBoolean(pos + i);
               break;
             case IValueMeta.TYPE_NUMBER:
-              v = Double.valueOf(cstmt.getDouble(pos + i));
+              v = cstmt.getDouble(pos + i);
               break;
             case IValueMeta.TYPE_BIGNUMBER:
               v = cstmt.getBigDecimal(pos + i);
               break;
             case IValueMeta.TYPE_INTEGER:
-              v = Long.valueOf(cstmt.getLong(pos + i));
+              v = cstmt.getLong(pos + i);
               break;
             case IValueMeta.TYPE_STRING:
               v = cstmt.getString(pos + i);
@@ -4417,6 +4635,8 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
               Date date = fields.getDate(r, i);
 
               if (Utils.isEmpty(dateFormat)) {
+                // Deprecated path. How a date literal is spelled in generated SQL is dialect
+                // syntax.
                 if (databaseMeta.getIDatabase().isOracleVariant()) {
                   if (fieldDateFormatters[i] == null) {
                     fieldDateFormatters[i] = new java.text.SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
@@ -4425,12 +4645,12 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
                       .append(fieldDateFormatters[i].format(date))
                       .append("', 'YYYY/MM/DD HH24:MI:SS')");
                 } else {
-                  ins.append("'" + fields.getString(r, i) + "'");
+                  ins.append("'").append(fields.getString(r, i)).append("'");
                 }
               } else {
                 try {
                   java.text.SimpleDateFormat formatter = new java.text.SimpleDateFormat(dateFormat);
-                  ins.append("'" + formatter.format(fields.getDate(r, i)) + "'");
+                  ins.append("'").append(formatter.format(fields.getDate(r, i))).append("'");
                 } catch (Exception e) {
                   throw new HopDatabaseException("Error : ", e);
                 }
@@ -4598,31 +4818,10 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
     return containerObjectId;
   }
 
-  /**
-   * @param containerObjectId the execution container Object id to set
-   */
-  public void setContainerObjectId(String containerObjectId) {
-    this.containerObjectId = containerObjectId;
-  }
-
   /** Stub */
   @Override
   public Date getRegistrationDate() {
     return null;
-  }
-
-  /**
-   * @return the nrExecutedCommits
-   */
-  public int getNrExecutedCommits() {
-    return nrExecutedCommits;
-  }
-
-  /**
-   * @param nrExecutedCommits the nrExecutedCommits to set
-   */
-  public void setNrExecutedCommits(int nrExecutedCommits) {
-    this.nrExecutedCommits = nrExecutedCommits;
   }
 
   /**
@@ -4663,7 +4862,7 @@ public class Database implements IVariables, ILoggingObject, AutoCloseable {
         if (Utils.isEmpty(sLine)) {
           sql.append(Const.CR);
         } else {
-          sql.append(Const.CR + sLine);
+          sql.append(Const.CR).append(sLine);
         }
       }
 

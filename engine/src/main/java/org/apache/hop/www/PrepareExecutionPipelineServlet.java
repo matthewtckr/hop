@@ -19,12 +19,13 @@ package org.apache.hop.www;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.Serial;
 import java.net.URLEncoder;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.annotations.HopServerServlet;
 import org.apache.hop.core.logging.HopLogStore;
@@ -46,7 +47,7 @@ public class PrepareExecutionPipelineServlet extends BaseHttpServlet implements 
   private static final String CONST_LINK_OPEN = "<a href=\"";
   private static final String CONST_LINK_CLOSE = "</a><p>";
   private static final String CONST_CLOSE_TAG = "\">";
-  private static final long serialVersionUID = 3634806745372015720L;
+  @Serial private static final long serialVersionUID = 3634806745372015720L;
   public static final String CONTEXT_PATH = "/hop/prepareExec";
 
   public PrepareExecutionPipelineServlet() {}
@@ -61,6 +62,9 @@ public class PrepareExecutionPipelineServlet extends BaseHttpServlet implements 
     if (isJettyMode() && !request.getContextPath().startsWith(CONTEXT_PATH)) {
       return;
     }
+    if (refuseIfShuttingDown(response)) {
+      return;
+    }
 
     if (log.isDebug()) {
       logDebug(
@@ -71,16 +75,22 @@ public class PrepareExecutionPipelineServlet extends BaseHttpServlet implements 
     String pipelineName = request.getParameter("name");
     String id = request.getParameter("id");
     boolean useXML = "Y".equalsIgnoreCase(request.getParameter("xml"));
+    boolean useJson = isJsonRequest(request);
 
     response.setStatus(HttpServletResponse.SC_OK);
 
-    PrintWriter out = response.getWriter();
+    PrintWriter out = getSafeWriter(response);
+    if (out == null) {
+      return;
+    }
     if (useXML) {
       response.setContentType("text/xml");
-      out.print(XmlHandler.getXmlHeader(Const.XML_ENCODING));
+      response.setCharacterEncoding(Const.UTF_8);
+      out.print(XmlHandler.getXmlHeader(Const.UTF_8));
+    } else if (useJson) {
+      response.setContentType("application/json");
+      response.setCharacterEncoding(Const.UTF_8);
     } else {
-
-      response.setCharacterEncoding("UTF-8");
       response.setContentType("text/html;charset=UTF-8");
 
       out.println("<HTML>");
@@ -97,7 +107,10 @@ public class PrepareExecutionPipelineServlet extends BaseHttpServlet implements 
               + URLEncoder.encode(pipelineName, UTF_8)
               + CONST_CLOSE_TAG);
       out.println("<META http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\">");
-      out.println("<link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/images/favicon.svg\">");
+      out.println(
+          "<link rel=\"icon\" type=\"image/svg+xml\" href=\""
+              + getStaticPath(request, CONTEXT_PATH)
+              + "/images/favicon.svg\">");
       out.println("</HEAD>");
       out.println("<BODY>");
     }
@@ -139,8 +152,9 @@ public class PrepareExecutionPipelineServlet extends BaseHttpServlet implements 
 
           if (useXML) {
             out.println(WebResult.OK.getXml());
+          } else if (useJson) {
+            out.println(WebResult.OK.getJson());
           } else {
-
             out.println(
                 CONST_HEADER_OPEN
                     + Encode.forHtml(
@@ -163,19 +177,20 @@ public class PrepareExecutionPipelineServlet extends BaseHttpServlet implements 
               HopLogStore.getAppender()
                   .getBuffer(pipeline.getLogChannel().getLogChannelId(), true)
                   .toString();
+          String errorMsg =
+              BaseMessages.getString(
+                  PKG,
+                  "PrepareExecutionPipelineServlet.Error.PipelineInitFailed",
+                  Const.CR
+                      + logText
+                      + Const.CR
+                      + Const.getSimpleStackTrace(e)
+                      + Const.CR
+                      + Const.getStackTracker(e));
           if (useXML) {
-            out.println(
-                new WebResult(
-                    WebResult.STRING_ERROR,
-                    BaseMessages.getString(
-                        PKG,
-                        "PrepareExecutionPipelineServlet.Error.PipelineInitFailed",
-                        Const.CR
-                            + logText
-                            + Const.CR
-                            + Const.getSimpleStackTrace(e)
-                            + Const.CR
-                            + Const.getStackTracker(e))));
+            out.println(new WebResult(WebResult.STRING_ERROR, errorMsg).getXml());
+          } else if (useJson) {
+            out.println(new WebResult(WebResult.STRING_ERROR, errorMsg).getJson());
           } else {
             out.println(
                 CONST_HEADER_OPEN
@@ -203,12 +218,13 @@ public class PrepareExecutionPipelineServlet extends BaseHttpServlet implements 
           }
         }
       } else {
+        String notFoundMsg =
+            BaseMessages.getString(
+                PKG, "PipelineStatusServlet.Log.CoundNotFindSpecPipeline", pipelineName);
         if (useXML) {
-          out.println(
-              new WebResult(
-                  WebResult.STRING_ERROR,
-                  BaseMessages.getString(
-                      PKG, "PipelineStatusServlet.Log.CoundNotFindSpecPipeline", pipelineName)));
+          out.println(new WebResult(WebResult.STRING_ERROR, notFoundMsg).getXml());
+        } else if (useJson) {
+          out.println(new WebResult(WebResult.STRING_ERROR, notFoundMsg).getJson());
         } else {
           out.println(
               CONST_HEADER_OPEN
@@ -226,14 +242,15 @@ public class PrepareExecutionPipelineServlet extends BaseHttpServlet implements 
         }
       }
     } catch (Exception ex) {
+      String errorMsg =
+          BaseMessages.getString(
+              PKG,
+              "PrepareExecutionPipelineServlet.Error.UnexpectedError",
+              Const.CR + Const.getStackTracker(ex));
       if (useXML) {
-        out.println(
-            new WebResult(
-                WebResult.STRING_ERROR,
-                BaseMessages.getString(
-                    PKG,
-                    "PrepareExecutionPipelineServlet.Error.UnexpectedError",
-                    Const.CR + Const.getStackTracker(ex))));
+        out.println(new WebResult(WebResult.STRING_ERROR, errorMsg).getXml());
+      } else if (useJson) {
+        out.println(new WebResult(WebResult.STRING_ERROR, errorMsg).getJson());
       } else {
         out.println("<p>");
         out.println("<pre>");
@@ -243,7 +260,7 @@ public class PrepareExecutionPipelineServlet extends BaseHttpServlet implements 
       }
     }
 
-    if (!useXML) {
+    if (!useXML && !useJson) {
       out.println("<p>");
       out.println("</BODY>");
       out.println("</HTML>");

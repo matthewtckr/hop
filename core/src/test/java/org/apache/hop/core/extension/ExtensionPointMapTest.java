@@ -17,7 +17,9 @@
 
 package org.apache.hop.core.extension;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -26,19 +28,19 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.apache.hop.core.plugins.PluginRegistry;
-import org.apache.hop.junit.rules.RestoreHopEnvironment;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.apache.hop.junit.rules.RestoreHopEnvironmentExtension;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
-public class ExtensionPointMapTest {
-  @ClassRule public static RestoreHopEnvironment env = new RestoreHopEnvironment();
+@ExtendWith(RestoreHopEnvironmentExtension.class)
+class ExtensionPointMapTest {
   public static final String TEST_NAME = "testName";
   private IPluginMock pluginInterface;
   private IExtensionPoint extensionPoint;
 
-  @Before
-  public void setUp() {
+  @BeforeEach
+  void setUp() {
     pluginInterface = mock(IPluginMock.class);
     when(pluginInterface.getName()).thenReturn(TEST_NAME);
     when(pluginInterface.getMainType()).thenReturn((Class) IExtensionPoint.class);
@@ -49,7 +51,7 @@ public class ExtensionPointMapTest {
   }
 
   @Test
-  public void constructorTest() throws Exception {
+  void constructorTest() throws Exception {
     PluginRegistry.getInstance().registerPlugin(ExtensionPointPluginType.class, pluginInterface);
     assertEquals(1, ExtensionPointMap.getInstance().getNumberOfRows());
 
@@ -64,7 +66,18 @@ public class ExtensionPointMapTest {
   }
 
   @Test
-  public void addExtensionPointTest() {
+  void isRegisteredTest() {
+    assertFalse(ExtensionPointMap.getInstance().isRegistered(TEST_NAME));
+
+    ExtensionPointMap.getInstance().addExtensionPoint(pluginInterface);
+    assertTrue(ExtensionPointMap.getInstance().isRegistered(TEST_NAME));
+
+    ExtensionPointMap.getInstance().removeExtensionPoint(pluginInterface);
+    assertFalse(ExtensionPointMap.getInstance().isRegistered(TEST_NAME));
+  }
+
+  @Test
+  void addExtensionPointTest() {
     ExtensionPointMap.getInstance().addExtensionPoint(pluginInterface);
     assertEquals(
         ExtensionPointMap.getInstance().getTableValue(TEST_NAME, "testID"), extensionPoint);

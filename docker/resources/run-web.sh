@@ -29,10 +29,113 @@ exitWithCode() {
   exit "${1}"
 }
 
+# Download JDBC drivers on container start, before Tomcat is launched, so they are picked up by the
+# lib/jdbc scan. Driven by environment variables:
+#   HOP_DRIVERS_DOWNLOAD        comma-separated driver ids, each optionally with a version,
+#                               e.g. "oracle,mariadb:3.4.1,mysql". Run 'hop driver list' for ids.
+#   HOP_DRIVERS_ACCEPT_LICENSE  set to "true" to accept the vendor license of restricted (Category X)
+#                               drivers (Oracle, MariaDB, MySQL, DB2, ...). Required for those.
+#   HOP_DRIVERS_MAVEN_REPO      optional Maven repository base URL (defaults to Maven Central).
+install_jdbc_drivers() {
+  local drivers="${HOP_DRIVERS_DOWNLOAD:-}"
+  if [ -z "${drivers}" ]; then
+    return 0
+  fi
+
+  local accept_flag=""
+  case "${HOP_DRIVERS_ACCEPT_LICENSE:-}" in
+  true | TRUE | True | Y | y | yes | YES | 1) accept_flag="--accept-license" ;;
+  *) ;;
+  esac
+
+  local repo_flag=""
+  if [ -n "${HOP_DRIVERS_MAVEN_REPO:-}" ]; then
+    repo_flag="--repo=${HOP_DRIVERS_MAVEN_REPO}"
+  fi
+
+  log "Installing JDBC drivers: ${drivers}"
+
+  local spec id version version_flag
+  for spec in ${drivers//,/ }; do
+    spec="$(echo "${spec}" | tr -d '[:space:]')"
+    [ -z "${spec}" ] && continue
+
+    id="${spec%%:*}"
+    version=""
+    [ "${spec}" != "${id}" ] && version="${spec#*:}"
+    version_flag=""
+    [ -n "${version}" ] && version_flag="--driver-version=${version}"
+
+    log "Installing JDBC driver '${id}'${version:+ (version ${version})}"
+    # shellcheck disable=SC2086
+    if ! "${DEPLOYMENT_PATH}"/hop driver install "${id}" ${version_flag} ${repo_flag} ${accept_flag}; then
+      log "Error: failed to install JDBC driver '${id}'"
+      exitWithCode 8
+    fi
+  done
+}
+
+# Ensure HOP_AUDIT_FOLDER exists and is writable by the hop process (per-user data under
+# users/<username>/). Prefer the configured path; fall back to /tmp/hop-web-audit under
+# java.io.tmpdir when a bind-mount is not writable.
+# Nested dirs may be 0750 from Tomcat umask 0027 and owned by the host UID after a bind-mount
+# chown — open them up so hop (UID 501) can write.
+ensure_hop_audit_folder() {
+  local preferred="${HOP_AUDIT_FOLDER:-/tmp/hop-web-audit}"
+  local fallback="/tmp/hop-web-audit"
+  mkdir -p "${preferred}" 2>/dev/null || true
+  if touch "${preferred}/.hop-write-test" 2>/dev/null; then
+    rm -f "${preferred}/.hop-write-test"
+    export HOP_AUDIT_FOLDER="${preferred}"
+  else
+    mkdir -p "${fallback}"
+    export HOP_AUDIT_FOLDER="${fallback}"
+    log "WARNING: configured audit folder '${preferred}' is not writable; using '${fallback}'"
+  fi
+  mkdir -p "${HOP_AUDIT_FOLDER}/users" 2>/dev/null || true
+  # Best effort: hop can only chmod paths it owns; host scripts chmod -R before start for the rest
+  chmod -R a+rwX "${HOP_AUDIT_FOLDER}" 2>/dev/null || true
+  # Prepend so this -D wins over any baked CATALINA_OPTS value
+  export CATALINA_OPTS="-DHOP_AUDIT_FOLDER=${HOP_AUDIT_FOLDER} ${CATALINA_OPTS:-}"
+  log "HOP_AUDIT_FOLDER=${HOP_AUDIT_FOLDER}"
+}
+
+ensure_hop_audit_folder
+
 # The common execution options for short and long lived containers
 # The default log level is Basic
 #
 HOP_EXEC_OPTIONS="--level=${HOP_LOG_LEVEL}"
+
+# Register a project in hop-config if it is not already present.
+# Usage: register_hop_project NAME FOLDER CONFIG_FILE [PARENT_NAME]
+#
+register_hop_project() {
+  local name="$1"
+  local home="$2"
+  local cfg="$3"
+  local parent="${4:-}"
+
+  if $("${DEPLOYMENT_PATH}"/hop-conf.sh -pl | grep -q -E "^  ${name} :"); then
+    log "project ${name} already exists"
+    return 0
+  fi
+
+  local conf_args=(
+    --project="${name}"
+    --project-create
+    --project-home="${home}"
+    --project-config-file="${cfg}"
+    --project-keep-config-file
+  )
+  if [ -n "${parent}" ]; then
+    conf_args+=(--project-parent="${parent}")
+  fi
+
+  log "Registering project ${name} in the Hop container configuration (home=${home})"
+  log "${DEPLOYMENT_PATH}/hop-conf.sh ${conf_args[*]}"
+  "${DEPLOYMENT_PATH}"/hop-conf.sh "${conf_args[@]}"
+}
 
 # If a project folder is defined we assume that we want to create it in the container
 #
@@ -55,18 +158,33 @@ if [ -n "${HOP_PROJECT_FOLDER}" ]; then
     log "The specified project folder exists"
   fi
 
-  log "Registering project ${HOP_PROJECT_NAME} in the Hop container configuration"
-  log "${DEPLOYMENT_PATH}/hop-conf.sh --project=${HOP_PROJECT_NAME} --project-create --project-home='${HOP_PROJECT_FOLDER}' --project-config-file='${HOP_PROJECT_CONFIG_FILE_NAME}'"
-
-  if $("${DEPLOYMENT_PATH}"/hop-conf.sh -pl | grep -q -E "^  ${HOP_PROJECT_NAME} :"); then
-    log "project ${HOP_PROJECT_NAME} already exists"
-  else
-    "${DEPLOYMENT_PATH}"/hop-conf.sh \
-      --project="${HOP_PROJECT_NAME}" \
-      --project-create \
-      --project-home="${HOP_PROJECT_FOLDER}" \
-      --project-config-file="${HOP_PROJECT_CONFIG_FILE_NAME}"
+  # Optional one-level parent project (issue #2596). Register the parent first so
+  # metadata inheritance and PARENT_PROJECT_HOME resolve when the child is enabled.
+  #
+  HOP_PARENT_PROJECT_CONFIG_FILE_NAME="${HOP_PARENT_PROJECT_CONFIG_FILE_NAME:-project-config.json}"
+  if [ -n "${HOP_PARENT_PROJECT_FOLDER}" ] || [ -n "${HOP_PARENT_PROJECT_NAME}" ]; then
+    if [ -z "${HOP_PARENT_PROJECT_FOLDER}" ] || [ -z "${HOP_PARENT_PROJECT_NAME}" ]; then
+      log "Error: both HOP_PARENT_PROJECT_NAME and HOP_PARENT_PROJECT_FOLDER must be set to register a parent project"
+      exitWithCode 9
+    fi
+    if [ ! -d "${HOP_PARENT_PROJECT_FOLDER}" ]; then
+      log "Error: the folder specified in variable HOP_PARENT_PROJECT_FOLDER does not exist: ${HOP_PARENT_PROJECT_FOLDER}"
+      exitWithCode 9
+    else
+      log "The specified parent project folder exists"
+    fi
+    register_hop_project \
+      "${HOP_PARENT_PROJECT_NAME}" \
+      "${HOP_PARENT_PROJECT_FOLDER}" \
+      "${HOP_PARENT_PROJECT_CONFIG_FILE_NAME}"
   fi
+
+  HOP_PROJECT_CONFIG_FILE_NAME="${HOP_PROJECT_CONFIG_FILE_NAME:-project-config.json}"
+  register_hop_project \
+    "${HOP_PROJECT_NAME}" \
+    "${HOP_PROJECT_FOLDER}" \
+    "${HOP_PROJECT_CONFIG_FILE_NAME}" \
+    "${HOP_PARENT_PROJECT_NAME:-}"
 
   HOP_EXEC_OPTIONS="${HOP_EXEC_OPTIONS} --project=${HOP_PROJECT_NAME}"
 
@@ -102,6 +220,8 @@ else
   log "Not creating a project or environment in the container"
 fi
 
+# Download requested JDBC drivers (HOP_DRIVERS_DOWNLOAD) before Tomcat starts.
+install_jdbc_drivers
 
 # if we have a /config/tomcat-users.xml file, copy it to the conf folder.
 if [ -f "/config/tomcat-users.xml" ]; then

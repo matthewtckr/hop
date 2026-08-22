@@ -21,14 +21,15 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidator;
+import org.apache.hop.pipeline.transforms.loadsave.validator.IntLoadSaveValidator;
 import org.apache.hop.workflow.action.loadsave.WorkflowActionLoadSaveTestSupport;
-import org.junit.ClassRule;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class WorkflowActionGetPOPLoadSaveTest
-    extends WorkflowActionLoadSaveTestSupport<ActionGetPOP> {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+class WorkflowActionGetPOPLoadSaveTest extends WorkflowActionLoadSaveTestSupport<ActionGetPOP> {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
   @Override
   protected Class<ActionGetPOP> getActionClass() {
@@ -73,7 +74,7 @@ public class WorkflowActionGetPOPLoadSaveTest
         "moveToIMAPFolder",
         "createMoveToFolder",
         "createLocalFolder",
-        //        "afterGetIMAP",
+        "afterGetIMAP",
         "includeSubFolders",
         "useProxy",
         "proxyUsername");
@@ -90,8 +91,8 @@ public class WorkflowActionGetPOPLoadSaveTest
     //        new IntLoadSaveValidator(MailConnectionMeta.conditionDateCode.length));
     //    validators.put(
     //        "actionType", new IntLoadSaveValidator(MailConnectionMeta.actionTypeCode.length));
-    //    validators.put(
-    //        "afterGetIMAP", new IntLoadSaveValidator(MailConnectionMeta.afterGetIMAPCode.length));
+    validators.put(
+        "afterGetIMAP", new IntLoadSaveValidator(MailConnectionMeta.afterGetIMAPCode.length));
 
     return validators;
   }

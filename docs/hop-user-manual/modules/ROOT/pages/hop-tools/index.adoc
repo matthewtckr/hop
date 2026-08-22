@@ -21,10 +21,17 @@ Even though Hop developers will spend the majority of their time in Hop Gui, Hop
 
 This page provides an overview of the tools that are available in the platform.
 
+* xref:hop-tools/hop.adoc[Hop]
+* xref:hop-tools/hop-setup.adoc[Hop Setup]
+* xref:hop-tools/hop-marketplace.adoc[Hop Marketplace]
 * xref:hop-tools/hop-conf/hop-conf.adoc[Hop Conf]
 * xref:hop-tools/hop-encrypt.adoc[Hop Encrypt]
 * xref:hop-tools/hop-gui.adoc[Hop Gui]
 * xref:hop-run/index.adoc[Hop Run]
 * xref:hop-tools/hop-search.adoc[Hop Search]
 * xref:hop-tools/hop-import.adoc[Hop Import]
+* xref:hop-tools/hop-doc.adoc[Hop Documentation]
+* xref:hop-tools/hop-python/hop-python.adoc[Hop Python (PyHop)]
+* xref:hop-tools/hop-arrow-command.adoc[Hop Arrow (Flight server)]
+
 * xref:hop-server/index.adoc[Hop Server]

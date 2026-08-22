@@ -43,8 +43,8 @@ import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
-import org.eclipse.swt.layout.FormLayout;
 import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.TableItem;
@@ -55,6 +55,7 @@ public class GroupByDialog extends BaseTransformDialog {
 
   public static final String STRING_SORT_WARNING_PARAMETER = "GroupSortWarning";
   private static final int AGGREGATION_TABLE_TYPE_INDEX = 3;
+  private static final int AGGREGATION_TABLE_ORDER_FIELD_INDEX = 5;
 
   private TableView wGroup;
 
@@ -100,44 +101,15 @@ public class GroupByDialog extends BaseTransformDialog {
 
   @Override
   public String open() {
-    Shell parent = getParent();
+    createShell(BaseMessages.getString(PKG, "GroupByDialog.Shell.Title"));
 
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
-    PropsUi.setLook(shell);
-    setShellImage(shell, input);
+    buildButtonBar().ok(e -> ok()).cancel(e -> cancel()).build();
 
     ModifyListener lsMod = e -> input.setChanged();
     backupChanged = input.hasChanged();
     backupAllRows = input.isPassAllRows();
 
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = PropsUi.getFormMargin();
-    formLayout.marginHeight = PropsUi.getFormMargin();
-
-    shell.setLayout(formLayout);
-    shell.setText(BaseMessages.getString(PKG, "GroupByDialog.Shell.Title"));
-
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
-
-    // TransformName line
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(BaseMessages.getString(PKG, "GroupByDialog.TransformName.Label"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    fdlTransformName.top = new FormAttachment(0, margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    wTransformName.addModifyListener(lsMod);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(middle, 0);
-    fdTransformName.top = new FormAttachment(0, margin);
-    fdTransformName.right = new FormAttachment(100, 0);
-    wTransformName.setLayoutData(fdTransformName);
+    Control lastControl = wSpacer;
 
     // Include all rows?
     Label wlAllRows = new Label(shell, SWT.RIGHT);
@@ -145,7 +117,7 @@ public class GroupByDialog extends BaseTransformDialog {
     PropsUi.setLook(wlAllRows);
     FormData fdlAllRows = new FormData();
     fdlAllRows.left = new FormAttachment(0, 0);
-    fdlAllRows.top = new FormAttachment(wTransformName, margin);
+    fdlAllRows.top = new FormAttachment(lastControl, margin);
     fdlAllRows.right = new FormAttachment(middle, -margin);
     wlAllRows.setLayoutData(fdlAllRows);
     wAllRows = new Button(shell, SWT.CHECK);
@@ -203,14 +175,14 @@ public class GroupByDialog extends BaseTransformDialog {
     FormData fdlPrefix = new FormData();
     fdlPrefix.left = new FormAttachment(0, 0);
     fdlPrefix.right = new FormAttachment(middle, -margin);
-    fdlPrefix.top = new FormAttachment(wbSortDir, margin * 2);
+    fdlPrefix.top = new FormAttachment(wbSortDir, margin);
     wlPrefix.setLayoutData(fdlPrefix);
     wPrefix = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
     PropsUi.setLook(wPrefix);
     wPrefix.addModifyListener(lsMod);
     FormData fdPrefix = new FormData();
     fdPrefix.left = new FormAttachment(middle, 0);
-    fdPrefix.top = new FormAttachment(wbSortDir, margin * 2);
+    fdPrefix.top = new FormAttachment(wbSortDir, margin);
     fdPrefix.right = new FormAttachment(100, 0);
     wPrefix.setLayoutData(fdPrefix);
 
@@ -338,7 +310,7 @@ public class GroupByDialog extends BaseTransformDialog {
     fdlAgg.top = new FormAttachment(wGroup, margin);
     wlAgg.setLayoutData(fdlAgg);
 
-    int nrCols = 4;
+    int nrCols = 5;
     int nrRows = input.getAggregations().size();
 
     ciReturn = new ColumnInfo[nrCols];
@@ -365,6 +337,14 @@ public class GroupByDialog extends BaseTransformDialog {
             false);
     ciReturn[3].setToolTip(BaseMessages.getString(PKG, "GroupByDialog.ColumnInfo.Value.Tooltip"));
     ciReturn[3].setUsingVariables(true);
+    ciReturn[4] =
+        new ColumnInfo(
+            BaseMessages.getString(PKG, "GroupByDialog.ColumnInfo.OrderField"),
+            ColumnInfo.COLUMN_TYPE_CCOMBO,
+            new String[] {""},
+            false);
+    ciReturn[4].setToolTip(
+        BaseMessages.getString(PKG, "GroupByDialog.ColumnInfo.OrderField.Tooltip"));
 
     wAgg =
         new TableView(
@@ -412,14 +392,6 @@ public class GroupByDialog extends BaseTransformDialog {
         };
     new Thread(runnable).start();
 
-    // THE BUTTONS
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-
-    setButtonPositions(new Button[] {wOk, wCancel}, margin, null);
-
     FormData fdAgg = new FormData();
     fdAgg.left = new FormAttachment(0, 0);
     fdAgg.top = new FormAttachment(wlAgg, margin);
@@ -428,14 +400,12 @@ public class GroupByDialog extends BaseTransformDialog {
     wAgg.setLayoutData(fdAgg);
 
     // Add listeners
-    wOk.addListener(SWT.Selection, e -> ok());
     wGet.addListener(SWT.Selection, e -> get());
     wGetAgg.addListener(SWT.Selection, e -> getAgg());
-    wCancel.addListener(SWT.Selection, e -> cancel());
 
     getData();
     input.setChanged(backupChanged);
-
+    focusTransformName();
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 
     return transformName;
@@ -447,6 +417,7 @@ public class GroupByDialog extends BaseTransformDialog {
     String[] fieldNames = ConstUi.sortFieldNames(inputFields);
     ciKey[0].setComboValues(fieldNames);
     ciReturn[1].setComboValues(fieldNames);
+    ciReturn[4].setComboValues(fieldNames);
   }
 
   public void setFlags() {
@@ -496,6 +467,7 @@ public class GroupByDialog extends BaseTransformDialog {
       item.setText(2, Const.NVL(aggregation.getSubject(), ""));
       item.setText(3, Const.NVL(Aggregation.getTypeDescLongFromCode(aggregation.getType()), ""));
       item.setText(4, Const.NVL(aggregation.getValue(), ""));
+      item.setText(5, Const.NVL(aggregation.getOrderField(), ""));
     }
 
     wGroup.setRowNums();
@@ -505,9 +477,6 @@ public class GroupByDialog extends BaseTransformDialog {
 
     setFlags();
     updateAllRowsCheckbox(wAgg, wAllRows, !input.isPassAllRows());
-
-    wTransformName.selectAll();
-    wTransformName.setFocus();
   }
 
   private void cancel() {
@@ -544,7 +513,9 @@ public class GroupByDialog extends BaseTransformDialog {
       String aggSubject = item.getText(2);
       String aggTypeDesc = item.getText(3);
       String aggValue = item.getText(4);
-      Aggregation aggr = new Aggregation(aggField, aggSubject, aggTypeDesc, aggValue);
+      String aggOrderField = item.getText(5);
+      Aggregation aggr =
+          new Aggregation(aggField, aggSubject, aggTypeDesc, aggValue, aggOrderField);
       input.getAggregations().add(aggr);
     }
 
@@ -624,7 +595,8 @@ public class GroupByDialog extends BaseTransformDialog {
             .anyMatch(
                 pred ->
                     pred == Aggregation.TYPE_GROUP_CUMULATIVE_SUM
-                        || pred == Aggregation.TYPE_GROUP_CUMULATIVE_AVERAGE);
+                        || pred == Aggregation.TYPE_GROUP_CUMULATIVE_AVERAGE
+                        || pred == Aggregation.TYPE_GROUP_MOVING_AVERAGE);
 
     allRowsButton.setEnabled(!isCumulativeSelected);
 

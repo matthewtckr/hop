@@ -28,6 +28,17 @@ public class KeyboardShortcut {
   private boolean command;
   private int keyCode;
 
+  /** If true, shortcut works from anywhere (e.g. activate perspective, toggle terminal). */
+  private boolean global;
+
+  /**
+   * Class the shortcut is triggered on. It defaults to the class declaring the annotated method but
+   * is set to the GUI plugin class when the shortcut is registered: a shortcut method can be
+   * inherited from a base class (the canvas navigation keys are declared on DragViewZoomBase and
+   * inherited by the pipeline and workflow graphs).
+   */
+  private String parentClassName;
+
   private String parentMethodName;
 
   public KeyboardShortcut() {
@@ -41,6 +52,8 @@ public class KeyboardShortcut {
     this.shift = shortcut.shift();
     this.command = shortcut.command();
     this.keyCode = shortcut.key();
+    this.global = shortcut.global();
+    this.parentClassName = parentMethod.getDeclaringClass().getName();
     this.parentMethodName = parentMethod.getName();
   }
 
@@ -51,6 +64,8 @@ public class KeyboardShortcut {
     this.shift = shortcut.shift();
     this.command = shortcut.command();
     this.keyCode = shortcut.key();
+    this.global = shortcut.global();
+    this.parentClassName = parentMethod.getDeclaringClass().getName();
     this.parentMethodName = parentMethod.getName();
   }
 
@@ -179,6 +194,8 @@ public class KeyboardShortcut {
         case 29:
           str.append("F20");
           break;
+        default:
+          break;
       }
     }
 
@@ -304,6 +321,22 @@ public class KeyboardShortcut {
   }
 
   /**
+   * Gets parentClassName (class where this shortcut should be triggered).
+   *
+   * @return value of parentClassName
+   */
+  public String getParentClassName() {
+    return parentClassName;
+  }
+
+  /**
+   * @param parentClassName The parentClassName to set
+   */
+  public void setParentClassName(String parentClassName) {
+    this.parentClassName = parentClassName;
+  }
+
+  /**
    * Gets parentMethodName
    *
    * @return value of parentMethodName
@@ -317,5 +350,13 @@ public class KeyboardShortcut {
    */
   public void setParentMethodName(String parentMethodName) {
     this.parentMethodName = parentMethodName;
+  }
+
+  public boolean isGlobal() {
+    return global;
+  }
+
+  public void setGlobal(boolean global) {
+    this.global = global;
   }
 }

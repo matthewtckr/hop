@@ -21,18 +21,20 @@ package org.apache.hop.execution.caching;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.execution.Execution;
 import org.apache.hop.execution.ExecutionData;
@@ -50,10 +52,17 @@ public class CacheEntry {
   // The name of the pipeline of workflow
   private String name;
 
+  // The creation date of this entry
+  //
+  private Date creationDate;
+
   // The parent execution: pipeline or workflow
   private Execution execution;
 
   // The parent execution: pipeline or workflow
+  // Custom getter/setter (below) so we flag dirty when state is updated after an early persist.
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
   private ExecutionState executionState;
 
   // All the child transform/action executions
@@ -79,6 +88,7 @@ public class CacheEntry {
     childExecutionData = new HashMap<>();
     summary = new EntrySummary();
     lastWritten = new Date();
+    creationDate = new Date();
     dirty = true;
   }
 
@@ -89,23 +99,37 @@ public class CacheEntry {
    * @throws HopException In case there was an error writing.
    */
   public void writeToDisk(String rootFolder) throws HopException {
+    writeToDisk(rootFolder, null);
+  }
+
+  /**
+   * Write this cache entry to a file under {@code rootFolder}.
+   *
+   * @param variables required for named VFS schemes (e.g. Databricks/MinIO connection schemes)
+   */
+  public void writeToDisk(String rootFolder, IVariables variables) throws HopException {
     String targetFilename = calculateFilename(rootFolder);
-    String filename = calculateFilename(rootFolder) + ".new";
-    try (FileOutputStream fos = new FileOutputStream(filename)) {
-      // Serialize this object to JSON in a file
+    String filename = targetFilename + ".new";
+    // Use Hop VFS (not java.io.FileOutputStream): rootFolder is often a VFS URI such as
+    // file:///data/hop-data/executions when resolved from ${HOP_DATA}. FileOutputStream treats
+    // "file://…" as a literal path and fails with FileNotFoundException even when the folder
+    // was created successfully via VFS. Named schemes (db-volume://) need variables so providers
+    // load from project metadata.
+    try (OutputStream os = HopVfs.getOutputStream(filename, false, variables)) {
       ObjectMapper objectMapper = new ObjectMapper();
-      objectMapper.writeValue(fos, this);
+      objectMapper.writeValue(os, this);
     } catch (Exception e) {
-      throw new HopException(
-          "Error writing cache entry to file '" + calculateFilename(rootFolder) + "'", e);
+      throw new HopException("Error writing cache entry to file '" + targetFilename + "'", e);
     }
     // Now delete the old file and rename the new one.
     //
     try {
-      FileObject targetFileObject = HopVfs.getFileObject(targetFilename);
-      targetFileObject.delete();
-      FileObject fileObject = HopVfs.getFileObject(filename);
-      fileObject.moveTo(targetFileObject);
+      FileObject targetFileObject = HopVfs.getFileObject(targetFilename, variables);
+      if (targetFileObject.exists()) {
+        targetFileObject.delete();
+      }
+      FileObject fileObject = HopVfs.getFileObject(filename, variables);
+      HopVfs.moveFile(fileObject, targetFileObject);
     } catch (Exception e) {
       throw new HopException(
           "Error renaming execution information to file '" + targetFilename + "'", e);
@@ -117,9 +141,13 @@ public class CacheEntry {
   }
 
   public void deleteFromDisk(String rootFolder) throws HopException {
+    deleteFromDisk(rootFolder, null);
+  }
+
+  public void deleteFromDisk(String rootFolder, IVariables variables) throws HopException {
     String targetFilename = calculateFilename(rootFolder);
     try {
-      FileObject fileObject = HopVfs.getFileObject(targetFilename);
+      FileObject fileObject = HopVfs.getFileObject(targetFilename, variables);
       fileObject.delete();
     } catch (Exception e) {
       throw new HopException(
@@ -135,7 +163,35 @@ public class CacheEntry {
    * @param rootFolder the root folder to store the
    */
   public String calculateFilename(String rootFolder) {
-    return rootFolder + Const.FILE_SEPARATOR + id + ".json";
+    if (StringUtils.isEmpty(rootFolder)) {
+      return id + ".json";
+    }
+    // Avoid double separators when the configured folder ends with / or \
+    String base = rootFolder;
+    if (base.endsWith("/") || base.endsWith("\\")) {
+      return base + id + ".json";
+    }
+    // Prefer / for VFS URIs (file://…); Const.FILE_SEPARATOR is wrong on Windows for file:// roots
+    if (base.contains("://") || base.startsWith("file:")) {
+      return base + "/" + id + ".json";
+    }
+    return base + Const.FILE_SEPARATOR + id + ".json";
+  }
+
+  /**
+   * Must flag dirty: top-level {@code registerExecution} often persists immediately (dirty=false).
+   * A later {@code updateExecutionState} (timer or end-of-run) would otherwise sit only in memory
+   * and never flush on {@code close()} when no further children dirty the entry — short nested
+   * workflows then appear in the GUI as files without state and are filtered out.
+   */
+  public void setExecutionState(ExecutionState executionState) {
+    this.executionState = executionState;
+    flagDirty();
+  }
+
+  public ExecutionState getExecutionState() {
+    flagRead();
+    return executionState;
   }
 
   public void addChildExecution(Execution childExecution) {
@@ -215,8 +271,20 @@ public class CacheEntry {
     return lastWritten != null && System.currentTimeMillis() - lastWritten.getTime() > maxAge;
   }
 
+  /**
+   * IDs of child transform/action executions. Includes registered children and owners that only
+   * contributed sample data or state (Beam/Spark may register data before a full child Execution).
+   */
   public List<String> getChildIds() {
-    return new ArrayList<>(childExecutions.keySet());
+    // Preserve insertion-ish order: executions first, then states, then data-only owners
+    java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>(childExecutions.keySet());
+    if (childExecutionStates != null) {
+      ids.addAll(childExecutionStates.keySet());
+    }
+    if (childExecutionData != null) {
+      ids.addAll(childExecutionData.keySet());
+    }
+    return new ArrayList<>(ids);
   }
 
   public void calculateSummary() {

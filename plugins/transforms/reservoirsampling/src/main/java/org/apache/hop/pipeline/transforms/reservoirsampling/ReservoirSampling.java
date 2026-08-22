@@ -19,6 +19,7 @@ package org.apache.hop.pipeline.transforms.reservoirsampling;
 
 import java.util.Arrays;
 import java.util.List;
+import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopTransformException;
 import org.apache.hop.pipeline.Pipeline;
@@ -91,7 +92,10 @@ public class ReservoirSampling extends BaseTransform<ReservoirSamplingMeta, Rese
       data.setOutputRowMeta(getInputRowMeta().clone());
       String sampleSize = resolve(meta.getSampleSize());
       String seed = resolve(meta.getSeed());
-      data.initialize(Integer.parseInt(sampleSize), Integer.parseInt(seed));
+      String expandedSampleSize = Const.expandIntegerString(sampleSize);
+      data.initialize(
+          Integer.parseInt(expandedSampleSize != null ? expandedSampleSize : sampleSize),
+          Integer.parseInt(seed));
 
       // no real reason to determine the output fields here
       // as we don't add/delete any fields
@@ -111,7 +115,7 @@ public class ReservoirSampling extends BaseTransform<ReservoirSamplingMeta, Rese
       logRowlevel("Read row #" + getLinesRead() + " : " + Arrays.toString(row));
     }
 
-    if (checkFeedback(getLinesRead())) {
+    if (checkFeedback(getLinesRead()) && isBasic()) {
       logBasic("Line number " + getLinesRead());
     }
     return true;
@@ -126,14 +130,16 @@ public class ReservoirSampling extends BaseTransform<ReservoirSamplingMeta, Rese
       List<Object[]> samples = data.getSamples();
 
       int numRows = (samples != null) ? samples.size() : 0;
-      logBasic(
-          this.getTransformName()
-              + " Actual/Sample: "
-              + numRows
-              + "/"
-              + data.sampleSize
-              + " Seed:"
-              + resolve(meta.seed));
+      if (isBasic()) {
+        logBasic(
+            this.getTransformName()
+                + " Actual/Sample: "
+                + numRows
+                + "/"
+                + data.sampleSize
+                + " Seed:"
+                + resolve(meta.seed));
+      }
       if (samples != null) {
         for (Object[] sample : samples) {
           if (sample != null) {

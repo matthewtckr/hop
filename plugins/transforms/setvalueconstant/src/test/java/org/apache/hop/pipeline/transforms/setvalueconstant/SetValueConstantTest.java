@@ -29,20 +29,20 @@ import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.row.RowMeta;
 import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Tests for "Set field value to a constant" transform
  *
  * @see SetValueConstant
  */
-public class SetValueConstantTest {
+class SetValueConstantTest {
   private TransformMockHelper<SetValueConstantMeta, SetValueConstantData> smh;
 
-  @Before
-  public void setUp() {
+  @BeforeEach
+  void setUp() {
     smh =
         new TransformMockHelper<>(
             "SetValueConstant", SetValueConstantMeta.class, SetValueConstantData.class);
@@ -50,13 +50,13 @@ public class SetValueConstantTest {
         .thenReturn(smh.iLogChannel);
   }
 
-  @After
-  public void cleanUp() {
+  @AfterEach
+  void cleanUp() {
     smh.cleanUp();
   }
 
   @Test
-  public void testUpdateField() throws Exception {
+  void testUpdateField() throws Exception {
     SetValueConstant transform =
         new SetValueConstant(
             smh.transformMeta,
@@ -79,7 +79,6 @@ public class SetValueConstantTest {
     field.setReplaceValue("Replace Value");
 
     doReturn(Collections.singletonList(field)).when(smh.iTransformMeta).getFields();
-    doReturn(field).when(smh.iTransformMeta).getField(0);
     doReturn(rowMeta).when(smh.iTransformData).getConvertRowMeta();
     doReturn(rowMeta).when(smh.iTransformData).getOutputRowMeta();
     doReturn(1).when(smh.iTransformData).getFieldnr();

@@ -20,8 +20,9 @@ package org.apache.hop.reflection.pipeline.meta;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
+import org.apache.hop.core.logging.LogLevel;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.pipeline.PipelineHopMeta;
 import org.apache.hop.pipeline.PipelineMeta;
@@ -38,11 +39,11 @@ import org.apache.hop.ui.core.widget.TableView;
 import org.apache.hop.ui.core.widget.TextVar;
 import org.apache.hop.ui.hopgui.HopGui;
 import org.apache.hop.ui.hopgui.file.pipeline.HopPipelineFileType;
-import org.apache.hop.ui.hopgui.perspective.dataorch.HopDataOrchestrationPerspective;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
 import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Event;
@@ -62,7 +63,9 @@ public class PipelineLogEditor extends MetadataEditor<PipelineLog> {
   private Text wName;
   private Button wEnabled;
   private Button wLoggingParentsOnly;
+  private Button wFailParentOnLoggingFailure;
   private TextVar wFilename;
+  private Combo wLogLevel;
   private Button wAtStart;
   private Button wAtEnd;
   private Button wPeriodic;
@@ -155,6 +158,27 @@ public class PipelineLogEditor extends MetadataEditor<PipelineLog> {
     wLoggingParentsOnly.setLayoutData(fdLoggingParentsOnly);
     lastControl = wlLoggingParentsOnly;
 
+    // FailParentOnLoggingFailure?
+    //
+    Label wlFailParentOnLoggingFailure = new Label(parent, SWT.RIGHT);
+    PropsUi.setLook(wlFailParentOnLoggingFailure);
+    wlFailParentOnLoggingFailure.setText(
+        BaseMessages.getString(PKG, "PipelineLoggingEditor.FailParentOnLoggingFailure.Label"));
+    FormData fdlFailParentOnLoggingFailure = new FormData();
+    fdlFailParentOnLoggingFailure.left = new FormAttachment(0, 0);
+    fdlFailParentOnLoggingFailure.right = new FormAttachment(middle, 0);
+    fdlFailParentOnLoggingFailure.top = new FormAttachment(lastControl, 2 * margin);
+    wlFailParentOnLoggingFailure.setLayoutData(fdlFailParentOnLoggingFailure);
+    wFailParentOnLoggingFailure = new Button(parent, SWT.CHECK | SWT.LEFT);
+    PropsUi.setLook(wFailParentOnLoggingFailure);
+    FormData fdFailParentOnLoggingFailure = new FormData();
+    fdFailParentOnLoggingFailure.left = new FormAttachment(middle, margin);
+    fdFailParentOnLoggingFailure.right = new FormAttachment(100, 0);
+    fdFailParentOnLoggingFailure.top =
+        new FormAttachment(wlFailParentOnLoggingFailure, 0, SWT.CENTER);
+    wFailParentOnLoggingFailure.setLayoutData(fdFailParentOnLoggingFailure);
+    lastControl = wlFailParentOnLoggingFailure;
+
     Label wlFilename = new Label(parent, SWT.RIGHT);
     PropsUi.setLook(wlFilename);
     wlFilename.setText(BaseMessages.getString(PKG, "PipelineLoggingEditor.Filename.Label"));
@@ -199,6 +223,26 @@ public class PipelineLogEditor extends MetadataEditor<PipelineLog> {
     fdFilename.top = new FormAttachment(wlFilename, 0, SWT.CENTER);
     wFilename.setLayoutData(fdFilename);
     lastControl = wlFilename;
+
+    // The log level to run the logging pipeline at
+    //
+    Label wlLogLevel = new Label(parent, SWT.RIGHT);
+    PropsUi.setLook(wlLogLevel);
+    wlLogLevel.setText(BaseMessages.getString(PKG, "PipelineLoggingEditor.LogLevel.Label"));
+    FormData fdlLogLevel = new FormData();
+    fdlLogLevel.left = new FormAttachment(0, 0);
+    fdlLogLevel.right = new FormAttachment(middle, 0);
+    fdlLogLevel.top = new FormAttachment(lastControl, 2 * margin);
+    wlLogLevel.setLayoutData(fdlLogLevel);
+    wLogLevel = new Combo(parent, SWT.SINGLE | SWT.READ_ONLY | SWT.BORDER | SWT.LEFT);
+    PropsUi.setLook(wLogLevel);
+    wLogLevel.setItems(LogLevel.getLogLevelDescriptions());
+    FormData fdLogLevel = new FormData();
+    fdLogLevel.left = new FormAttachment(middle, margin);
+    fdLogLevel.right = new FormAttachment(100, 0);
+    fdLogLevel.top = new FormAttachment(wlLogLevel, 0, SWT.CENTER);
+    wLogLevel.setLayoutData(fdLogLevel);
+    lastControl = wlLogLevel;
 
     // Execute at start
     //
@@ -312,7 +356,9 @@ public class PipelineLogEditor extends MetadataEditor<PipelineLog> {
     wName.addListener(SWT.Modify, modifyListener);
     wEnabled.addListener(SWT.Selection, modifyListener);
     wLoggingParentsOnly.addListener(SWT.Selection, modifyListener);
+    wFailParentOnLoggingFailure.addListener(SWT.Selection, modifyListener);
     wFilename.addListener(SWT.Modify, modifyListener);
+    wLogLevel.addListener(SWT.Modify, modifyListener);
     wAtStart.addListener(SWT.Selection, modifyListener);
     wAtEnd.addListener(SWT.Selection, modifyListener);
     wPeriodic.addListener(SWT.Selection, modifyListener);
@@ -367,15 +413,13 @@ public class PipelineLogEditor extends MetadataEditor<PipelineLog> {
         pipelineMeta.setFilename(realFilename);
         pipelineMeta.clearChanged();
 
-        HopDataOrchestrationPerspective perspective = HopGui.getDataOrchestrationPerspective();
+        // Open it in the Hop GUI
+        //
+        HopGui.getExplorerPerspective().addPipeline(pipelineMeta);
 
         // Switch to the perspective
         //
-        perspective.activate();
-
-        // Open it in the Hop GUI
-        //
-        HopGui.getDataOrchestrationPerspective().addPipeline(hopGui, pipelineMeta, type);
+        HopGui.getExplorerPerspective().activate();
 
         // Save the file
         hopGui.fileDelegate.fileSave();
@@ -425,7 +469,9 @@ public class PipelineLogEditor extends MetadataEditor<PipelineLog> {
     wName.setText(Const.NVL(pl.getName(), ""));
     wEnabled.setSelection(pl.isEnabled());
     wLoggingParentsOnly.setSelection(pl.isLoggingParentsOnly());
+    wFailParentOnLoggingFailure.setSelection(pl.isFailParentOnLoggingFailure());
     wFilename.setText(Const.NVL(pl.getPipelineFilename(), ""));
+    wLogLevel.setText(pl.getLogLevel().getDescription());
     wAtStart.setSelection(pl.isExecutingAtStart());
     wAtEnd.setSelection(pl.isExecutingAtEnd());
     wPeriodic.setSelection(pl.isExecutingPeriodically());
@@ -445,7 +491,9 @@ public class PipelineLogEditor extends MetadataEditor<PipelineLog> {
     pl.setName(wName.getText());
     pl.setEnabled(wEnabled.getSelection());
     pl.setLoggingParentsOnly(wLoggingParentsOnly.getSelection());
+    pl.setFailParentOnLoggingFailure(wFailParentOnLoggingFailure.getSelection());
     pl.setPipelineFilename(wFilename.getText());
+    pl.setLogLevel(LogLevel.lookupDescription(wLogLevel.getText()));
     pl.setExecutingAtStart(wAtStart.getSelection());
     pl.setExecutingAtEnd(wAtEnd.getSelection());
     pl.setExecutingPeriodically(wPeriodic.getSelection());

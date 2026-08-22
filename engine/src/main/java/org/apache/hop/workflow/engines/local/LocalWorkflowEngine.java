@@ -23,7 +23,7 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.IExtensionData;
 import org.apache.hop.core.Result;
@@ -31,11 +31,13 @@ import org.apache.hop.core.database.Database;
 import org.apache.hop.core.database.map.DatabaseConnectionMap;
 import org.apache.hop.core.exception.HopDatabaseException;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.logging.ILogChannel;
 import org.apache.hop.core.logging.ILoggingObject;
 import org.apache.hop.core.util.ExecutorUtil;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
+import org.apache.hop.execution.Execution;
 import org.apache.hop.execution.ExecutionBuilder;
 import org.apache.hop.execution.ExecutionDataBuilder;
 import org.apache.hop.execution.ExecutionInfoLocation;
@@ -58,6 +60,12 @@ import org.apache.hop.workflow.engine.WorkflowEnginePlugin;
     name = "Hop local workflow engine",
     description = "Executes your workflow locally")
 public class LocalWorkflowEngine extends Workflow implements IWorkflowEngine<WorkflowMeta> {
+
+  /**
+   * Must stay in sync with {@code org.apache.hop.spark.util.SparkConst#VAR_TRANSFORM_OWNER_ID}.
+   * Engine cannot depend on the spark plugin.
+   */
+  static final String VAR_SPARK_TRANSFORM_OWNER_ID = "Internal.Spark.TransformOwnerId";
 
   private ExecutionInfoLocation executionInfoLocation;
   private Timer executionInfoTimer;
@@ -129,74 +137,81 @@ public class LocalWorkflowEngine extends Workflow implements IWorkflowEngine<Wor
       //
       addExecutionFinishedListener(
           workflow -> {
-            String group = (String) workflow.getExtensionDataMap().get(Const.CONNECTION_GROUP);
-            List<Database> databases = DatabaseConnectionMap.getInstance().getDatabases(group);
-            Result result = workflow.getResult();
+            try {
+              String group = (String) workflow.getExtensionDataMap().get(Const.CONNECTION_GROUP);
+              List<Database> databases = DatabaseConnectionMap.getInstance().getDatabases(group);
+              Result result = workflow.getResult();
 
-            for (Database database : databases) {
-              // All fine?  Commit!
-              //
-              try {
-                if (result.getResult() && !result.isStopped() && result.getNrErrors() == 0) {
-                  try {
-                    database.commit(true);
-                    workflow
-                        .getLogChannel()
-                        .logBasic(
-                            "All transactions of database connection '"
-                                + database.getDatabaseMeta().getName()
-                                + "' were committed at the end of the workflow!");
-                  } catch (HopDatabaseException e) {
-                    workflow
-                        .getLogChannel()
-                        .logError(
-                            "Error committing database connection "
-                                + database.getDatabaseMeta().getName(),
-                            e);
-                    result.setNrErrors(result.getNrErrors() + 1);
-                  }
-                } else {
-                  // Error? Rollback!
-                  try {
-                    database.rollback(true);
-                    workflow
-                        .getLogChannel()
-                        .logBasic(
-                            "All transactions of database connection '"
-                                + database.getDatabaseMeta().getName()
-                                + "' were rolled back at the end of the workflow!");
-                  } catch (HopDatabaseException e) {
-                    workflow
-                        .getLogChannel()
-                        .logError(
-                            "Error rolling back database connection "
-                                + database.getDatabaseMeta().getName(),
-                            e);
-                    result.setNrErrors(result.getNrErrors() + 1);
-                  }
-                }
-              } finally {
-                // Always close connection!
+              for (Database database : databases) {
+                // All fine?  Commit!
+                //
                 try {
-                  database.closeConnectionOnly();
-                  workflow
-                      .getLogChannel()
-                      .logDebug(
-                          "Database connection '"
-                              + database.getDatabaseMeta().getName()
-                              + "' closed successfully!");
-                } catch (HopDatabaseException hde) {
-                  workflow
-                      .getLogChannel()
-                      .logError(
-                          "Error disconnecting from database - closeConnectionOnly failed:"
-                              + Const.CR
-                              + hde.getMessage());
-                  workflow.getLogChannel().logError(Const.getStackTracker(hde));
+                  if (result.isResult()
+                      && !result.isStopped()
+                      && !workflow.isStopped()
+                      && result.getNrErrors() == 0) {
+                    try {
+                      database.commit(true);
+                      workflow
+                          .getLogChannel()
+                          .logBasic(
+                              "All transactions of database connection '"
+                                  + database.getDatabaseMeta().getName()
+                                  + "' were committed at the end of the workflow!");
+                    } catch (HopDatabaseException e) {
+                      workflow
+                          .getLogChannel()
+                          .logError(
+                              "Error committing database connection "
+                                  + database.getDatabaseMeta().getName(),
+                              e);
+                      result.setNrErrors(result.getNrErrors() + 1);
+                    }
+                  } else {
+                    // Error? Rollback!
+                    try {
+                      database.rollback(true);
+                      workflow
+                          .getLogChannel()
+                          .logBasic(
+                              "All transactions of database connection '"
+                                  + database.getDatabaseMeta().getName()
+                                  + "' were rolled back at the end of the workflow!");
+                    } catch (HopDatabaseException e) {
+                      workflow
+                          .getLogChannel()
+                          .logError(
+                              "Error rolling back database connection "
+                                  + database.getDatabaseMeta().getName(),
+                              e);
+                      result.setNrErrors(result.getNrErrors() + 1);
+                    }
+                  }
+                } finally {
+                  // Always close connection!
+                  try {
+                    database.closeConnectionOnly();
+                    workflow
+                        .getLogChannel()
+                        .logDebug(
+                            "Database connection '"
+                                + database.getDatabaseMeta().getName()
+                                + "' closed successfully!");
+                  } catch (HopDatabaseException hde) {
+                    workflow
+                        .getLogChannel()
+                        .logError(
+                            "Error disconnecting from database - closeConnectionOnly failed:"
+                                + Const.CR
+                                + hde.getMessage());
+                    workflow.getLogChannel().logError(Const.getStackTracker(hde));
+                  }
+                  // Definitely remove the connection reference the connections map
+                  DatabaseConnectionMap.getInstance().removeConnection(group, null, database);
                 }
-                // Definitely remove the connection reference the connections map
-                DatabaseConnectionMap.getInstance().removeConnection(group, null, database);
               }
+            } catch (Exception e) {
+              log.logError("Error finishing database handling of the transactional workflow" + e);
             }
           });
     }
@@ -252,20 +267,36 @@ public class LocalWorkflowEngine extends Workflow implements IWorkflowEngine<Wor
   /** This method looks up the execution information location specified in the run configuration. */
   public void lookupExecutionInformationLocation() {
     try {
+      if (workflowRunConfiguration == null || metadataProvider == null) {
+        return;
+      }
       String locationName = resolve(workflowRunConfiguration.getExecutionInfoLocationName());
       if (StringUtils.isNotEmpty(locationName)) {
         ExecutionInfoLocation location =
             metadataProvider.getSerializer(ExecutionInfoLocation.class).load(locationName);
         if (location != null) {
-          executionInfoLocation = location;
+          // Clone so nested workflow runs do not share timer/rootFolder state
+          executionInfoLocation = location.clone();
 
           IExecutionInfoLocation iLocation = executionInfoLocation.getExecutionInfoLocation();
-          // Initialize the location.
-          // This location is closed when nothing else needs to be done.  This is when the timer is
-          // stopped in
-          // stopExecutionInfoTimer().
-          //
+          if (iLocation == null) {
+            log.logError(
+                "Execution information location '"
+                    + locationName
+                    + "' has no location plugin configured (non-fatal)");
+            return;
+          }
+          // Initialize the location with this workflow's variable space (includes inherited parent
+          // pipeline variables after WorkflowExecutor.initializeFrom). This is when
+          // ${EXECUTIONS_INFORMATION_FOLDER} / ${HOP_DATA} must resolve.
+          // The location is closed when the timer is stopped in stopExecutionInfoTimer().
           iLocation.initialize(this, metadataProvider);
+          log.logBasic(
+              "Using execution information location '"
+                  + locationName
+                  + "' (logChannelId="
+                  + getLogChannelId()
+                  + ")");
         } else {
           log.logError(
               "Execution information location '"
@@ -287,13 +318,56 @@ public class LocalWorkflowEngine extends Workflow implements IWorkflowEngine<Wor
       if (executionInfoLocation != null) {
         // Register the execution at this location
         // This adds metadata, variables, parameters, ...
-        executionInfoLocation
-            .getExecutionInfoLocation()
-            .registerExecution(ExecutionBuilder.fromExecutor(this).build());
+        Execution execution = ExecutionBuilder.fromExecutor(this).build();
+        rebindSparkTransformOwnerParent(execution);
+        executionInfoLocation.getExecutionInfoLocation().registerExecution(execution);
       }
     } catch (Exception e) {
       log.logError("Error registering workflow execution information (non-fatal)", e);
     }
+  }
+
+  /**
+   * When this workflow is nested under a Native Spark mapPartitions transform (Workflow Executor),
+   * the parent transform is registered under a synthetic id {@code pipelineId|name|copy}. Rebind so
+   * the execution perspective can drill down from that transform node.
+   *
+   * <p>Uses {@link IVariables#getVariable(String)} (not {@link IVariables#resolve(String)}):
+   * resolve only substitutes {@code ${...}} tokens and returns a bare name unchanged, which would
+   * always overwrite parentId with the literal variable name (issue #7743).
+   */
+  /** Package-private for unit tests. */
+  void rebindSparkTransformOwnerParent(Execution execution) {
+    if (execution == null) {
+      return;
+    }
+    String sparkOwner = sparkTransformOwnerId(this);
+    if (StringUtils.isNotEmpty(sparkOwner)) {
+      execution.setParentId(sparkOwner);
+    }
+  }
+
+  /** Package-private for unit tests. */
+  void rebindSparkTransformOwnerParent(ExecutionState state) {
+    if (state == null) {
+      return;
+    }
+    String sparkOwner = sparkTransformOwnerId(this);
+    if (StringUtils.isNotEmpty(sparkOwner)) {
+      state.setParentId(sparkOwner);
+    }
+  }
+
+  /**
+   * Returns the Spark transform owner id when set on the variable space; otherwise null.
+   *
+   * <p>Package-private for unit tests.
+   */
+  static String sparkTransformOwnerId(IVariables variables) {
+    if (variables == null) {
+      return null;
+    }
+    return variables.getVariable(VAR_SPARK_TRANSFORM_OWNER_ID);
   }
 
   public void startExecutionInfoTimer() {
@@ -321,12 +395,13 @@ public class LocalWorkflowEngine extends Workflow implements IWorkflowEngine<Wor
               ExecutionState executionState =
                   ExecutionStateBuilder.fromExecutor(LocalWorkflowEngine.this, lastLogLineNr.get())
                       .build();
+              rebindSparkTransformOwnerParent(executionState);
               iLocation.updateExecutionState(executionState);
               if (executionState.getLastLogLineNr() != null) {
                 lastLogLineNr.set(executionState.getLastLogLineNr());
               }
             } catch (Exception e) {
-              throw new RuntimeException(
+              throw new HopRuntimeException(
                   "Error registering execution info data from transforms at location "
                       + executionInfoLocation.getName(),
                   e);
@@ -442,6 +517,7 @@ public class LocalWorkflowEngine extends Workflow implements IWorkflowEngine<Wor
       //
       ExecutionState executionState =
           ExecutionStateBuilder.fromExecutor(LocalWorkflowEngine.this, -1).build();
+      rebindSparkTransformOwnerParent(executionState);
       iLocation.updateExecutionState(executionState);
     } finally {
       // Nothing more needs to be done. We can now close the location.

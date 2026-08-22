@@ -48,7 +48,7 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     image = "dbproc.svg",
     name = "i18n::CallDBProcedure.Name",
     description = "i18n::CallDBProcedure.Description",
-    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Lookup",
+    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Utility",
     keywords = "i18n::DBProcMeta.keyword",
     documentationUrl = "/pipeline/transforms/calldbproc.html",
     actionTransformTypes = ActionTransformType.RDBMS)
@@ -80,22 +80,6 @@ public class DBProcMeta extends BaseTransformMeta<DBProc, DBProcData> {
     this.result = new ProcResult();
   }
 
-  public DBProcMeta(DBProcMeta m) {
-    this();
-    this.connection = m.connection;
-    this.procedure = m.procedure;
-    for (ProcArgument argument : m.arguments) {
-      this.arguments.add(new ProcArgument(argument));
-    }
-    this.result = new ProcResult(m.result);
-    this.autoCommit = m.autoCommit;
-  }
-
-  @Override
-  public DBProcMeta clone() {
-    return new DBProcMeta(this);
-  }
-
   @Override
   public void setDefault() {
     connection = null;
@@ -125,9 +109,7 @@ public class DBProcMeta extends BaseTransformMeta<DBProc, DBProcData> {
       }
     }
 
-    for (int i = 0; i < arguments.size(); i++) {
-      ProcArgument argument = arguments.get(i);
-
+    for (ProcArgument argument : arguments) {
       if (argument.getDirection().equalsIgnoreCase("OUT")) {
         IValueMeta v;
         try {
@@ -181,9 +163,7 @@ public class DBProcMeta extends BaseTransformMeta<DBProc, DBProcData> {
           errorMessage = "";
           boolean errorFound = false;
 
-          for (int i = 0; i < arguments.size(); i++) {
-            ProcArgument argument = arguments.get(i);
-
+          for (ProcArgument argument : arguments) {
             IValueMeta v = prev.searchValueMeta(argument.getName());
             if (v == null) {
               if (first) {

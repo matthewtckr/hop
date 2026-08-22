@@ -38,6 +38,8 @@ import org.apache.hop.core.row.value.ValueMetaInteger;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.lineage.api.RelationalLineage;
+import org.apache.hop.lineage.model.RelationalIoOperation;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
@@ -57,6 +59,9 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     actionTransformTypes = {ActionTransformType.OUTPUT, ActionTransformType.RDBMS})
 @Getter
 @Setter
+@RelationalLineage(
+    operation = RelationalIoOperation.WRITE,
+    tableNameFromFieldProperty = "tableNameField")
 public class TableOutputMeta extends BaseTransformMeta<TableOutput, TableOutputData> {
   private static final Class<?> PKG = TableOutputMeta.class;
 
@@ -148,7 +153,8 @@ public class TableOutputMeta extends BaseTransformMeta<TableOutput, TableOutputD
   @HopMetadataProperty(
       key = "tablename_field",
       injectionKey = "TABLE_NAME_FIELD",
-      injectionKeyDescription = "TableOutputMeta.Injection.TableNameField.Field")
+      injectionKeyDescription = "TableOutputMeta.Injection.TableNameField.Field",
+      hopMetadataPropertyType = HopMetadataPropertyType.RDBMS_TABLE)
   private String tableNameField;
 
   @HopMetadataProperty(
@@ -175,6 +181,41 @@ public class TableOutputMeta extends BaseTransformMeta<TableOutput, TableOutputD
       injectionKeyDescription = "TableOutputMeta.Injection.SpecifyFields.Field")
   private boolean specifyFields;
 
+  /** Automatically update table structure based on incoming data stream */
+  @HopMetadataProperty(
+      key = "auto_update_table_structure",
+      injectionKey = "AUTO_UPDATE_TABLE_STRUCTURE",
+      injectionKeyDescription = "TableOutputMeta.Injection.AutoUpdateTableStructure.Field")
+  private boolean autoUpdateTableStructure;
+
+  /** Always drop and recreate table when auto-updating structure */
+  @HopMetadataProperty(
+      key = "always_drop_and_recreate",
+      injectionKey = "ALWAYS_DROP_AND_RECREATE",
+      injectionKeyDescription = "TableOutputMeta.Injection.AlwaysDropAndRecreate.Field")
+  private boolean alwaysDropAndRecreate;
+
+  /** Add columns from incoming stream that don't exist in target table */
+  @HopMetadataProperty(
+      key = "add_columns",
+      injectionKey = "ADD_COLUMNS",
+      injectionKeyDescription = "TableOutputMeta.Injection.AddColumns.Field")
+  private boolean addColumns;
+
+  /** Drop columns from table that don't exist in incoming stream */
+  @HopMetadataProperty(
+      key = "drop_columns",
+      injectionKey = "DROP_COLUMNS",
+      injectionKeyDescription = "TableOutputMeta.Injection.DropColumns.Field")
+  private boolean dropColumns;
+
+  /** Change column data types to match incoming stream types */
+  @HopMetadataProperty(
+      key = "change_column_types",
+      injectionKey = "CHANGE_COLUMN_TYPES",
+      injectionKeyDescription = "TableOutputMeta.Injection.ChangeColumnTypes.Field")
+  private boolean changeColumnTypes;
+
   @HopMetadataProperty(
       groupKey = "fields",
       key = "field",
@@ -200,11 +241,6 @@ public class TableOutputMeta extends BaseTransformMeta<TableOutput, TableOutputD
     commitSize = "1000";
 
     fields = new ArrayList<>();
-  }
-
-  @Override
-  public Object clone() {
-    return super.clone();
   }
 
   @Override

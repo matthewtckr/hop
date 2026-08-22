@@ -32,7 +32,6 @@ import org.kie.api.builder.Results;
 import org.kie.api.io.Resource;
 import org.kie.api.io.ResourceType;
 import org.kie.api.runtime.KieSession;
-import org.kie.api.runtime.ObjectFilter;
 import org.kie.internal.io.ResourceFactory;
 import org.kie.internal.utils.KieHelper;
 
@@ -134,35 +133,34 @@ public class RulesAccumulatorData extends BaseTransformData implements ITransfor
     ClassLoader loader = getClass().getClassLoader();
     Thread.currentThread().setContextClassLoader(loader);
 
-    if (kieHelper != null) {
-      KieSession session = kieHelper.getKieContainer().newKieSession();
-      for (Rules.Row fact : rowList) {
-        session.insert(fact);
+    try {
+      if (kieHelper != null) {
+        // KieSession.close() delegates to dispose()
+        try (KieSession session = kieHelper.getKieContainer().newKieSession()) {
+          for (Rules.Row fact : rowList) {
+            session.insert(fact);
+          }
+
+          session.fireAllRules();
+
+          Collection<Object> oList =
+              (Collection<Object>)
+                  session.getObjects(
+                      o -> {
+                        if (o instanceof Rules.Row row && !row.isExternalSource()) {
+                          return true;
+                        }
+                        return false;
+                      });
+
+          for (Object o : oList) {
+            resultList.add((Rules.Row) o);
+          }
+        }
       }
-
-      int fh = session.fireAllRules();
-
-      Collection<Object> oList =
-          (Collection<Object>)
-              session.getObjects(
-                  new ObjectFilter() {
-                    @Override
-                    public boolean accept(Object o) {
-                      if (o instanceof Rules.Row row && !row.isExternalSource()) {
-                        return true;
-                      }
-                      return false;
-                    }
-                  });
-
-      for (Object o : oList) {
-        resultList.add((Rules.Row) o);
-      }
-
-      session.dispose();
+    } finally {
+      Thread.currentThread().setContextClassLoader(orig);
     }
-
-    Thread.currentThread().setContextClassLoader(orig);
   }
 
   /**

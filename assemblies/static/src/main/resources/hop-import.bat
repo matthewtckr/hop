@@ -22,8 +22,20 @@ setlocal
 REM switch to script directory
 cd /D %~dp0
 
-set LIBSPATH=lib\core;lib\beam
-set CLASSPATH=lib\core\*;lib\beam\*;lib\swt\win64\*
+REM Optional user-level env written by `hop setup` (does not override already-set variables)
+if exist "%USERPROFILE%\.hop\hop-env.cmd" call "%USERPROFILE%\.hop\hop-env.cmd"
+
+set LIBSPATH=lib\core
+set CLASSPATH=lib\core\*;lib\spark-client\*;lib\swt\win64\*
+
+REM Optional versioned Spark client pack
+if defined HOP_SPARK_CLIENT_VERSION if exist "lib\spark-clients\%HOP_SPARK_CLIENT_VERSION%\" (
+  set CLASSPATH=%CLASSPATH%;lib\spark-clients\%HOP_SPARK_CLIENT_VERSION%\*
+)
+
+
+
+
 
 :NormalStart
 REM set java primary is HOP_JAVA_HOME fallback to JAVA_HOME or default java
@@ -44,7 +56,7 @@ REM If the user passes in DEBUG as the first parameter, it starts Hop in debugge
 REM to allow attaching a debugger to step code.
 if [%1]==[DEBUG] (
 REM # optional line for attaching a debugger
-set HOP_OPTIONS=%HOP_OPTIONS% -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5009)
+set HOP_OPTIONS=%HOP_OPTIONS% -Xdebug -Xnoagent -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5009)
 
 REM Pass HOP variables if they're set.
 if not "%HOP_AUDIT_FOLDER%"=="" (
@@ -66,6 +78,9 @@ if not "%HOP_PASSWORD_ENCODER_PLUGIN%"=="" (
 )
 if not "%HOP_AES_ENCODER_KEY%"=="" (
   set HOP_OPTIONS=%HOP_OPTIONS% -DHOP_AES_ENCODER_KEY=%HOP_AES_ENCODER_KEY%
+)
+if not "%HOP_AES_ENCODER_KEY_FILE%"=="" (
+  set HOP_OPTIONS=%HOP_OPTIONS% -DHOP_AES_ENCODER_KEY_FILE=%HOP_AES_ENCODER_KEY_FILE%
 )
 
 set HOP_OPTIONS=%HOP_OPTIONS% -DHOP_PLATFORM_OS=Windows

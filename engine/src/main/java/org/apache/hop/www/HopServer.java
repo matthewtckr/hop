@@ -17,26 +17,21 @@
 
 package org.apache.hop.www;
 
-import com.google.common.annotations.VisibleForTesting;
-import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.Socket;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
-import javax.ws.rs.client.Client;
-import javax.ws.rs.client.ClientBuilder;
-import javax.ws.rs.client.WebTarget;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.commons.collections4.CollectionUtils;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.HopClientEnvironment;
 import org.apache.hop.core.HopEnvironment;
+import org.apache.hop.core.HopVersionProvider;
 import org.apache.hop.core.Result;
 import org.apache.hop.core.config.plugin.ConfigPlugin;
-import org.apache.hop.core.config.plugin.ConfigPluginType;
 import org.apache.hop.core.config.plugin.IConfigOptions;
 import org.apache.hop.core.encryption.Encr;
 import org.apache.hop.core.exception.HopException;
@@ -45,14 +40,15 @@ import org.apache.hop.core.extension.HopExtensionPoint;
 import org.apache.hop.core.logging.ILogChannel;
 import org.apache.hop.core.logging.LogChannel;
 import org.apache.hop.core.logging.LogLevel;
-import org.apache.hop.core.plugins.IPlugin;
 import org.apache.hop.core.plugins.JarCache;
-import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.core.xml.XmlHandler;
+import org.apache.hop.hop.Hop;
+import org.apache.hop.hop.plugin.HopCommand;
+import org.apache.hop.hop.plugin.IHopCommand;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.metadata.api.IHasHopMetadataProvider;
 import org.apache.hop.metadata.api.IHopMetadataSerializer;
@@ -60,23 +56,33 @@ import org.apache.hop.metadata.serializer.json.JsonMetadataProvider;
 import org.apache.hop.metadata.serializer.multi.MultiMetadataProvider;
 import org.apache.hop.metadata.util.HopMetadataInstance;
 import org.apache.hop.metadata.util.HopMetadataUtil;
+import org.apache.hop.pipeline.PipelineMeta;
+import org.apache.hop.pipeline.engine.IPipelineEngine;
 import org.apache.hop.pipeline.transform.TransformStatus;
 import org.apache.hop.server.HopServerMeta;
-import org.glassfish.jersey.client.ClientConfig;
-import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
+import org.apache.hop.workflow.WorkflowMeta;
+import org.apache.hop.workflow.engine.IWorkflowEngine;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import picocli.CommandLine;
+import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
 @SuppressWarnings("java:S106")
-public class HopServer implements Runnable, IHasHopMetadataProvider {
+@Getter
+@Setter
+@Command(
+    versionProvider = HopVersionProvider.class,
+    mixinStandardHelpOptions = true,
+    description = "Run a Hop server")
+@HopCommand(id = "server", description = "Run a Hop server")
+public class HopServer implements Runnable, IHasHopMetadataProvider, IHopCommand {
   private static final Class<?> PKG = HopServer.class;
   private static final String CONST_FOUND = " found.";
   private static final String CONST_SPACE = "        ";
   private static final String CONST_USAGE_EXAMPLE = "HopServer.Usage.Example";
 
-  @Parameters(description = "One XML configuration file or a hostname and port", arity = "0..3")
+  @Parameters(description = "One XML configuration file or a hostname and port", arity = "0..2")
   private List<String> parameters;
 
   @picocli.CommandLine.Option(
@@ -128,6 +134,20 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
       description = "The name of the server to start as defined in the metadata.")
   private String serverName;
 
+  @CommandLine.Option(
+      names = {"-a", "--auth"},
+      description = "Does the Hop web server have authentication enabled")
+  private Boolean enableAuth;
+
+  @CommandLine.Option(
+      names = {"-swt", "--shutdown-timeout"},
+      description =
+          "The maximum number of seconds to wait for running pipelines and workflows to finish "
+              + "when the server shuts down. 0 (the default) shuts down immediately without "
+              + "waiting. Can also be set with the HOP_SERVER_SHUTDOWN_TIMEOUT environment variable.",
+      defaultValue = "${env:HOP_SERVER_SHUTDOWN_TIMEOUT:-0}")
+  private long shutdownTimeout;
+
   private WebServer webServer;
   private HopServerConfig config;
   private boolean allOK;
@@ -139,14 +159,37 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
   private Boolean joinOverride;
   private String realFilename;
 
+  /**
+   * When the server exits normally (its run loop returns) this stays true and the VM shutdown hook
+   * is removed. When the VM shutdown hook itself triggers the shutdown it is set to false so the
+   * hook is not removed while the shutdown sequence is already running.
+   */
+  private boolean jvmExit = true;
+
   public HopServer() {
     this.config = new HopServerConfig();
     this.joinOverride = null;
 
     HopServerMeta defaultServer =
-        new HopServerMeta("local8080", "localhost", "8080", "8079", "cluster", "cluster");
+        new HopServerMeta("local8080", "localhost", "8080", "cluster", "cluster");
     this.config.setHopServer(defaultServer);
     this.config.setJoining(true);
+  }
+
+  @Override
+  public void initialize(
+      CommandLine cmd, IVariables variables, MultiMetadataProvider metadataProvider)
+      throws HopException {
+    this.cmd = cmd;
+    this.variables = variables;
+    this.metadataProvider = metadataProvider;
+
+    HopClientEnvironment.getInstance().setClient(HopClientEnvironment.ClientType.SERVER);
+    Hop.addMixinPlugins(cmd, ConfigPlugin.CATEGORY_SERVER);
+
+    // Add optional metadata folder (legacy)
+    //
+    addMetadataFolderProvider();
   }
 
   public void runHopServer() throws Exception {
@@ -163,36 +206,177 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
     HopServerMeta hopServer = config.getHopServer();
 
     String hostname = hopServer.getHostname();
-    int port = WebServer.CONST_PORT;
-    int shutdownPort = WebServer.SHUTDOWN_PORT;
+    int port = WebServer.DEFAULT_PORT;
     if (!Utils.isEmpty(hopServer.getPort())) {
       port = parsePort(hopServer);
     }
-    if (!Utils.isEmpty(hopServer.getShutdownPort())) {
-      shutdownPort = parseShutdownPort(hopServer);
-    }
 
     if (allOK) {
+      // Expose the hop-server.xml details as Internal.Server.* variables so they
+      // are inherited by pipelines and workflows executing on this server.
+      config.setInternalHopServerVariables(config.getVariables(), port);
+      config.setInternalHopServerVariables(variables, port);
+
       boolean shouldJoin = config.isJoining();
       if (joinOverride != null) {
         shouldJoin = joinOverride;
       }
 
-      this.webServer =
-          new WebServer(
-              log,
-              pipelineMap,
-              workflowMap,
-              hostname,
-              port,
-              shutdownPort,
-              shouldJoin,
-              config.getPasswordFile(),
-              hopServer.getSslConfig());
+      Thread shutdownHook = new ShutdownHook();
+      try {
+        // Register a virtual-machine shutdown hook to stop the Hop server gracefully.
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
+
+        this.webServer =
+            new WebServer(
+                log,
+                pipelineMap,
+                workflowMap,
+                hostname,
+                port,
+                config.getPasswordFile(),
+                hopServer.getSslConfig());
+
+        // Start the web server
+        webServer.start();
+
+        HopServerSingleton.setHopServer(this);
+
+        // Right after the Hop server has started and is fully functional
+        try {
+          ExtensionPointHandler.callExtensionPoint(
+              log, variables, HopExtensionPoint.HopServerStartup.id, this);
+        } catch (Exception e) {
+          // Log error but continue regular operations to make sure HopServer continues to run
+          // properly.
+          log.logError("Error calling extension point HopServerStartup", e);
+        }
+
+        if (shouldJoin) {
+          webServer.join();
+          webServer = null;
+        }
+
+        HopServerSingleton.setHopServer(null);
+
+        // Right after the Hop server shutdown
+        try {
+          ExtensionPointHandler.callExtensionPoint(
+              log, variables, HopExtensionPoint.HopServerTerminate.id, this);
+        } catch (Exception e) {
+          // Log error but continue regular operations to make sure HopServer continues to run
+          // properly.
+          log.logError("Error calling extension point HopServerTerminate", e);
+        }
+      } finally {
+        // Shutdown hooks cannot be removed once the shutdown sequence is started.
+        if (jvmExit) {
+          Runtime.getRuntime().removeShutdownHook(shutdownHook);
+        }
+      }
+    }
+  }
+
+  /** Gracefully shut down the running Hop web server. */
+  public void shutdown() {
+    if (webServer != null) {
+      // From now on the server refuses new work (adding/running pipelines, workflows, ...) but
+      // keeps serving status requests.
+      HopServerSingleton.setServerShuttingDown(true);
+
+      // Right before the Hop server will shut down
+      try {
+        ExtensionPointHandler.callExtensionPoint(
+            log, variables, HopExtensionPoint.HopServerShutdown.id, this);
+      } catch (Exception e) {
+        // Log error but continue regular operations to make sure HopServer can be shut down
+        // properly.
+        log.logError("Error calling extension point HopServerShutdown", e);
+      }
+
+      // Wait for running pipelines and workflows to finish, up to the configured timeout.
+      awaitRunningExecutions();
+
+      webServer.stop();
+    }
+  }
+
+  /**
+   * Wait until all running pipelines and workflows on this server have finished, or until the
+   * configured shutdown timeout (in seconds) has elapsed. A timeout of 0 (the default) shuts down
+   * immediately without waiting.
+   */
+  private void awaitRunningExecutions() {
+    if (shutdownTimeout <= 0) {
+      log.logBasic(
+          "Shutdown timeout is 0; stopping the server immediately without waiting for running "
+              + "pipelines and workflows to finish. Set --shutdown-timeout (or "
+              + "HOP_SERVER_SHUTDOWN_TIMEOUT) to a number of seconds to wait for them.");
+      return;
     }
 
-    ExtensionPointHandler.callExtensionPoint(
-        log, variables, HopExtensionPoint.HopServerShutdown.id, this);
+    HopServerSingleton singleton = HopServerSingleton.getInstance();
+    PipelineMap pipelineMap = singleton.getPipelineMap();
+    WorkflowMap workflowMap = singleton.getWorkflowMap();
+
+    long deadline = System.currentTimeMillis() + shutdownTimeout * 1000L;
+    log.logBasic(
+        "Waiting up to "
+            + shutdownTimeout
+            + " seconds for running pipelines and workflows to finish before shutting down.");
+
+    int running;
+    while ((running = countRunningExecutions(pipelineMap, workflowMap)) > 0
+        && System.currentTimeMillis() < deadline) {
+      log.logBasic(running + " pipeline(s)/workflow(s) still running, waiting for completion...");
+      try {
+        Thread.sleep(5000L);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        break;
+      }
+    }
+
+    running = countRunningExecutions(pipelineMap, workflowMap);
+    if (running > 0) {
+      log.logBasic(
+          "Shutdown wait time elapsed while "
+              + running
+              + " pipeline(s)/workflow(s) are still running; stopping the server now.");
+    } else {
+      log.logBasic("All pipelines and workflows have finished; stopping the server.");
+    }
+  }
+
+  /**
+   * @return the number of pipelines and workflows that are currently running on this server
+   */
+  private int countRunningExecutions(PipelineMap pipelineMap, WorkflowMap workflowMap) {
+    int running = 0;
+    for (HopServerObjectEntry entry : pipelineMap.getPipelineObjects()) {
+      IPipelineEngine<PipelineMeta> pipeline = pipelineMap.getPipeline(entry);
+      if (pipeline != null && !pipeline.isFinished() && !pipeline.isStopped()) {
+        running++;
+      }
+    }
+    for (HopServerObjectEntry entry : workflowMap.getWorkflowObjects()) {
+      IWorkflowEngine<WorkflowMeta> workflow = workflowMap.getWorkflow(entry);
+      if (workflow != null && !workflow.isFinished() && !workflow.isStopped()) {
+        running++;
+      }
+    }
+    return running;
+  }
+
+  /** Virtual-machine shutdown hook that stops the Hop server gracefully (e.g. on Ctrl-C). */
+  private class ShutdownHook extends Thread {
+    @Override
+    public void run() {
+      log.logDetailed("Shutting down the Hop server...");
+      // We are already in the JVM shutdown sequence, so the hook must not be removed again.
+      jvmExit = false;
+      shutdown();
+    }
   }
 
   private int parsePort(HopServerMeta hopServer) {
@@ -208,22 +392,10 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
     return -1;
   }
 
-  private int parseShutdownPort(HopServerMeta hopServer) {
-    try {
-      return Integer.parseInt(hopServer.getShutdownPort());
-    } catch (Exception e) {
-      log.logError(
-          BaseMessages.getString(
-              PKG, "HopServer.Error.CanNotPartShutdownPort", hopServer.getShutdownPort()),
-          e);
-      allOK = false;
-    }
-    return -1;
-  }
-
   @Override
   public void run() {
     try {
+      System.setProperty(Const.HOP_PLATFORM_RUNTIME, "SERVER");
       log = new LogChannel("HopServer");
       log.setLogLevel(determineLogLevel());
       log.logDetailed("Start of Hop Server");
@@ -257,24 +429,24 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
         setupByFileName();
       }
 
-      if ((CollectionUtils.size(parameters) == 2 || (CollectionUtils.size(parameters) == 3))
+      if (CollectionUtils.size(parameters) == 2
           && StringUtils.isNotEmpty(parameters.get(0))
           && StringUtils.isNotEmpty(parameters.get(1))) {
         String hostname = parameters.get(0);
         String port = parameters.get(1);
 
-        String shutdownPort =
-            CollectionUtils.size(parameters) == 3
-                ? parameters.get(2)
-                : Integer.toString(WebServer.SHUTDOWN_PORT);
-
-        setupByHostNameAndPort(hostname, port, shutdownPort);
+        setupByHostNameAndPort(hostname, port);
       }
 
       // Pass the variables and metadata provider
       //
       config.setVariables(variables);
       config.setMetadataProvider(metadataProvider);
+
+      // enable auth
+      if (this.enableAuth != null) {
+        config.getHopServer().setEnableAuth(this.enableAuth);
+      }
 
       // See if we need to add the metadata folder (legacy)
       //
@@ -295,9 +467,8 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
     }
   }
 
-  private void setupByHostNameAndPort(String hostname, String port, String shutdownPort) {
-    HopServerMeta hopServer =
-        new HopServerMeta(hostname + ":" + port, hostname, port, shutdownPort, null, null);
+  private void setupByHostNameAndPort(String hostname, String port) {
+    HopServerMeta hopServer = new HopServerMeta(hostname + ":" + port, hostname, port, null, null);
 
     config = new HopServerConfig();
     config.setHopServer(hopServer);
@@ -326,8 +497,7 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
     }
     String hostname = variables.resolve(hopServer.getHostname());
     String port = variables.resolve(hopServer.getPort());
-    String shutDownPort = variables.resolve(hopServer.getShutdownPort());
-    parameters = List.of(Const.NVL(hostname, ""), Const.NVL(port, ""), Const.NVL(shutDownPort, ""));
+    parameters = List.of(Const.NVL(hostname, ""), Const.NVL(port, ""));
   }
 
   private boolean handleQueryOptions() {
@@ -348,7 +518,8 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
 
       if (generalStatus) {
         queried = true;
-        HopServerStatus status = config.getHopServer().getStatus(variables);
+        HopServerStatus status =
+            new RemoteHopServer(config.getHopServer()).requestServerStatus(variables);
         // List the pipelines...
         //
         System.out.println("Pipelines: " + status.getPipelineStatusList().size() + CONST_FOUND);
@@ -369,7 +540,8 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
               "Please specify the ID of the pipeline execution to see its status.");
         }
         HopServerPipelineStatus pipelineStatus =
-            config.getHopServer().getPipelineStatus(variables, pipelineName, id, 0);
+            new RemoteHopServer(config.getHopServer())
+                .requestPipelineStatus(variables, pipelineName, id, 0);
         printPipelineStatus(pipelineStatus, true);
       } else if (StringUtils.isNotEmpty(workflowName)) {
         queried = true;
@@ -378,7 +550,8 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
               "Please specify the ID of the workflow execution to see its status.");
         }
         HopServerWorkflowStatus workflowStatus =
-            config.getHopServer().getWorkflowStatus(variables, workflowName, id, 0);
+            new RemoteHopServer(config.getHopServer())
+                .requestWorkflowStatus(variables, workflowName, id, 0);
         printWorkflowStatus(workflowStatus, true);
       }
 
@@ -441,7 +614,7 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
     System.out.println("      Status:   " + workflowStatus.getStatusDescription());
     System.out.println("      Log date: " + formatDate(workflowStatus.getLogDate()));
     if (result != null) {
-      System.out.println("      Result:   " + result.getResult());
+      System.out.println("      Result:   " + result.isResult());
       System.out.println("      Errors:   " + result.getNrErrors());
     }
     if (printDetails) {
@@ -476,7 +649,7 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
     //
     if (systemProperties != null) {
       for (String parameter : systemProperties) {
-        String[] split = parameter.split("=");
+        String[] split = parameter.split("=", 2);
         String key = split.length > 0 ? split[0] : null;
         String value = split.length > 1 ? split[1] : null;
         if (StringUtils.isNotEmpty(key) && StringUtils.isNotEmpty(value)) {
@@ -530,15 +703,7 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
 
       // Now add server configuration plugins...
       //
-      List<IPlugin> configPlugins = PluginRegistry.getInstance().getPlugins(ConfigPluginType.class);
-      for (IPlugin configPlugin : configPlugins) {
-        // Load only the plugins of the "run" category
-        if (ConfigPlugin.CATEGORY_SERVER.equals(configPlugin.getCategory())) {
-          IConfigOptions configOptions =
-              PluginRegistry.getInstance().loadClass(configPlugin, IConfigOptions.class);
-          cmd.addMixin(configPlugin.getIds()[0], configOptions);
-        }
-      }
+      Hop.addMixinPlugins(cmd, ConfigPlugin.CATEGORY_SERVER);
       hopServer.setCmd(cmd);
 
       // Add optional metadata folder (legacy)
@@ -598,300 +763,5 @@ public class HopServer implements Runnable, IHasHopMetadataProvider {
     System.err.println(
         BaseMessages.getString(PKG, CONST_USAGE_EXAMPLE)
             + ": hop-server.sh -e aura-gcp gs://apachehop/hop-server-config.xml");
-    System.err.println(
-        BaseMessages.getString(PKG, CONST_USAGE_EXAMPLE)
-            + ": hop-server.sh 127.0.0.1 8080 --kill --userName cluster --password cluster");
-  }
-
-  /**
-   * @return the webServer
-   */
-  public WebServer getWebServer() {
-    return webServer;
-  }
-
-  /**
-   * @param webServer the webServer to set
-   */
-  public void setWebServer(WebServer webServer) {
-    this.webServer = webServer;
-  }
-
-  /**
-   * @return the hop server (HopServer) configuration
-   */
-  public HopServerConfig getConfig() {
-    return config;
-  }
-
-  /**
-   * @param config the hop server (HopServer) configuration
-   */
-  public void setConfig(HopServerConfig config) {
-    this.config = config;
-  }
-
-  private static void shutdown(
-      String hostname, String port, String shutdownPort, String username, String password) {
-    try {
-      callStopHopServerRestService(hostname, port, shutdownPort, username, password);
-    } catch (Exception e) {
-      e.printStackTrace();
-    }
-  }
-
-  /**
-   * Checks that HopServer is running and if so, shuts down the HopServer server
-   *
-   * @param hostname
-   * @param port
-   * @param username
-   * @param password
-   * @throws HopServerCommandException
-   */
-  @VisibleForTesting
-  static void callStopHopServerRestService(
-      String hostname, String port, String shutdownPort, String username, String password)
-      throws HopServerCommandException {
-    // get information about the remote connection
-    try {
-      HopClientEnvironment.init();
-
-      HttpAuthenticationFeature authFeature =
-          HttpAuthenticationFeature.basicBuilder()
-              .credentials(username, Encr.decryptPasswordOptionallyEncrypted(password))
-              .build();
-
-      ClientConfig clientConfig = new ClientConfig();
-      Client client = ClientBuilder.newClient(clientConfig);
-      client.register(authFeature);
-
-      // check if the user can access the hop server. Don't really need this call but may want to
-      // check it's output at
-      // some point
-      String contextURL = "http://" + hostname + ":" + port + "/hop";
-      WebTarget target = client.target(contextURL + "/status/?xml=Y");
-      String response = target.request().get(String.class);
-      if (response == null || !response.contains("<serverstatus>")) {
-        throw new HopServerCommandException(
-            BaseMessages.getString(PKG, "HopServer.Error.NoServerFound", hostname, port));
-      }
-
-      Socket s = new Socket(InetAddress.getByName(hostname), Integer.parseInt(shutdownPort));
-      OutputStream out = s.getOutputStream();
-      out.write(("\r\n").getBytes());
-      out.flush();
-      s.close();
-
-    } catch (Exception e) {
-      throw new HopServerCommandException(
-          BaseMessages.getString(PKG, "HopServer.Error.NoServerFound", hostname, port), e);
-    }
-  }
-
-  /** Exception generated when command line fails */
-  public static class HopServerCommandException extends Exception {
-    private static final long serialVersionUID = 1L;
-
-    public HopServerCommandException(final String message) {
-      super(message);
-    }
-
-    public HopServerCommandException(final String message, final Throwable cause) {
-      super(message, cause);
-    }
-  }
-
-  /**
-   * Gets parameters
-   *
-   * @return value of parameters
-   */
-  public List<String> getParameters() {
-    return parameters;
-  }
-
-  /**
-   * @param parameters The parameters to set
-   */
-  public void setParameters(List<String> parameters) {
-    this.parameters = parameters;
-  }
-
-  /**
-   * Gets systemProperties
-   *
-   * @return value of systemProperties
-   */
-  public String[] getSystemProperties() {
-    return systemProperties;
-  }
-
-  /**
-   * @param systemProperties The systemProperties to set
-   */
-  public void setSystemProperties(String[] systemProperties) {
-    this.systemProperties = systemProperties;
-  }
-
-  /**
-   * Gets stopPassword
-   *
-   * @return value of stopPassword
-   */
-  public String getPassword() {
-    return password;
-  }
-
-  /**
-   * @param password The stopPassword to set
-   */
-  public void setPassword(String password) {
-    this.password = password;
-  }
-
-  /**
-   * Gets stopUsername
-   *
-   * @return value of stopUsername
-   */
-  public String getUsername() {
-    return username;
-  }
-
-  /**
-   * @param username The stopUsername to set
-   */
-  public void setUsername(String username) {
-    this.username = username;
-  }
-
-  /**
-   * Gets level
-   *
-   * @return value of level
-   */
-  public String getLevel() {
-    return level;
-  }
-
-  /**
-   * @param level The level to set
-   */
-  public void setLevel(String level) {
-    this.level = level;
-  }
-
-  /**
-   * Gets allOK
-   *
-   * @return value of allOK
-   */
-  public boolean isAllOK() {
-    return allOK;
-  }
-
-  /**
-   * @param allOK The allOK to set
-   */
-  public void setAllOK(boolean allOK) {
-    this.allOK = allOK;
-  }
-
-  /**
-   * Gets variables
-   *
-   * @return value of variables
-   */
-  public IVariables getVariables() {
-    return variables;
-  }
-
-  /**
-   * @param variables The variables to set
-   */
-  public void setVariables(IVariables variables) {
-    this.variables = variables;
-  }
-
-  /**
-   * Gets cmd
-   *
-   * @return value of cmd
-   */
-  public CommandLine getCmd() {
-    return cmd;
-  }
-
-  /**
-   * @param cmd The cmd to set
-   */
-  public void setCmd(CommandLine cmd) {
-    this.cmd = cmd;
-  }
-
-  /**
-   * Gets log
-   *
-   * @return value of log
-   */
-  public ILogChannel getLog() {
-    return log;
-  }
-
-  /**
-   * @param log The log to set
-   */
-  public void setLog(ILogChannel log) {
-    this.log = log;
-  }
-
-  /**
-   * Gets metadataProvider
-   *
-   * @return value of metadataProvider
-   */
-  @Override
-  public MultiMetadataProvider getMetadataProvider() {
-    return metadataProvider;
-  }
-
-  /**
-   * @param metadataProvider The metadataProvider to set
-   */
-  public void setMetadataProvider(MultiMetadataProvider metadataProvider) {
-    this.metadataProvider = metadataProvider;
-  }
-
-  /**
-   * Gets joinOverride
-   *
-   * @return value of joinOverride
-   */
-  public Boolean getJoinOverride() {
-    return joinOverride;
-  }
-
-  /**
-   * @param joinOverride The joinOverride to set
-   */
-  public void setJoinOverride(Boolean joinOverride) {
-    this.joinOverride = joinOverride;
-  }
-
-  /**
-   * Gets realFilename
-   *
-   * @return value of realFilename
-   */
-  public String getRealFilename() {
-    return realFilename;
-  }
-
-  /**
-   * @param realFilename The realFilename to set
-   */
-  public void setRealFilename(String realFilename) {
-    this.realFilename = realFilename;
   }
 }

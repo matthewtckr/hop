@@ -30,7 +30,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.injection.Injection;
 import org.apache.hop.core.injection.InjectionSupported;
 import org.apache.hop.core.logging.ILogChannel;
@@ -39,6 +40,7 @@ import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.IStringObjectConverter;
 import org.apache.hop.metadata.util.ReflectionUtil;
+import org.jspecify.annotations.NonNull;
 
 /** Storage for bean annotations info for Metadata Injection and Load/Save. */
 public class BeanInjectionInfo<Meta extends Object> {
@@ -68,7 +70,7 @@ public class BeanInjectionInfo<Meta extends Object> {
       this.clazz = clazz;
       clazzAnnotation = clazz.getAnnotation(InjectionSupported.class);
       if (!isInjectionSupported(clazz)) {
-        throw new RuntimeException("Injection not supported in " + clazz);
+        throw new HopRuntimeException("Injection not supported in " + clazz);
       }
 
       if (clazzAnnotation == null) {
@@ -115,9 +117,9 @@ public class BeanInjectionInfo<Meta extends Object> {
 
     List<BeanLevelInfo> parentPath = Arrays.asList(classLevelInfo);
 
-    boolean hasChildren = extractMetadataProperties(rootGroup, parentPath, clazz);
+    boolean hasChildren = extractMetadataProperties(rootGroup, parentPath, clazz, null, "");
     if (!hasChildren) {
-      throw new RuntimeException("Injection not supported in " + clazz);
+      throw new HopRuntimeException("Injection not supported in " + clazz);
     }
 
     properties = Collections.unmodifiableMap(properties);
@@ -125,11 +127,20 @@ public class BeanInjectionInfo<Meta extends Object> {
   }
 
   private boolean extractMetadataProperties(
-      Group rootGroup, List<BeanLevelInfo> parentPath, Class<?> clazz) {
+      Group rootGroup,
+      List<BeanLevelInfo> parentPath,
+      Class<?> clazz,
+      HopMetadataProperty parentProperty,
+      String keyPrefix) {
+
+    Set<String> childKeysToIgnore = getChildKeysToIgnore(parentProperty);
+
     Map<Field, HopMetadataProperty> propertyFields = new HashMap<>();
     for (Field field : ReflectionUtil.findAllFields(clazz)) {
       HopMetadataProperty property = field.getAnnotation(HopMetadataProperty.class);
-      if (property != null) {
+      if (property != null
+          && !property.isExcludedFromInjection()
+          && !childKeysToIgnore.contains(property.key())) {
         propertyFields.put(field, property);
       }
     }
@@ -143,10 +154,11 @@ public class BeanInjectionInfo<Meta extends Object> {
 
       HopMetadataProperty property = propertyFields.get(field);
 
-      String injectionKey = calculateInjectionKey(field, property);
+      String injectionKey = applyPrefix(keyPrefix, calculateInjectionKey(field, property));
       String injectionKeyDescription = calculateInjectionKeyDescription(property);
-      String injectionGroupKey = calculateInjectionGroupKey(property);
+      String injectionGroupKey = applyPrefix(keyPrefix, calculateInjectionGroupKey(property));
       String injectionGroupDescription = calculateInjectionGroupDescription(property);
+      String childPrefix = nextPrefix(keyPrefix, property.injectionKeyPrefix());
 
       // Class Bean Level Info...
       //
@@ -161,12 +173,14 @@ public class BeanInjectionInfo<Meta extends Object> {
 
       Group group = null;
       if (StringUtils.isNotEmpty(injectionGroupKey)) {
-        group = groupsMap.get(injectionGroupKey);
-        if (group == null) {
-          group = new Group(injectionGroupKey, injectionGroupDescription);
-          groupsMap.put(injectionGroupKey, group);
-          groupsList.add(group);
-        }
+        group =
+            groupsMap.computeIfAbsent(
+                injectionGroupKey,
+                key -> {
+                  Group newGroup = new Group(key, injectionGroupDescription);
+                  groupsList.add(newGroup);
+                  return newGroup;
+                });
       }
 
       if (StringUtils.isNotEmpty(injectionGroupKey)) {
@@ -207,14 +221,15 @@ public class BeanInjectionInfo<Meta extends Object> {
                   path,
                   property.isExcludedFromInjection());
           group.properties.add(p);
-          properties.put(injectionKey, p);
+          registerProperty(injectionKey, p);
         } else {
+          Set<String> ignoreKeys = new HashSet<>(Set.of(property.childKeysToIgnore()));
           for (Field childField : ReflectionUtil.findAllFields(fieldType)) {
             Class<?> childFieldType = childField.getType();
             HopMetadataProperty childProperty = childField.getAnnotation(HopMetadataProperty.class);
-            if (childProperty != null) {
-
-              String childInjectionKey = calculateInjectionKey(childField, childProperty);
+            if (childProperty != null && !ignoreKeys.contains(childProperty.key())) {
+              String childInjectionKey =
+                  applyPrefix(childPrefix, calculateInjectionKey(childField, childProperty));
               String childInjectionKeyDescription = calculateInjectionKeyDescription(childProperty);
 
               // Child bean level info...
@@ -241,11 +256,16 @@ public class BeanInjectionInfo<Meta extends Object> {
                         path,
                         property.isExcludedFromInjection());
                 group.properties.add(p);
-                properties.put(childInjectionKey, p);
+                registerProperty(childInjectionKey, p);
               } else {
                 // Extract properties of this child as well...
                 //
-                extractMetadataProperties(rootGroup, path, childFieldType);
+                extractMetadataProperties(
+                    rootGroup,
+                    path,
+                    childFieldType,
+                    childProperty,
+                    nextPrefix(childPrefix, childProperty.injectionKeyPrefix()));
               }
             }
           }
@@ -270,18 +290,58 @@ public class BeanInjectionInfo<Meta extends Object> {
                   path,
                   property.isExcludedFromInjection());
           rootGroup.properties.add(p);
-          properties.put(injectionKey, p);
+          registerProperty(injectionKey, p);
         }
         if (!childless) {
           // POJO: look deeper..
           //
           List<BeanLevelInfo> path = new ArrayList<>(parentPath);
           path.add(fieldLevelInfo);
-          extractMetadataProperties(rootGroup, path, fieldType);
+          extractMetadataProperties(rootGroup, path, fieldType, property, childPrefix);
         }
       }
     }
     return true;
+  }
+
+  private void registerProperty(String injectionKey, Property property) {
+    if (properties.containsKey(injectionKey)) {
+      log.logBasic(
+          "Duplicate metadata injection key '"
+              + injectionKey
+              + "' in "
+              + clazz.getName()
+              + "; last definition wins");
+    }
+    properties.put(injectionKey, property);
+  }
+
+  private static String applyPrefix(String prefix, String key) {
+    if (StringUtils.isEmpty(prefix) || StringUtils.isEmpty(key)) {
+      return key;
+    }
+    return prefix + key;
+  }
+
+  /**
+   * Accumulated prefix for descendants of a field; empty field prefix keeps the incoming prefix.
+   */
+  private static String nextPrefix(String prefix, String fieldPrefix) {
+    if (StringUtils.isEmpty(fieldPrefix)) {
+      return prefix;
+    }
+    if (StringUtils.isEmpty(prefix)) {
+      return fieldPrefix;
+    }
+    return prefix + fieldPrefix;
+  }
+
+  private static @NonNull Set<String> getChildKeysToIgnore(HopMetadataProperty property) {
+    Set<String> childKeysToIgnore = new HashSet<>();
+    if (property != null) {
+      childKeysToIgnore = new HashSet<>(Set.of(property.childKeysToIgnore()));
+    }
+    return childKeysToIgnore;
   }
 
   private boolean isChildlessClass(Class<?> fieldType, HopMetadataProperty property) {
@@ -308,7 +368,7 @@ public class BeanInjectionInfo<Meta extends Object> {
       try {
         fieldLevelInfo.converter = property.injectionConverter().getConstructor().newInstance();
       } catch (Exception e) {
-        throw new RuntimeException(
+        throw new HopRuntimeException(
             "Unable to instantiate injection metadata converter class "
                 + property.injectionConverter().getName(),
             e);
@@ -320,7 +380,7 @@ public class BeanInjectionInfo<Meta extends Object> {
           fieldLevelInfo.stringObjectConverter =
               property.injectionStringObjectConverter().getConstructor().newInstance();
         } catch (Exception e) {
-          throw new RuntimeException(
+          throw new HopRuntimeException(
               "Unable to instantiate injection string-to-object converter class "
                   + property.injectionStringObjectConverter().getName(),
               e);
@@ -339,7 +399,7 @@ public class BeanInjectionInfo<Meta extends Object> {
         fieldLevelInfo.getter =
             parentClass.getMethod(ReflectionUtil.getGetterMethodName(field.getName(), isBoolean));
       } catch (Exception e) {
-        throw new RuntimeException(
+        throw new HopRuntimeException(
             "Unable to find getter for field "
                 + field.getName()
                 + " in class "
@@ -350,7 +410,7 @@ public class BeanInjectionInfo<Meta extends Object> {
         fieldLevelInfo.setter =
             parentClass.getMethod(ReflectionUtil.getSetterMethodName(field.getName()), fieldType);
       } catch (Exception e) {
-        throw new RuntimeException(
+        throw new HopRuntimeException(
             "Unable to find setter for field "
                 + field.getName()
                 + " in class "
@@ -447,12 +507,12 @@ public class BeanInjectionInfo<Meta extends Object> {
 
   protected void addInjectionProperty(Injection metaInj, BeanLevelInfo leaf) {
     if (StringUtils.isBlank(metaInj.name())) {
-      throw new RuntimeException("Property name shouldn't be blank in the " + clazz);
+      throw new HopRuntimeException("Property name shouldn't be blank in the " + clazz);
     }
 
     String propertyName = calcPropertyName(metaInj, leaf);
     if (properties.containsKey(propertyName)) {
-      throw new RuntimeException("Property '" + propertyName + "' already defined for " + clazz);
+      throw new HopRuntimeException("Property '" + propertyName + "' already defined for " + clazz);
     }
 
     // probably hidden
@@ -468,7 +528,7 @@ public class BeanInjectionInfo<Meta extends Object> {
     properties.put(prop.key, prop);
     Group gr = groupsMap.get(metaInj.group());
     if (gr == null) {
-      throw new RuntimeException(
+      throw new HopRuntimeException(
           "Group '"
               + metaInj.group()
               + "' for property '"
@@ -520,7 +580,7 @@ public class BeanInjectionInfo<Meta extends Object> {
     }
     if (!name.toString().equals(metaInj.name()) && !metaInj.group().isEmpty()) {
       // group exist with prefix
-      throw new RuntimeException("Group shouldn't be declared with prefix in " + clazz);
+      throw new HopRuntimeException("Group shouldn't be declared with prefix in " + clazz);
     }
     return name.toString();
   }

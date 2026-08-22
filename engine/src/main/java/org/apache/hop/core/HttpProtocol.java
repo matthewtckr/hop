@@ -19,13 +19,17 @@ package org.apache.hop.core;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.URI;
+import org.apache.hc.client5.http.auth.AuthenticationException;
+import org.apache.hc.client5.http.classic.HttpClient;
+import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.protocol.HttpClientContext;
+import org.apache.hc.core5.http.ClassicHttpResponse;
+import org.apache.hc.core5.http.HttpHost;
+import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hop.core.util.HttpClientManager;
+import org.apache.hop.core.util.HttpClientUtil;
 import org.apache.hop.core.util.Utils;
-import org.apache.http.HttpResponse;
-import org.apache.http.HttpStatus;
-import org.apache.http.auth.AuthenticationException;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpGet;
 
 /**
  * HTTP
@@ -65,41 +69,53 @@ public class HttpProtocol {
    * @throws AuthenticationException
    * @throws IOException
    */
+  @SuppressWarnings("java:S2095") // see the comment on httpClient.execute() below
   public String get(String urlAsString, String username, String password)
       throws IOException, AuthenticationException {
 
     HttpClient httpClient;
     HttpGet getMethod = new HttpGet(urlAsString);
+    HttpClientContext clientContext = HttpClientContext.create();
     if (!Utils.isEmpty(username)) {
       HttpClientManager.HttpClientBuilderFacade clientBuilder =
           HttpClientManager.getInstance().createBuilder();
       clientBuilder.setCredentials(username, password);
       httpClient = clientBuilder.build();
+      HttpHost origin = HttpClientManager.createHttpHost(URI.create(urlAsString));
+      HttpClientContext preemptive =
+          HttpClientUtil.createPreemptiveBasicAuthentication(
+              origin.getHostName(), origin.getPort(), username, password, origin.getSchemeName());
+      if (preemptive != null) {
+        clientContext = preemptive;
+      }
     } else {
       httpClient = HttpClientManager.getInstance().createDefaultClient();
     }
-    HttpResponse httpResponse = httpClient.execute(getMethod);
-    int statusCode = httpResponse.getStatusLine().getStatusCode();
-    StringBuilder bodyBuffer = new StringBuilder();
+    // Do NOT close httpClient: it is built on the process-wide shared connection manager in
+    // HttpClientManager, and closing the client shuts that pool down for every other caller.
+    // Closing the response is what releases this request's connection back to the pool.
+    try (ClassicHttpResponse httpResponse =
+        (ClassicHttpResponse) httpClient.execute(getMethod, clientContext)) {
+      int statusCode = httpResponse.getCode();
+      StringBuilder bodyBuffer = new StringBuilder();
 
-    if (statusCode != -1) {
-      if (statusCode != HttpStatus.SC_UNAUTHORIZED) {
-        // the response
-        InputStreamReader inputStreamReader =
-            new InputStreamReader(httpResponse.getEntity().getContent());
-
-        int c;
-        while ((c = inputStreamReader.read()) != -1) {
-          bodyBuffer.append((char) c);
+      if (statusCode != -1) {
+        if (statusCode != HttpStatus.SC_UNAUTHORIZED) {
+          // the response
+          try (InputStreamReader inputStreamReader =
+              new InputStreamReader(httpResponse.getEntity().getContent())) {
+            int c;
+            while ((c = inputStreamReader.read()) != -1) {
+              bodyBuffer.append((char) c);
+            }
+          }
+        } else {
+          throw new AuthenticationException();
         }
-        inputStreamReader.close();
-
-      } else {
-        throw new AuthenticationException();
       }
-    }
 
-    // Display response
-    return bodyBuffer.toString();
+      // Display response
+      return bodyBuffer.toString();
+    }
   }
 }

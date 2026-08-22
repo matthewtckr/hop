@@ -17,25 +17,31 @@
 
 package org.apache.hop.core.row.value;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.sql.PreparedStatement;
+import java.sql.Types;
+import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.exception.HopValueException;
 import org.apache.hop.core.row.IValueMeta;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-public class ValueMetaInternetAddressTest {
+class ValueMetaInternetAddressTest {
 
   @Test
-  public void testCompare() throws UnknownHostException, HopValueException {
+  void testCompare() throws UnknownHostException, HopValueException {
     ValueMetaInternetAddress vm = new ValueMetaInternetAddress();
     InetAddress smaller = InetAddress.getByName("127.0.0.1");
     InetAddress larger = InetAddress.getByName("127.0.1.1");
@@ -61,7 +67,7 @@ public class ValueMetaInternetAddressTest {
   }
 
   @Test
-  public void testCompare_PDI17270() throws UnknownHostException, HopValueException {
+  void testCompare_PDI17270() throws UnknownHostException, HopValueException {
     ValueMetaInternetAddress vm = new ValueMetaInternetAddress();
 
     InetAddress smaller = InetAddress.getByName("0.0.0.0");
@@ -84,7 +90,7 @@ public class ValueMetaInternetAddressTest {
   }
 
   @Test
-  public void testCompare_Representations() throws UnknownHostException, HopValueException {
+  void testCompare_Representations() throws UnknownHostException, HopValueException {
     ValueMetaInternetAddress vm = new ValueMetaInternetAddress();
 
     InetAddress extended = InetAddress.getByName("1080:0:0:0:8:800:200C:417A");
@@ -107,14 +113,14 @@ public class ValueMetaInternetAddressTest {
   }
 
   @Test
-  public void testGetBigNumber_NullParameter() throws HopValueException {
+  void testGetBigNumber_NullParameter() throws HopValueException {
     ValueMetaInternetAddress vm = new ValueMetaInternetAddress();
 
     assertNull(vm.getBigNumber(null));
   }
 
   @Test
-  public void testGetBigNumber_Success() throws UnknownHostException, HopValueException {
+  void testGetBigNumber_Success() throws UnknownHostException, HopValueException {
     ValueMetaInternetAddress vm = new ValueMetaInternetAddress();
     String[] addresses = {
       // Some IPv6 addresses
@@ -146,10 +152,11 @@ public class ValueMetaInternetAddressTest {
       InetAddress addr = InetAddress.getByName(address);
       vm.getBigNumber(addr);
     }
+    assertNotNull(vm);
   }
 
   @Test
-  public void testGetBinaryString() throws HopValueException, UnknownHostException {
+  void testGetBinaryString() throws HopValueException, UnknownHostException {
     // Test normal storage type
     ValueMetaInternetAddress vmInet = new ValueMetaInternetAddress();
     final ValueMetaString vmString = new ValueMetaString();
@@ -182,8 +189,34 @@ public class ValueMetaInternetAddressTest {
     }
   }
 
+  /**
+   * The value used to go over as Types.OTHER, which Oracle rejects with "invalid column type". A
+   * database with a native address type says what it wants with a binding of its own.
+   */
   @Test
-  public void testGetNativeDataType() throws UnknownHostException, HopValueException {
+  void testSetPreparedStatementValueWritesAString() throws Exception {
+    PreparedStatement ps = mock(PreparedStatement.class);
+
+    new ValueMetaInternetAddress("host")
+        .setPreparedStatementValue(
+            mock(DatabaseMeta.class), ps, 1, InetAddress.getByName("10.0.0.1"));
+
+    verify(ps).setString(1, "10.0.0.1");
+  }
+
+  @Test
+  void testSetPreparedStatementValueWritesANullAsANullString() throws Exception {
+    PreparedStatement ps = mock(PreparedStatement.class);
+
+    new ValueMetaInternetAddress("host")
+        .setPreparedStatementValue(mock(DatabaseMeta.class), ps, 1, null);
+
+    verify(ps).setNull(1, Types.VARCHAR);
+    verify(ps, never()).setNull(1, Types.OTHER);
+  }
+
+  @Test
+  void testGetNativeDataType() throws UnknownHostException, HopValueException {
     IValueMeta vmi = new ValueMetaInternetAddress("Test");
     InetAddress expected = InetAddress.getByAddress(new byte[] {(byte) 192, (byte) 168, 1, 1});
 

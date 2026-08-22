@@ -18,48 +18,46 @@
 package org.apache.hop.pipeline.transforms.rest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doCallRealMethod;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.nullable;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 
-import javax.ws.rs.client.Client;
-import javax.ws.rs.client.Invocation;
-import javax.ws.rs.client.WebTarget;
-import javax.ws.rs.core.MultivaluedHashMap;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hop.core.encryption.Encr;
+import org.apache.hop.core.encryption.HopTwoWayPasswordEncoder;
+import org.apache.hop.core.encryption.TwoWayPasswordEncoderPlugin;
+import org.apache.hop.core.encryption.TwoWayPasswordEncoderPluginType;
 import org.apache.hop.core.exception.HopException;
-import org.apache.hop.core.row.IRowMeta;
+import org.apache.hop.core.plugins.PluginRegistry;
+import org.apache.hop.core.row.RowMeta;
+import org.apache.hop.core.variables.Variables;
+import org.apache.hop.metadata.api.IHopMetadataProvider;
+import org.apache.hop.metadata.rest.RestConnection;
+import org.apache.hop.metadata.rest.client.RestAuthenticator;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
+import org.apache.hop.pipeline.transform.BaseTransform;
 import org.apache.hop.pipeline.transform.TransformMeta;
-import org.glassfish.jersey.client.ClientResponse;
-import org.junit.jupiter.api.AfterEach;
+import org.apache.hop.pipeline.transforms.rest.fields.ResultField;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
-import org.mockito.Answers;
-import org.mockito.MockedStatic;
 
 class RestTest {
 
-  private MockedStatic<Client> mockedClient;
-
   @BeforeEach
-  void setUpStaticMocks() {
-    mockedClient = mockStatic(Client.class);
-  }
-
-  @AfterEach
-  void tearDownStaticMocks() {
-    mockedClient.closeOnDemand();
+  void setUpEncryption() throws Exception {
+    PluginRegistry.getInstance()
+        .registerPluginClass(
+            HopTwoWayPasswordEncoder.class.getName(),
+            TwoWayPasswordEncoderPluginType.class,
+            TwoWayPasswordEncoderPlugin.class);
+    Encr.init("Hop");
   }
 
   @Test
@@ -77,54 +75,161 @@ class RestTest {
             1,
             pipelineMeta,
             spy(new LocalPipelineEngine()));
-    MultivaluedHashMap map = rest.createMultivalueMap("param1", "{a:{[val1]}}");
-    String val1 = map.getFirst("param1").toString();
-    assertTrue(val1.contains("%7D"));
+    Map<String, String> map = rest.createMultivalueMap("param1", "{a:{[val1]}}");
+    assertTrue(map.get("param1").contains("%7D"));
   }
 
-  @Disabled("This test needs to be reviewed")
   @Test
-  void testCallEndpointWithDeleteVerb() throws HopException {
-    MultivaluedMap<String, String> headers = null;
-    headers.add("Content-Type", "application/json");
+  void testDispose() {
+    TransformMeta transformMeta = new TransformMeta();
+    transformMeta.setName("TestRest");
+    PipelineMeta pipelineMeta = new PipelineMeta();
+    pipelineMeta.setName("TestRest");
+    pipelineMeta.addTransform(transformMeta);
 
-    Response response = mock(Response.class);
-    doReturn(200).when(response).getStatus();
-    doReturn(headers).when(response).getHeaders();
-    doReturn("true").when(response).getEntity().toString();
+    RestData data = new RestData();
+    data.headerNames = new String[] {"header1", "header2"};
+    data.indexOfHeaderFields = new int[] {0, 1};
+    data.paramNames = new String[] {"param1"};
 
-    Invocation.Builder builder = mock(Invocation.Builder.class);
-    doReturn(response).when(builder).delete(ClientResponse.class);
+    Rest rest =
+        new Rest(
+            transformMeta,
+            mock(RestMeta.class),
+            data,
+            1,
+            pipelineMeta,
+            spy(new LocalPipelineEngine()));
 
-    WebTarget resource = mock(WebTarget.class);
+    rest.dispose();
 
-    Client client = mock(Client.class);
-    doReturn(resource).when(client).target(nullable(String.class));
+    // After dispose, these should be null
+    assertNull(data.headerNames);
+    assertNull(data.indexOfHeaderFields);
+    assertNull(data.paramNames);
+  }
 
-    RestMeta meta = mock(RestMeta.class);
-    doReturn(false).when(meta).isDetailed();
-    doReturn(false).when(meta).isUrlInField();
-    doReturn(false).when(meta).isDynamicMethod();
+  @Test
+  void testTrackRequestBytesAddsBytesForCharset() throws Exception {
+    Rest rest = newRest();
 
-    IRowMeta rmi = mock(IRowMeta.class);
-    doReturn(1).when(rmi).size();
+    invokePrivate(rest, "trackRequestBytes", "hello", StandardCharsets.UTF_16LE);
 
-    RestData data = mock(RestData.class);
-    data.method = RestMeta.HTTP_METHOD_DELETE;
-    data.inputRowMeta = rmi;
-    data.resultFieldName = "result";
-    data.resultCodeFieldName = "status";
-    data.resultHeaderFieldName = "headers";
+    assertEquals(10L, getLongField(rest, "dataVolumeOut"));
+  }
 
-    Rest rest = mock(Rest.class, Answers.RETURNS_DEFAULTS);
-    doCallRealMethod().when(rest).callRest(any());
-    doCallRealMethod().when(rest).searchForHeaders(any());
+  @Test
+  void testResponseBytesAreCountedFromTheBody() throws Exception {
+    // The response body is read into memory once, so its length is the byte count — no reliance on
+    // a Content-Length header the server may not send.
+    RestData data = new RestData();
+    data.mediaType = ContentType.TEXT_PLAIN;
+    data.method = RestMeta.HTTP_METHOD_GET;
+    data.realUrl = "http://example.com";
+    data.inputRowMeta = new RowMeta();
+    data.client = FakeHttpClient.returning(200, "hello", Map.of());
 
-    Object[] output = rest.callRest(new Object[] {0});
+    RestMeta meta = new RestMeta();
+    meta.setMethod(RestMeta.HTTP_METHOD_GET);
+    meta.setUrl("http://example.com");
+    meta.setResultField(new ResultField());
 
-    verify(builder, times(1)).delete(ClientResponse.class);
-    assertEquals("true", output[1]);
-    assertEquals(200L, output[2]);
-    assertEquals("{\"Content-Type\":\"application\\/json\"}", output[3]);
+    Rest rest = newRest(meta, data);
+    rest.callRest(new Object[] {});
+
+    assertEquals(5L, getLongField(rest, "dataVolumeIn"));
+  }
+
+  /** The authenticator a connection produces, as the transform would build it. */
+  private static RestAuthenticator authenticatorFor(RestConnection connection) throws HopException {
+    return new RestAuthenticator(connection.createClientSettings());
+  }
+
+  @Test
+  void testConnectionApiKeyHeaderIsDecryptedAndRowWins() throws HopException {
+    // Regression for #6697: an "Encrypted ..." API key configured on the REST connection must be
+    // decrypted before it is sent (it used to be forwarded verbatim from the transform, giving a
+    // 401), while a header already supplied on the incoming row must still win over connection
+    // auth.
+    String encryptedValue = Encr.encryptPasswordIfNotUsingVariables("my_super_secret");
+    assertTrue(encryptedValue.startsWith(Encr.PASSWORD_ENCRYPTED_PREFIX));
+
+    RestConnection connection = new RestConnection(new Variables());
+    connection.setAuthType(RestConnection.API_KEY);
+    connection.setAuthorizationHeaderName("X-API-Key");
+    connection.setAuthorizationPrefix("Token");
+    connection.setAuthorizationHeaderValue(encryptedValue);
+
+    // Fresh row: the connection contributes the decrypted, prefixed value.
+    Map<String, String> headers = new LinkedHashMap<>();
+    authenticatorFor(connection).applyRequestHeaders(headers, "https://example.com/api");
+    assertEquals("Token my_super_secret", headers.get("X-API-Key"));
+
+    // Row already supplied the header (case-insensitively): connection auth is skipped, row wins
+    // and no second (differently-cased) copy is appended.
+    Map<String, String> rowHeaders = new LinkedHashMap<>();
+    rowHeaders.put("x-api-key", "row_value");
+    authenticatorFor(connection).applyRequestHeaders(rowHeaders, "https://example.com/api");
+    assertEquals(1, rowHeaders.size());
+    assertEquals("row_value", rowHeaders.get("x-api-key"));
+    assertNull(rowHeaders.get("X-API-Key"));
+  }
+
+  @Test
+  void testConnectionApiKeyHeaderIsNotDuplicated() throws HopException {
+    // Regression for #6697: the connection's API-key header must be emitted exactly once — the
+    // original bug sent it doubled (e.g. "my_super_secret,my_super_secret" -> HTTP 401). The test
+    // button, the connection's own getResponse(...) and the transform all funnel auth through this
+    // same authenticator, so re-applying it must stay idempotent instead of appending a second
+    // value.
+    RestConnection connection = new RestConnection(new Variables());
+    connection.setAuthType(RestConnection.API_KEY);
+    connection.setAuthorizationHeaderName("X-API-Key");
+    connection.setAuthorizationHeaderValue("my_super_secret");
+
+    Map<String, String> headers = new LinkedHashMap<>();
+    RestAuthenticator authenticator = authenticatorFor(connection);
+
+    authenticator.applyRequestHeaders(headers, "https://example.com/api");
+    authenticator.applyRequestHeaders(headers, "https://example.com/api");
+
+    assertEquals(1, headers.size());
+    assertEquals("my_super_secret", headers.get("X-API-Key"));
+  }
+
+  private Rest newRest() {
+    return newRest(mock(RestMeta.class), new RestData());
+  }
+
+  private Rest newRest(RestMeta meta, RestData data) {
+    TransformMeta transformMeta = new TransformMeta();
+    transformMeta.setName("TestRest");
+    PipelineMeta pipelineMeta = new PipelineMeta();
+    pipelineMeta.setName("TestRest");
+    pipelineMeta.addTransform(transformMeta);
+    Rest rest =
+        new Rest(transformMeta, meta, data, 1, pipelineMeta, spy(new LocalPipelineEngine()));
+    rest.setMetadataProvider(mock(IHopMetadataProvider.class));
+    return rest;
+  }
+
+  private static Object invokePrivate(Object target, String methodName, Object... args)
+      throws Exception {
+    Method method =
+        switch (methodName) {
+          case "trackRequestBytes" ->
+              target
+                  .getClass()
+                  .getDeclaredMethod(methodName, String.class, java.nio.charset.Charset.class);
+          default -> throw new NoSuchMethodException(methodName);
+        };
+    method.setAccessible(true);
+    return method.invoke(target, args);
+  }
+
+  private static Long getLongField(Object target, String fieldName) throws Exception {
+    Field field = BaseTransform.class.getDeclaredField(fieldName);
+    field.setAccessible(true);
+    return (Long) field.get(target);
   }
 }

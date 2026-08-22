@@ -17,16 +17,17 @@
 
 package org.apache.hop.pipeline.transforms.mergejoin;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.IValueMeta;
@@ -36,7 +37,8 @@ import org.apache.hop.core.row.value.ValueMetaInteger;
 import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.core.xml.XmlHandler;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
+import org.apache.hop.metadata.inject.HopMetadataInjector;
 import org.apache.hop.pipeline.transform.TransformMeta;
 import org.apache.hop.pipeline.transform.stream.IStream;
 import org.apache.hop.pipeline.transforms.loadsave.LoadSaveTester;
@@ -44,11 +46,12 @@ import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValid
 import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidatorFactory;
 import org.apache.hop.pipeline.transforms.loadsave.validator.ListLoadSaveValidator;
 import org.apache.hop.pipeline.transforms.loadsave.validator.StringLoadSaveValidator;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class MergeJoinMetaTest {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+class MergeJoinMetaTest {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
   LoadSaveTester loadSaveTester;
 
@@ -60,9 +63,9 @@ public class MergeJoinMetaTest {
 
     Map<String, IFieldLoadSaveValidator<?>> attrValidatorMap = new HashMap<>();
     attrValidatorMap.put(
-        "keyFields1", new ListLoadSaveValidator<String>(new StringLoadSaveValidator()) {});
+        "keyFields1", new ListLoadSaveValidator<>(new StringLoadSaveValidator()) {});
     attrValidatorMap.put(
-        "keyFields2", new ListLoadSaveValidator<String>(new StringLoadSaveValidator()) {});
+        "keyFields2", new ListLoadSaveValidator<>(new StringLoadSaveValidator()) {});
 
     Map<String, IFieldLoadSaveValidator<?>> typeValidatorMap = new HashMap<>();
 
@@ -82,7 +85,7 @@ public class MergeJoinMetaTest {
         loadSaveTester.getFieldLoadSaveValidatorFactory();
 
     IFieldLoadSaveValidator<MergeJoinMeta> targetValidator =
-        new IFieldLoadSaveValidator<MergeJoinMeta>() {
+        new IFieldLoadSaveValidator<>() {
 
           @Override
           public MergeJoinMeta getTestObject() {
@@ -108,12 +111,12 @@ public class MergeJoinMetaTest {
   }
 
   @Test
-  public void testSerialization() throws HopException {
+  void testSerialization() throws HopException {
     loadSaveTester.testSerialization();
   }
 
   @Test
-  public void testGetFieldsEmptyInput() throws Exception {
+  void testGetFieldsEmptyInput() throws Exception {
     RowMeta outputRowMeta = new RowMeta();
     MergeJoinMeta meta = new MergeJoinMeta();
 
@@ -175,7 +178,7 @@ public class MergeJoinMetaTest {
   }
 
   @Test
-  public void cloneTest() throws Exception {
+  void cloneTest() throws Exception {
     MergeJoinMeta meta = new MergeJoinMeta();
     meta.setKeyFields1(Arrays.asList("kf1-1", "kf1-2"));
     meta.setKeyFields2(Arrays.asList("kf2-1", "kf2-2", "kf2-3"));
@@ -200,7 +203,7 @@ public class MergeJoinMetaTest {
   }
 
   @Test
-  public void testXmlRoundTrip() throws Exception {
+  void testXmlRoundTrip() throws Exception {
     MergeJoinMeta meta = new MergeJoinMeta();
     meta.setKeyFields1(Arrays.asList("id1"));
     meta.setKeyFields2(Arrays.asList("id2"));
@@ -219,7 +222,7 @@ public class MergeJoinMetaTest {
   }
 
   @Test
-  public void testGetFields() throws Exception {
+  void testGetFields() throws Exception {
     MergeJoinMeta meta = new MergeJoinMeta();
     meta.setKeyFields1(Arrays.asList("id1"));
     meta.setKeyFields2(Arrays.asList("id2"));
@@ -236,5 +239,15 @@ public class MergeJoinMetaTest {
     meta.getFields(rowMeta, "name", infos, null, null, null);
 
     assertEquals(4, rowMeta.size());
+  }
+
+  @Test
+  void testHopMetadataMapping() throws Exception {
+    Map<String, Set<String>> map = HopMetadataInjector.findInjectionGroupKeys(MergeJoinMeta.class);
+    assertEquals(2, map.size());
+    Set<String> keys1 = map.get("KEY_FIELDS1");
+    assertEquals(1, keys1.size());
+    Set<String> keys2 = map.get("KEY_FIELDS2");
+    assertEquals(1, keys2.size());
   }
 }

@@ -69,6 +69,7 @@ For example, if your `{openvar}PROJECT_HOME{closevar}` is `/home/admin/hop/proje
 One row is passed to the workflow at every execution.
 For example, you can execute a workflow for each file found in a directory.|false
 |Wait for the remote workflow to finish?|Enable to block until the workflow on the Hop Server has finished|true
+|Stop after (milliseconds)|Maximum time to wait for the workflow to complete. Empty or 0 means wait indefinitely. When the time is reached the workflow is stopped and this action fails. Only used when wait-to-finish is enabled. The value may contain a variable.|empty (no limit)
 |===
 
 === Logging Settings Tab
@@ -101,7 +102,9 @@ See also the logging window in Logging.
 
 === Parameters Tab
 
-Specify which parameters will be passed to the sub-workflow:
+Specify which parameters will be passed to the sub-workflow.
+
+See xref:fields-parameters-variables.adoc[Fields, parameters, and variables] for how parameters relate to fields and variables.
 
 [options="header",cols="1,3", width="90%"]
 |===

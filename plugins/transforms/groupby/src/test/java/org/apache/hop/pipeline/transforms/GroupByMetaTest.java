@@ -18,6 +18,8 @@
 
 package org.apache.hop.pipeline.transforms;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import java.util.List;
 import org.apache.hop.core.xml.XmlHandler;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
@@ -25,21 +27,20 @@ import org.apache.hop.metadata.serializer.xml.XmlMetadataUtil;
 import org.apache.hop.pipeline.transforms.groupby.Aggregation;
 import org.apache.hop.pipeline.transforms.groupby.GroupByMeta;
 import org.apache.hop.pipeline.transforms.groupby.GroupingField;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-public class GroupByMetaTest {
+class GroupByMetaTest {
 
   @Test
-  public void testClone() throws Exception {
+  void testClone() throws Exception {
     GroupByMeta meta1 = generateTestMeta();
-    GroupByMeta meta2 = meta1.clone();
+    GroupByMeta meta2 = (GroupByMeta) meta1.clone();
 
     compareMetas(meta1, meta2);
   }
 
   @Test
-  public void testSerialization() throws Exception {
+  void testSerialization() throws Exception {
     GroupByMeta meta1 = generateTestMeta();
     String xml = "<transform>" + XmlMetadataUtil.serializeObjectToXml(meta1) + "</transform>";
 
@@ -53,23 +54,23 @@ public class GroupByMetaTest {
   }
 
   public void compareMetas(GroupByMeta meta1, GroupByMeta meta2) {
-    Assert.assertEquals(meta1.getGroupingFields().size(), meta2.getGroupingFields().size());
+    assertEquals(meta1.getGroupingFields().size(), meta2.getGroupingFields().size());
     for (int i = 0; i < meta1.getGroupingFields().size(); i++) {
       GroupingField field1 = meta1.getGroupingFields().get(i);
       GroupingField field2 = meta2.getGroupingFields().get(i);
-      Assert.assertEquals(field1, field2);
+      assertEquals(field1, field2);
     }
-    Assert.assertEquals(meta1.getAggregations().size(), meta2.getAggregations().size());
+    assertEquals(meta1.getAggregations().size(), meta2.getAggregations().size());
     for (int i = 0; i < meta1.getAggregations().size(); i++) {
       Aggregation agg1 = meta1.getAggregations().get(i);
       Aggregation agg2 = meta2.getAggregations().get(i);
-      Assert.assertEquals(agg1, agg2);
+      assertEquals(agg1, agg2);
     }
-    Assert.assertEquals(meta1.isPassAllRows(), meta2.isPassAllRows());
-    Assert.assertEquals(meta1.isAddingLineNrInGroup(), meta2.isAddingLineNrInGroup());
-    Assert.assertEquals(meta1.getLineNrInGroupField(), meta2.getLineNrInGroupField());
-    Assert.assertEquals(meta1.getDirectory(), meta2.getDirectory());
-    Assert.assertEquals(meta1.getPrefix(), meta2.getPrefix());
+    assertEquals(meta1.isPassAllRows(), meta2.isPassAllRows());
+    assertEquals(meta1.isAddingLineNrInGroup(), meta2.isAddingLineNrInGroup());
+    assertEquals(meta1.getLineNrInGroupField(), meta2.getLineNrInGroupField());
+    assertEquals(meta1.getDirectory(), meta2.getDirectory());
+    assertEquals(meta1.getPrefix(), meta2.getPrefix());
   }
 
   private GroupByMeta generateTestMeta() {
@@ -99,7 +100,8 @@ public class GroupByMetaTest {
             new Aggregation("field21", "subject21", getDesc("STD_DEV_SAMPLE"), "value21"),
             new Aggregation("field22", "subject22", getDesc("PERCENTILE_NEAREST_RANK"), "value22"),
             new Aggregation("field23", "subject23", getDesc("CONCAT_STRING_CRLF"), null),
-            new Aggregation("field24", "subject23", getDesc("CONCAT_DISTINCT"), "value24")));
+            new Aggregation("field24", "subject23", getDesc("CONCAT_DISTINCT"), "value24"),
+            new Aggregation("field25", "subject25", getDesc("MOVING_AVG"), "5", "order_field_25")));
     meta.setPassAllRows(true);
     meta.setAlwaysGivingBackOneRow(true);
     meta.setDirectory("directory");

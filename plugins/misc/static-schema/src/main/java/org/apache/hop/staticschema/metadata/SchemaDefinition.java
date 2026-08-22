@@ -20,7 +20,7 @@ package org.apache.hop.staticschema.metadata;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopPluginException;
 import org.apache.hop.core.row.IRowMeta;
@@ -28,6 +28,7 @@ import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.row.RowMeta;
 import org.apache.hop.metadata.api.HopMetadata;
 import org.apache.hop.metadata.api.HopMetadataBase;
+import org.apache.hop.metadata.api.HopMetadataCategory;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadata;
@@ -37,6 +38,7 @@ import org.apache.hop.metadata.api.IHopMetadata;
     name = "i18n::SchemaDefinition.Name",
     description = "i18n::SchemaDefinition.Description",
     image = "ui/images/folder.svg",
+    category = HopMetadataCategory.DATA_DEFINITION,
     documentationUrl = "/metadata-types/static-schema-definition.html",
     hopMetadataPropertyType = HopMetadataPropertyType.STATIC_SCHEMA_DEFINITION)
 public class SchemaDefinition extends HopMetadataBase implements Serializable, IHopMetadata {

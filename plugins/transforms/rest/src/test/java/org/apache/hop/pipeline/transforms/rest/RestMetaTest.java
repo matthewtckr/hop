@@ -17,15 +17,17 @@
 
 package org.apache.hop.pipeline.transforms.rest;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
 import org.apache.hop.core.encryption.Encr;
@@ -38,7 +40,7 @@ import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.core.util.EnvUtil;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.ITransformMeta;
@@ -52,19 +54,20 @@ import org.apache.hop.pipeline.transforms.rest.fields.HeaderField;
 import org.apache.hop.pipeline.transforms.rest.fields.MatrixParameterField;
 import org.apache.hop.pipeline.transforms.rest.fields.ParameterField;
 import org.apache.hop.pipeline.transforms.rest.fields.ResultField;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class RestMetaTest implements IInitializer<ITransformMeta> {
+class RestMetaTest implements IInitializer<ITransformMeta> {
 
-  LoadSaveTester loadSaveTester;
+  LoadSaveTester<RestMeta> loadSaveTester;
   Class<RestMeta> testMetaClass = RestMeta.class;
 
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
-  @BeforeClass
-  public static void beforeClass() throws HopException {
+  @BeforeAll
+  static void beforeClass() throws HopException {
     PluginRegistry.addPluginType(TwoWayPasswordEncoderPluginType.getInstance());
     PluginRegistry.init();
     String passwordEncoderPluginID =
@@ -73,7 +76,8 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
   }
 
   @Test
-  public void testLoadSaveRoundTrip() throws HopException {
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  void testLoadSaveRoundTrip() throws HopException {
     List<String> attributes =
         Arrays.asList(
             "applicationType",
@@ -84,7 +88,7 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
             "proxyPort",
             "httpLogin",
             "httpPassword",
-            "preemptive",
+            "nonPreemptiveBasicAuth",
             "bodyField",
             "method",
             "dynamicMethod",
@@ -97,18 +101,7 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
             "headerFields",
             "parameterFields",
             "matrixParameterFields",
-            "resultField"
-            //            "headerField",
-            //            "headerName",
-            //            "parameterField",
-            //            "parameterName",
-            //            "matrixParameterField",
-            //            "matrixParameterName",
-            //            "fieldName",
-            //            "resultCodeFieldName",
-            //            "responseTimeFieldName",
-            //            "responseHeaderFieldName"
-            );
+            "resultField");
 
     Map<String, String> getterMap = new HashMap<>();
     getterMap.put("applicationType", "getApplicationType");
@@ -119,7 +112,7 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
     getterMap.put("proxyPort", "getProxyPort");
     getterMap.put("httpLogin", "getHttpLogin");
     getterMap.put("httpPassword", "getHttpPassword");
-    getterMap.put("preemptive", "isPreemptive");
+    getterMap.put("nonPreemptiveBasicAuth", "isNonPreemptiveBasicAuth");
     getterMap.put("bodyField", "getBodyField");
     getterMap.put("method", "getMethod");
     getterMap.put("dynamicMethod", "isDynamicMethod");
@@ -143,7 +136,7 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
     setterMap.put("proxyPort", "setProxyPort");
     setterMap.put("httpLogin", "setHttpLogin");
     setterMap.put("httpPassword", "setHttpPassword");
-    setterMap.put("preemptive", "setPreemptive");
+    setterMap.put("nonPreemptiveBasicAuth", "setNonPreemptiveBasicAuth");
     setterMap.put("bodyField", "setBodyField");
     setterMap.put("method", "setMethod");
     setterMap.put("dynamicMethod", "setDynamicMethod");
@@ -180,7 +173,7 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
             validatorFactory,
             ResultField.class,
             Arrays.asList("fieldName", "code", "responseTime", "responseHeader"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("fieldname", "getFieldName");
                 put("code", "getCode");
@@ -188,7 +181,7 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
                 put("responseHeader", "getResponseHeader");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("fieldname", "setFieldName");
                 put("code", "setCode");
@@ -203,13 +196,13 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
             validatorFactory,
             HeaderField.class,
             Arrays.asList("name", "headerField"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "getName");
                 put("headerField", "getHeaderField");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("bame", "setName");
                 put("headerField", "setHeaderField");
@@ -222,13 +215,13 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
             validatorFactory,
             ParameterField.class,
             Arrays.asList("name", "headerField"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "getName");
                 put("headerField", "getHeaderField");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("bame", "setName");
                 put("headerField", "setHeaderField");
@@ -241,48 +234,22 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
             validatorFactory,
             MatrixParameterField.class,
             Arrays.asList("name", "headerField"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "getName");
                 put("headerField", "getHeaderField");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("bame", "setName");
                 put("headerField", "setHeaderField");
               }
             }));
-
-    //    Map<String, IFieldLoadSaveValidator<?>> fieldLoadSaveValidatorAttributeMap = new
-    // HashMap<>();
-    //
-    //    // Arrays need to be consistent length
-    //    IFieldLoadSaveValidator<String[]> stringArrayLoadSaveValidator =
-    //        new ArrayLoadSaveValidator<>(new StringLoadSaveValidator(), 25);
-    //    fieldLoadSaveValidatorAttributeMap.put("headerField", stringArrayLoadSaveValidator);
-    //    fieldLoadSaveValidatorAttributeMap.put("headerName", stringArrayLoadSaveValidator);
-    //    fieldLoadSaveValidatorAttributeMap.put("parameterField", stringArrayLoadSaveValidator);
-    //    fieldLoadSaveValidatorAttributeMap.put("parameterName", stringArrayLoadSaveValidator);
-    //    fieldLoadSaveValidatorAttributeMap.put("matrixParameterField",
-    // stringArrayLoadSaveValidator);
-    //    fieldLoadSaveValidatorAttributeMap.put("matrixParameterName",
-    // stringArrayLoadSaveValidator);
-    //
-    //    LoadSaveTester<RestMeta> loadSaveTester =
-    //        new LoadSaveTester<>(
-    //            RestMeta.class,
-    //            attributes,
-    //            new HashMap<>(),
-    //            new HashMap<>(),
-    //            fieldLoadSaveValidatorAttributeMap,
-    //            new HashMap<>());
-
-    //    loadSaveTester.testSerialization();
   }
 
   @Test
-  public void testTransformChecks() {
+  void testTransformChecks() {
     RestMeta meta = new RestMeta();
     List<ICheckResult> remarks = new ArrayList<>();
     PipelineMeta pipelineMeta = new PipelineMeta();
@@ -315,22 +282,249 @@ public class RestMetaTest implements IInitializer<ITransformMeta> {
   }
 
   private static int getCheckResultErrorCount(List<ICheckResult> remarks) {
-    return remarks.stream()
-        .filter(p -> p.getType() == ICheckResult.TYPE_RESULT_ERROR)
-        .collect(Collectors.toList())
-        .size();
+    return (int)
+        remarks.stream().filter(p -> p.getType() == ICheckResult.TYPE_RESULT_ERROR).count();
   }
 
   @Test
-  public void testEntityEnclosingMethods() {
+  void testEntityEnclosingMethods() {
     assertTrue(RestMeta.isActiveBody(RestMeta.HTTP_METHOD_POST));
     assertTrue(RestMeta.isActiveBody(RestMeta.HTTP_METHOD_PUT));
     assertTrue(RestMeta.isActiveBody(RestMeta.HTTP_METHOD_PATCH));
+    assertTrue(RestMeta.isActiveBody(RestMeta.HTTP_METHOD_DELETE));
 
     assertFalse(RestMeta.isActiveBody(RestMeta.HTTP_METHOD_GET));
-    assertFalse(RestMeta.isActiveBody(RestMeta.HTTP_METHOD_DELETE));
     assertFalse(RestMeta.isActiveBody(RestMeta.HTTP_METHOD_HEAD));
     assertFalse(RestMeta.isActiveBody(RestMeta.HTTP_METHOD_OPTIONS));
+  }
+
+  @Test
+  void testIsActiveBodyWithEmptyMethod() {
+    assertFalse(RestMeta.isActiveBody(""));
+    assertFalse(RestMeta.isActiveBody(null));
+  }
+
+  @Test
+  void testIsActiveParametersForAllMethods() {
+    assertTrue(RestMeta.isActiveParameters(RestMeta.HTTP_METHOD_GET));
+    assertTrue(RestMeta.isActiveParameters(RestMeta.HTTP_METHOD_POST));
+    assertTrue(RestMeta.isActiveParameters(RestMeta.HTTP_METHOD_PUT));
+    assertTrue(RestMeta.isActiveParameters(RestMeta.HTTP_METHOD_PATCH));
+    assertTrue(RestMeta.isActiveParameters(RestMeta.HTTP_METHOD_DELETE));
+
+    assertFalse(RestMeta.isActiveParameters(RestMeta.HTTP_METHOD_HEAD));
+    assertFalse(RestMeta.isActiveParameters(RestMeta.HTTP_METHOD_OPTIONS));
+  }
+
+  @Test
+  void testIsActiveParametersWithEmptyMethod() {
+    assertFalse(RestMeta.isActiveParameters(""));
+    assertFalse(RestMeta.isActiveParameters(null));
+  }
+
+  @Test
+  void testCustomMethodsAllowBodyAndParameters() {
+    // Issue #4770: a custom verb must not have Body / Parameters greyed out, since we have no way
+    // of knowing that it does not take them.
+    assertTrue(RestMeta.isActiveBody("LIST"));
+    assertTrue(RestMeta.isActiveBody("PURGE"));
+    assertTrue(RestMeta.isActiveBody("PROPFIND"));
+
+    assertTrue(RestMeta.isActiveParameters("LIST"));
+    assertTrue(RestMeta.isActiveParameters("PURGE"));
+
+    // Variables are not resolved at dialog time, so they must not be treated as body-less either.
+    assertTrue(RestMeta.isActiveBody("${HTTP_METHOD}"));
+    assertTrue(RestMeta.isActiveParameters("${HTTP_METHOD}"));
+  }
+
+  @Test
+  void testNormalizeMethod() {
+    assertNull(RestMeta.normalizeMethod(null));
+
+    // Well-known verbs get canonicalized...
+    assertEquals(RestMeta.HTTP_METHOD_GET, RestMeta.normalizeMethod("  get "));
+    assertEquals(RestMeta.HTTP_METHOD_PATCH, RestMeta.normalizeMethod("Patch"));
+
+    // ...but a custom verb keeps its case, because HTTP method tokens are case-sensitive.
+    assertEquals("List", RestMeta.normalizeMethod(" List "));
+    assertEquals("PURGE", RestMeta.normalizeMethod("PURGE"));
+  }
+
+  @Test
+  void testIsValidMethodToken() {
+    assertTrue(RestMeta.isValidMethodToken("LIST"));
+    assertTrue(RestMeta.isValidMethodToken("M-SEARCH"));
+    assertTrue(RestMeta.isValidMethodToken("X_custom.verb!"));
+
+    assertFalse(RestMeta.isValidMethodToken(null));
+    assertFalse(RestMeta.isValidMethodToken(""));
+    // These would be spliced into the request line if we let them through.
+    assertFalse(RestMeta.isValidMethodToken("GET /admin HTTP/1.1"));
+    assertFalse(RestMeta.isValidMethodToken("GET\r\nX-Injected: 1"));
+    assertFalse(RestMeta.isValidMethodToken("GET("));
+  }
+
+  @Test
+  void testClone() {
+    RestMeta meta = new RestMeta();
+    meta.setUrl("http://example.com");
+    meta.setMethod(RestMeta.HTTP_METHOD_POST);
+    meta.setApplicationType(RestMeta.APPLICATION_TYPE_JSON);
+    meta.setConnectionTimeout("5000");
+    meta.setReadTimeout("10000");
+
+    RestMeta cloned = (RestMeta) meta.clone();
+    assertNotNull(cloned);
+    assertEquals(meta.getUrl(), cloned.getUrl());
+    assertEquals(meta.getMethod(), cloned.getMethod());
+    assertEquals(meta.getApplicationType(), cloned.getApplicationType());
+    assertEquals(meta.getConnectionTimeout(), cloned.getConnectionTimeout());
+    assertEquals(meta.getReadTimeout(), cloned.getReadTimeout());
+  }
+
+  @Test
+  void testSetDefault() {
+    RestMeta meta = new RestMeta();
+    meta.setDefault();
+
+    assertNotNull(meta.getHeaderFields());
+    assertNotNull(meta.getParameterFields());
+    assertNotNull(meta.getMatrixParameterFields());
+    assertNotNull(meta.getResultField());
+    assertEquals(RestMeta.HTTP_METHOD_GET, meta.getMethod());
+    assertFalse(meta.isDynamicMethod());
+    assertNull(meta.getMethodFieldName());
+    // Issue #4196: preemptive is what this transform has always done, so it is the default.
+    assertTrue(meta.isPreemptive());
+    assertFalse(meta.isNonPreemptiveBasicAuth());
+    assertNull(meta.getTrustStoreFile());
+    assertNull(meta.getTrustStorePassword());
+    assertEquals(RestMeta.APPLICATION_TYPE_TEXT_PLAIN, meta.getApplicationType());
+    assertEquals(String.valueOf(RestMeta.DEFAULT_READ_TIMEOUT), meta.getReadTimeout());
+    assertEquals(String.valueOf(RestMeta.DEFAULT_CONNECTION_TIMEOUT), meta.getConnectionTimeout());
+  }
+
+  @Test
+  void testSupportsErrorHandling() {
+    RestMeta meta = new RestMeta();
+    assertTrue(meta.supportsErrorHandling());
+  }
+
+  @Test
+  void testGetFields() {
+    RestMeta meta = new RestMeta();
+    meta.getResultField().setFieldName("result");
+    meta.getResultField().setCode("statusCode");
+    meta.getResultField().setResponseTime("responseTime");
+    meta.getResultField().setResponseHeader("headers");
+
+    IRowMeta inputRowMeta = new RowMeta();
+    IVariables variables = new Variables();
+
+    meta.getFields(inputRowMeta, "testTransform", null, null, variables, null);
+
+    assertEquals(4, inputRowMeta.size());
+    assertNotNull(inputRowMeta.searchValueMeta("result"));
+    assertNotNull(inputRowMeta.searchValueMeta("statusCode"));
+    assertNotNull(inputRowMeta.searchValueMeta("responseTime"));
+    assertNotNull(inputRowMeta.searchValueMeta("headers"));
+  }
+
+  @Test
+  void testGetFieldsWithEmptyResultField() {
+    RestMeta meta = new RestMeta();
+    // Don't set any result field names
+
+    IRowMeta inputRowMeta = new RowMeta();
+    IVariables variables = new Variables();
+
+    meta.getFields(inputRowMeta, "testTransform", null, null, variables, null);
+
+    assertEquals(0, inputRowMeta.size());
+  }
+
+  @Test
+  void testApplicationTypes() {
+    String[] types = RestMeta.APPLICATION_TYPES;
+    assertEquals(9, types.length);
+    assertEquals(RestMeta.APPLICATION_TYPE_TEXT_PLAIN, types[0]);
+    assertEquals(RestMeta.APPLICATION_TYPE_XML, types[1]);
+    assertEquals(RestMeta.APPLICATION_TYPE_JSON, types[2]);
+    assertEquals(RestMeta.APPLICATION_TYPE_OCTET_STREAM, types[3]);
+    assertEquals(RestMeta.APPLICATION_TYPE_XHTML, types[4]);
+    assertEquals(RestMeta.APPLICATION_TYPE_FORM_URLENCODED, types[5]);
+    assertEquals(RestMeta.APPLICATION_TYPE_ATOM_XML, types[6]);
+    assertEquals(RestMeta.APPLICATION_TYPE_SVG_XML, types[7]);
+    assertEquals(RestMeta.APPLICATION_TYPE_TEXT_XML, types[8]);
+  }
+
+  @Test
+  void testHttpMethods() {
+    String[] methods = RestMeta.HTTP_METHODS;
+    assertEquals(7, methods.length);
+    assertEquals(RestMeta.HTTP_METHOD_GET, methods[0]);
+    assertEquals(RestMeta.HTTP_METHOD_POST, methods[1]);
+    assertEquals(RestMeta.HTTP_METHOD_PUT, methods[2]);
+    assertEquals(RestMeta.HTTP_METHOD_DELETE, methods[3]);
+    assertEquals(RestMeta.HTTP_METHOD_HEAD, methods[4]);
+    assertEquals(RestMeta.HTTP_METHOD_OPTIONS, methods[5]);
+    assertEquals(RestMeta.HTTP_METHOD_PATCH, methods[6]);
+  }
+
+  @Test
+  void testDefaultTimeouts() {
+    assertEquals(10000, RestMeta.DEFAULT_CONNECTION_TIMEOUT);
+    assertEquals(10000, RestMeta.DEFAULT_READ_TIMEOUT);
+  }
+
+  @Test
+  void testCheckWithStaticUrl() {
+    RestMeta meta = new RestMeta();
+    meta.setUrlInField(false);
+    meta.setUrl("http://example.com");
+    meta.setMethod(RestMeta.HTTP_METHOD_GET);
+
+    List<ICheckResult> remarks = new ArrayList<>();
+    PipelineMeta pipelineMeta = new PipelineMeta();
+    TransformMeta transform = new TransformMeta();
+    IRowMeta prev = new RowMeta();
+    IRowMeta info = new RowMeta();
+    String[] input = new String[] {"previous"};
+    String[] output = new String[0];
+    IVariables variables = new Variables();
+
+    meta.check(remarks, pipelineMeta, transform, prev, input, output, info, variables, null);
+
+    // Should have fewer errors now
+    long errorCount =
+        remarks.stream().filter(r -> r.getType() == ICheckResult.TYPE_RESULT_ERROR).count();
+    // Expect 0 errors with valid configuration
+    assertEquals(0, errorCount);
+  }
+
+  @Test
+  void testCheckWithDynamicMethod() {
+    RestMeta meta = new RestMeta();
+    meta.setUrlInField(false);
+    meta.setUrl("http://example.com");
+    meta.setDynamicMethod(true);
+    meta.setMethodFieldName("methodField");
+
+    List<ICheckResult> remarks = new ArrayList<>();
+    PipelineMeta pipelineMeta = new PipelineMeta();
+    TransformMeta transform = new TransformMeta();
+    IRowMeta prev = new RowMeta();
+    prev.addValueMeta(new ValueMetaString("methodField"));
+    IRowMeta info = new RowMeta();
+    String[] input = new String[] {"previous"};
+    String[] output = new String[0];
+    IVariables variables = new Variables();
+
+    meta.check(remarks, pipelineMeta, transform, prev, input, output, info, variables, null);
+
+    // Check that there's a check result for the method field
+    assertFalse(remarks.isEmpty());
   }
 
   @Override

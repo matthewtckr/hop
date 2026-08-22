@@ -16,8 +16,9 @@
  */
 package org.apache.hop.www;
 
-import org.apache.commons.lang.StringUtils;
-import org.apache.commons.lang.Validate;
+import java.security.KeyStore;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.Validate;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.encryption.Encr;
 import org.apache.hop.core.xml.XmlHandler;
@@ -35,7 +36,7 @@ public class SslConfiguration {
   private static final String EMPTY = "empty";
   private static final String NULL = "null";
   private static final String CONST_ILLEGAL_PARAMETER = "WebServer.Error.IllegalSslParameter";
-  @HopMetadataProperty private String keyStoreType = "JKS";
+  @HopMetadataProperty private String keyStoreType = KeyStore.getDefaultType();
   @HopMetadataProperty private String keyStore;
 
   @HopMetadataProperty(password = true)

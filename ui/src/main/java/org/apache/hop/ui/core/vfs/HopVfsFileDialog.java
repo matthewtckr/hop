@@ -24,12 +24,14 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import lombok.Getter;
 import lombok.Setter;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOCase;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileContent;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.commons.vfs2.FileSystemException;
@@ -43,6 +45,7 @@ import org.apache.hop.core.gui.plugin.toolbar.GuiToolbarElement;
 import org.apache.hop.core.logging.LogChannel;
 import org.apache.hop.core.plugins.IPlugin;
 import org.apache.hop.core.plugins.PluginRegistry;
+import org.apache.hop.core.search.SearchMatcher;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.vfs.HopVfs;
@@ -59,10 +62,14 @@ import org.apache.hop.ui.core.dialog.MessageBox;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.gui.GuiToolbarWidgets;
 import org.apache.hop.ui.core.gui.HopNamespace;
+import org.apache.hop.ui.core.gui.IToolbarContainer;
 import org.apache.hop.ui.core.gui.WindowProperty;
+import org.apache.hop.ui.core.widget.HopTree;
 import org.apache.hop.ui.core.widget.TextVar;
 import org.apache.hop.ui.core.widget.TreeUtil;
 import org.apache.hop.ui.hopgui.HopGui;
+import org.apache.hop.ui.hopgui.HopGuiKeyHandler;
+import org.apache.hop.ui.hopgui.ToolbarFacade;
 import org.apache.hop.ui.hopgui.file.HopFileTypePluginType;
 import org.apache.hop.ui.hopgui.file.HopFileTypeRegistry;
 import org.apache.hop.ui.hopgui.file.IHopFileType;
@@ -92,19 +99,19 @@ import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.List;
 import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.MenuItem;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
-import org.eclipse.swt.widgets.ToolBar;
 import org.eclipse.swt.widgets.ToolItem;
 import org.eclipse.swt.widgets.Tree;
 import org.eclipse.swt.widgets.TreeColumn;
 import org.eclipse.swt.widgets.TreeItem;
 
-@GuiPlugin(description = "Allows you to browse to local or VFS locations")
+@GuiPlugin(name = "File Browser", description = "Allows you to browse to local or VFS locations")
 public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
 
   private static final Class<?> PKG = HopVfsFileDialog.class;
@@ -130,6 +137,7 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
 
   public static final String BROWSER_TOOLBAR_PARENT_ID = "HopVfsFileDialog-BrowserToolbar";
   private static final String BROWSER_ITEM_ID_CREATE_FOLDER = "0020-create-folder";
+  private static final String BROWSER_ITEM_ID_DRILL_INTO = "0030-drill-into";
   private static final String BROWSER_ITEM_ID_SHOW_HIDDEN = "0200-show-hidden";
   private static final String BROWSER_ITEM_ID_DELETE = "0100-delete";
   private static final String BROWSER_ITEM_ID_RENAME = "0110-rename";
@@ -156,6 +164,11 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
   private Text wDetails;
   private Tree wBrowser;
   private TreeEditor wBrowserEditor;
+
+  /** search file/folder */
+  private String filterText = "";
+
+  private SearchMatcher filterMatcher = new SearchMatcher("", false, false, true);
 
   @Setter @Getter private boolean showingHiddenFiles;
 
@@ -189,6 +202,12 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
 
   @Setter @Getter private boolean savingFile;
   private boolean folderAndFile;
+
+  /** Set before opening the dialog to let the user select more than one file. */
+  private boolean multiSelection;
+
+  /** Full paths of the files that were selected when more than one file was picked. */
+  private String[] selectedFilenames;
 
   @Setter @Getter private String saveFilename;
 
@@ -271,6 +290,7 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
 
   @Override
   public String open() {
+
     shell =
         new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MIN | SWT.MAX | SWT.APPLICATION_MODAL);
     PropsUi.setLook(shell);
@@ -306,9 +326,7 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     BaseTransformDialog.positionBottomButtons(
         shell, new Button[] {wOk, wCancel}, PropsUi.getMargin(), null);
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////
     // On top there are the navigation
-    //
     Composite navigateComposite = new Composite(shell, SWT.NONE);
     PropsUi.setLook(navigateComposite);
     GridLayout gridLayout = new GridLayout((browsingDirectories) ? 2 : 3, false);
@@ -323,14 +341,16 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     navigateComposite.setLayoutData(fdNavigationForm);
 
     // A toolbar above the browser, below the filename
-    //
-    ToolBar navigateToolBar = new ToolBar(navigateComposite, SWT.LEFT | SWT.HORIZONTAL);
+    IToolbarContainer navigateToolBarContainer =
+        ToolbarFacade.createToolbarContainer(navigateComposite, SWT.LEFT | SWT.HORIZONTAL);
+    Control navigateToolBar = navigateToolBarContainer.getControl();
     navigateToolBar.setLayoutData(new GridData(SWT.LEFT, SWT.FILL, false, true));
-    PropsUi.setLook(navigateToolBar, Props.WIDGET_STYLE_DEFAULT);
+    PropsUi.setLook(navigateToolBar, Props.WIDGET_STYLE_TOOLBAR);
 
     navigateToolbarWidgets = new GuiToolbarWidgets();
     navigateToolbarWidgets.registerGuiPluginObject(this);
-    navigateToolbarWidgets.createToolbarWidgets(navigateToolBar, NAVIGATE_TOOLBAR_PARENT_ID);
+    navigateToolbarWidgets.createToolbarWidgets(
+        navigateToolBarContainer, NAVIGATE_TOOLBAR_PARENT_ID);
     navigateToolBar.pack();
 
     wFilename = new TextVar(variables, navigateComposite, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
@@ -348,7 +368,6 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     }
 
     // Above this we have a sash form
-    //
     SashForm sashForm = new SashForm(shell, SWT.HORIZONTAL);
     FormData fdSashForm = new FormData();
     fdSashForm.left = new FormAttachment(0, 0);
@@ -360,17 +379,16 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
 
     PropsUi.setLook(sashForm);
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////
     // On the left there are the bookmarks
-    //
     Composite bookmarksComposite = new Composite(sashForm, SWT.BORDER);
     PropsUi.setLook(bookmarksComposite);
     bookmarksComposite.setLayout(new FormLayout());
 
     // Above the bookmarks a toolbar with add, delete
-    //
-    ToolBar bookmarksToolBar =
-        new ToolBar(bookmarksComposite, SWT.WRAP | SWT.SHADOW_IN | SWT.LEFT | SWT.HORIZONTAL);
+    IToolbarContainer bookmarksToolBarContainer =
+        ToolbarFacade.createToolbarContainer(
+            bookmarksComposite, SWT.WRAP | SWT.SHADOW_IN | SWT.LEFT | SWT.HORIZONTAL);
+    Control bookmarksToolBar = bookmarksToolBarContainer.getControl();
     FormData fdBookmarksToolBar = new FormData();
     fdBookmarksToolBar.left = new FormAttachment(0, 0);
     fdBookmarksToolBar.top = new FormAttachment(0, 0);
@@ -380,11 +398,11 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
 
     bookmarksToolbarWidgets = new GuiToolbarWidgets();
     bookmarksToolbarWidgets.registerGuiPluginObject(this);
-    bookmarksToolbarWidgets.createToolbarWidgets(bookmarksToolBar, BOOKMARKS_TOOLBAR_PARENT_ID);
+    bookmarksToolbarWidgets.createToolbarWidgets(
+        bookmarksToolBarContainer, BOOKMARKS_TOOLBAR_PARENT_ID);
     bookmarksToolBar.pack();
 
     // Below that we have a list with all the bookmarks in them
-    //
     wBookmarks = new List(bookmarksComposite, SWT.SINGLE | SWT.LEFT | SWT.V_SCROLL | SWT.H_SCROLL);
     PropsUi.setLook(wBookmarks);
     FormData fdBookmarks = new FormData();
@@ -397,7 +415,6 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     wBookmarks.addListener(SWT.DefaultSelection, this::bookmarkDefaultSelection);
 
     // Context menu for bookmarks
-    //
     final Menu menu = new Menu(wBookmarks);
     menu.addMenuListener(
         new MenuAdapter() {
@@ -420,7 +437,6 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     wBookmarks.setMenu(menu);
 
     // Drag and drop to bookmarks
-    //
     DropTarget target = new DropTarget(wBookmarks, DND.DROP_MOVE);
     target.setTransfer(TextTransfer.getInstance());
     target.addDropListener(
@@ -470,9 +486,7 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
           }
         });
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////
     // On the right there is a folder and files browser
-    //
     Composite browserComposite = new Composite(sashForm, SWT.BORDER);
     PropsUi.setLook(browserComposite);
     browserComposite.setLayout(new FormLayout());
@@ -484,27 +498,61 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     fdTreeComposite.bottom = new FormAttachment(100, 0);
     browserComposite.setLayoutData(fdTreeComposite);
 
-    // A toolbar above the browser, below the filename
-    //
-    ToolBar browserToolBar = new ToolBar(browserComposite, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    // Toolbar row: action buttons on the left, file search on the right
+    Composite browserToolBarRow = new Composite(browserComposite, SWT.NONE);
+    PropsUi.setLook(browserToolBarRow);
+    FormLayout toolBarRowLayout = new FormLayout();
+    toolBarRowLayout.marginWidth = 0;
+    toolBarRowLayout.marginHeight = 0;
+    browserToolBarRow.setLayout(toolBarRowLayout);
+
+    FormData fdBrowserToolBarRow = new FormData();
+    fdBrowserToolBarRow.left = new FormAttachment(0, 0);
+    fdBrowserToolBarRow.top = new FormAttachment(0, 0);
+    fdBrowserToolBarRow.right = new FormAttachment(100, 0);
+    browserToolBarRow.setLayoutData(fdBrowserToolBarRow);
+
+    Text wSearchText = new Text(browserToolBarRow, SWT.SEARCH | SWT.ICON_CANCEL | SWT.ICON_SEARCH);
+    wSearchText.setMessage(BaseMessages.getString(PKG, "HopVfsFileDialog.Search.Placeholder"));
+    PropsUi.setLook(wSearchText, Props.WIDGET_STYLE_TOOLBAR);
+    FormData fdSearchText = new FormData();
+    fdSearchText.right = new FormAttachment(100, 0);
+    fdSearchText.top = new FormAttachment(0, 0);
+    fdSearchText.width = (int) (260 * props.getZoomFactor());
+    wSearchText.setLayoutData(fdSearchText);
+    wSearchText.addListener(
+        SWT.Modify,
+        e -> {
+          String searchContent = wSearchText.getText();
+          filterText = searchContent != null ? searchContent.trim() : "";
+          filterMatcher = new SearchMatcher(filterText, false, false, true);
+          refreshBrowser();
+        });
+
+    IToolbarContainer browserToolBarContainer =
+        ToolbarFacade.createToolbarContainer(
+            browserToolBarRow, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    Control browserToolBar = browserToolBarContainer.getControl();
     FormData fdBrowserToolBar = new FormData();
     fdBrowserToolBar.left = new FormAttachment(0, 0);
     fdBrowserToolBar.top = new FormAttachment(0, 0);
-    fdBrowserToolBar.right = new FormAttachment(100, 0);
+    fdBrowserToolBar.right = new FormAttachment(wSearchText, -PropsUi.getMargin());
     browserToolBar.setLayoutData(fdBrowserToolBar);
     PropsUi.setLook(browserToolBar, Props.WIDGET_STYLE_TOOLBAR);
 
     browserToolbarWidgets = new GuiToolbarWidgets();
     browserToolbarWidgets.registerGuiPluginObject(this);
-    browserToolbarWidgets.createToolbarWidgets(browserToolBar, BROWSER_TOOLBAR_PARENT_ID);
+    browserToolbarWidgets.createToolbarWidgets(browserToolBarContainer, BROWSER_TOOLBAR_PARENT_ID);
     browserToolBar.pack();
 
     SashForm browseSash = new SashForm(browserComposite, SWT.VERTICAL);
 
-    wBrowser = new Tree(browseSash, SWT.SINGLE | SWT.H_SCROLL | SWT.V_SCROLL);
+    wBrowser =
+        new HopTree(
+            browseSash, (multiSelection ? SWT.MULTI : SWT.SINGLE) | SWT.H_SCROLL | SWT.V_SCROLL);
     PropsUi.setLook(wBrowser);
     wBrowser.setHeaderVisible(true);
-    wBrowser.setLinesVisible(false); // TODO needed?
+    wBrowser.setLinesVisible(false);
 
     TreeColumn folderColumn = new TreeColumn(wBrowser, SWT.LEFT);
     folderColumn.setText(BaseMessages.getString(PKG, "HopVfsFileDialog.Folder.Name.Label"));
@@ -554,27 +602,25 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     wBrowserEditor.grabHorizontal = true;
 
     // Put file details or message/logging label at the bottom...
-    //
     wDetails = new Text(browseSash, SWT.MULTI | SWT.H_SCROLL | SWT.V_SCROLL | SWT.READ_ONLY);
     PropsUi.setLook(wDetails);
 
     FormData fdBrowseSash = new FormData();
     fdBrowseSash.left = new FormAttachment(0, 0);
     fdBrowseSash.right = new FormAttachment(100, 0);
-    fdBrowseSash.top = new FormAttachment(browserToolBar, 0);
+    fdBrowseSash.top = new FormAttachment(browserToolBarRow, 0);
     fdBrowseSash.bottom = new FormAttachment(100, 0);
 
     browseSash.setLayoutData(fdBrowseSash);
-    browseSash.setWeights(new int[] {90, 10});
+    browseSash.setWeights(90, 10);
 
-    sashForm.setWeights(new int[] {15, 85});
+    sashForm.setWeights(15, 85);
 
     getData();
 
     BaseTransformDialog.setSize(shell);
 
     // The shell size usually ends up a bit too narrow so let's make it a bit higher
-    //
     Point shellSize = shell.getSize();
     if (shellSize.y < shellSize.x / 2) {
       shell.setSize(shellSize.x, shellSize.x / 2);
@@ -583,6 +629,11 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     // Set the focus on the filename
     //
     wFilename.setFocus();
+
+    // So Delete etc. work and we're tried before the active perspective
+    HopGuiKeyHandler keyHandler = HopGuiKeyHandler.getInstance();
+    keyHandler.addParentObjectToHandle(this, shell);
+    HopGui.getInstance().replaceKeyboardShortcutListeners(shell, keyHandler);
 
     shell.open();
 
@@ -657,11 +708,29 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
 
   private void okButton() {
     try {
+      // When multiple files are selected in the browser they take precedence over the single
+      // filename in the text field.
+      //
+      if (okMultipleSelectedFiles()) {
+        return;
+      }
+
       activeFileObject = HopVfs.getFileObject(wFilename.getText(), variables);
 
       if (!this.browsingDirectories && activeFileObject.isFolder() && !this.folderAndFile) {
         navigateTo(HopVfs.getFilename(activeFileObject), true);
         return;
+      }
+
+      // Directory browser: an archive is not a valid folder selection — enter it instead so the
+      // user can pick a folder inside (zip:…!/path).
+      //
+      if (this.browsingDirectories && isDrillableArchive(activeFileObject)) {
+        String archiveUri = buildArchiveBrowseUri(activeFileObject);
+        if (archiveUri != null) {
+          navigateTo(archiveUri, true);
+          return;
+        }
       }
 
       ok();
@@ -673,7 +742,63 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     }
   }
 
+  /**
+   * Close the dialog with all the files that are selected in the browser. Folders in the selection
+   * are ignored: they are navigation targets, not a choice.
+   *
+   * @return true if the dialog handled the selection in the browser and is closing
+   */
+  private boolean okMultipleSelectedFiles() throws FileSystemException {
+    if (!multiSelection) {
+      return false;
+    }
+    java.util.List<FileObject> selectedFiles = getSelectedFileObjects();
+    if (selectedFiles.size() < 2) {
+      return false;
+    }
+
+    java.util.List<FileObject> files = new ArrayList<>();
+    for (FileObject selectedFile : selectedFiles) {
+      if (!selectedFile.isFolder()) {
+        files.add(selectedFile);
+      }
+    }
+
+    if (files.isEmpty()) {
+      // Only folders were selected: put the first one in the filename field and let the regular
+      // handling navigate into it.
+      //
+      showFilename(selectedFiles.get(0));
+      return false;
+    }
+
+    activeFileObject = files.get(0);
+    if (files.size() > 1) {
+      java.util.List<String> filenames = new ArrayList<>();
+      for (FileObject file : files) {
+        filenames.add(HopVfs.getFilename(file));
+      }
+      selectedFilenames = filenames.toArray(new String[0]);
+    }
+    ok();
+    return true;
+  }
+
   private void enteredFilenameOrFolder() {
+    // Hitting enter with multiple files selected opens them all.
+    //
+    try {
+      if (okMultipleSelectedFiles()) {
+        return;
+      }
+    } catch (FileSystemException e) {
+      showError(
+          BaseMessages.getString(
+              PKG, "HopVfsFileDialog.ParsingFilename.Error.Message", wFilename.getText()),
+          e);
+      return;
+    }
+
     if (StringUtils.isNotEmpty(saveFilename)) {
       try {
         FileObject fullObject = HopVfs.getFileObject(wFilename.getText(), variables);
@@ -703,16 +828,64 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
   }
 
   /**
+   * All the files and folders selected in the browser. The order in which SWT reports a selection
+   * is platform dependent, so we walk the tree to always return them in the order they are listed.
+   */
+  private java.util.List<FileObject> getSelectedFileObjects() {
+    TreeItem[] selection = wBrowser.getSelection();
+    if (selection == null || selection.length == 0) {
+      return Collections.emptyList();
+    }
+    Set<TreeItem> selectedItems = new HashSet<>(Arrays.asList(selection));
+    java.util.List<FileObject> fileObjects = new ArrayList<>();
+    collectSelectedFileObjects(wBrowser.getItems(), selectedItems, fileObjects);
+    return fileObjects;
+  }
+
+  private void collectSelectedFileObjects(
+      TreeItem[] items, Set<TreeItem> selectedItems, java.util.List<FileObject> fileObjects) {
+    for (TreeItem item : items) {
+      if (selectedItems.contains(item)) {
+        FileObject fileObject = fileObjectsMap.get(getTreeItemPath(item));
+        if (fileObject != null) {
+          fileObjects.add(fileObject);
+        }
+      }
+      collectSelectedFileObjects(item.getItems(), selectedItems, fileObjects);
+    }
+  }
+
+  /**
    * Something is selected in the browser
    *
    * @param event that was triggered
    */
   private void fileSelected(Event event) {
-    FileObject selectedFile = getSelectedFileObject();
-    if (selectedFile != null) {
-      showFilename(selectedFile);
+    java.util.List<FileObject> selectedFiles = getSelectedFileObjects();
+    if (selectedFiles.size() > 1) {
+      showFilenames(selectedFiles);
+    } else if (!selectedFiles.isEmpty()) {
+      showFilename(selectedFiles.get(0));
     }
     updateSelection();
+  }
+
+  /**
+   * Show the names of all selected files, the way a native file dialog does, and report the size of
+   * the selection in the details pane.
+   */
+  private void showFilenames(java.util.List<FileObject> fileObjects) {
+    StringBuilder names = new StringBuilder();
+    for (FileObject fileObject : fileObjects) {
+      if (!names.isEmpty()) {
+        names.append(" ");
+      }
+      names.append("\"").append(fileObject.getName().getBaseName()).append("\"");
+    }
+    wFilename.setText(names.toString());
+    showDetails(
+        BaseMessages.getString(
+            PKG, "HopVfsFileDialog.FileInfo.SelectedFiles", "" + fileObjects.size()));
   }
 
   private void showFilename(FileObject fileObject) {
@@ -811,15 +984,26 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     }
 
     try {
-      navigateTo(HopVfs.getFilename(fileObject), true);
-
       if (fileObject.isFolder()) {
         // Browse into the selected folder...
         //
-        refreshBrowser();
-      } else {
+        navigateTo(HopVfs.getFilename(fileObject), true);
+        return;
+      }
+
+      // Double-click drills into supported archives (zip/jar/tar/...). To select the archive
+      // itself as a file, select it and press OK.
+      //
+      String archiveUri = buildArchiveBrowseUri(fileObject);
+      if (archiveUri != null) {
+        navigateTo(archiveUri, true);
+        return;
+      }
+
+      if (!browsingDirectories) {
         // Take this file as the user choice for this dialog
         //
+        navigateTo(HopVfs.getFilename(fileObject), true);
         okButton();
       }
     } catch (Exception e) {
@@ -945,40 +1129,30 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
   private void populateFolder(FileObject folder, TreeItem folderItem) throws FileSystemException {
 
     FileObject[] children = folder.getChildren();
+    if (children == null || children.length == 0) {
+      return;
+    }
 
+    // Comparator must define a total order (TimSort). Never treat unequal FileObjects as equal
+    // when metadata fails — that used to return 0 from catch and caused:
+    // IllegalArgumentException: Comparison method violates its general contract!
     Arrays.sort(
         children,
         (child1, child2) -> {
-          try {
-            int cmp;
-            switch (sortIndex) {
-              case 0:
-                String name1 = child1.getName().getBaseName();
-                String name2 = child2.getName().getBaseName();
-                cmp = name1.compareToIgnoreCase(name2);
-                break;
-              case 1:
-                long time1 = child1.getContent().getLastModifiedTime();
-                long time2 = child2.getContent().getLastModifiedTime();
-                cmp = Long.compare(time1, time2);
-                break;
-              case 2:
-                long size1 = child1.getContent().getSize();
-                long size2 = child2.getContent().getSize();
-                cmp = Long.compare(size1, size2);
-                break;
-
-              default:
-                cmp = 0;
-            }
-            if (ascending) {
-              return -cmp;
-            } else {
-              return cmp;
-            }
-          } catch (Exception e) {
-            return 0;
+          int cmp =
+              switch (sortIndex) {
+                case 1 -> Long.compare(safeLastModified(child1), safeLastModified(child2));
+                case 2 -> Long.compare(safeSize(child1), safeSize(child2));
+                default -> compareBaseName(child1, child2);
+              };
+          if (cmp == 0) {
+            cmp = compareBaseName(child1, child2);
           }
+          if (cmp == 0) {
+            cmp = compareUri(child1, child2);
+          }
+          // Preserve existing UI: ascending flag is inverted relative to natural order
+          return ascending ? -cmp : cmp;
         });
 
     // First the child folders
@@ -989,17 +1163,32 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
         if (!showingHiddenFiles && baseFilename.startsWith(".")) {
           continue;
         }
+        if (shouldFilterOut(baseFilename)) {
+          continue;
+        }
         TreeItem childFolderItem = new TreeItem(folderItem, SWT.NONE);
         childFolderItem.setImage(folderImage);
         childFolderItem.setText(child.getName().getBaseName());
         fileObjectsMap.put(getTreeItemPath(childFolderItem), child);
       }
     }
-    if (!browsingDirectories) {
+    if (browsingDirectories) {
+      // Directory mode: still show drillable archives so users can open project homes inside zip
+      // (and similar) via VFS without typing URIs by hand.
+      //
+      for (final FileObject child : children) {
+        if (child.isFile() && isDrillableArchive(child)) {
+          addBrowserFileItem(folderItem, child);
+        }
+      }
+    } else {
       for (final FileObject child : children) {
         if (child.isFile()) {
           String baseFilename = child.getName().getBaseName();
           if (!showingHiddenFiles && baseFilename.startsWith(".")) {
+            continue;
+          }
+          if (shouldFilterOut(baseFilename)) {
             continue;
           }
 
@@ -1015,31 +1204,99 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
             }
           }
 
-          // Hidden file?
+          // Always offer drillable archives even when the active filter would hide them
+          // (e.g. "Pipelines" only), so nested zip/jar browsing stays available.
           //
+          if (!selectFile && isDrillableArchive(child)) {
+            selectFile = true;
+          }
+
           if (selectFile) {
-            TreeItem childFileItem = new TreeItem(folderItem, SWT.NONE);
-            childFileItem.setImage(getFileImage(child));
-            childFileItem.setFont(GuiResource.getInstance().getFontBold());
-            childFileItem.setText(0, child.getName().getBaseName());
-            childFileItem.setText(1, getFileDate(child));
-            childFileItem.setText(2, getFileSize(child));
-            fileObjectsMap.put(getTreeItemPath(childFileItem), child);
-
-            // Gray out if the file is not readable
-            //
-            if (!child.isReadable()) {
-              childFileItem.setForeground(GuiResource.getInstance().getColorGray());
-            }
-
-            if (child.equals(activeFileObject)) {
-              wBrowser.setSelection(childFileItem);
-              wBrowser.showSelection();
-            }
+            addBrowserFileItem(folderItem, child);
           }
         }
       }
     }
+  }
+
+  /**
+   * Add a file row to the browser tree (name, modified, size, image, selection map).
+   *
+   * @param folderItem parent tree item for the current folder
+   * @param child file to display
+   */
+  private void addBrowserFileItem(TreeItem folderItem, FileObject child)
+      throws FileSystemException {
+    String baseFilename = child.getName().getBaseName();
+    if (!showingHiddenFiles && baseFilename.startsWith(".")) {
+      return;
+    }
+    if (shouldFilterOut(baseFilename)) {
+      return;
+    }
+
+    TreeItem childFileItem = new TreeItem(folderItem, SWT.NONE);
+    childFileItem.setImage(getFileImage(child));
+    childFileItem.setFont(GuiResource.getInstance().getFontBold());
+    childFileItem.setText(0, baseFilename);
+    childFileItem.setText(1, getFileDate(child));
+    childFileItem.setText(2, getFileSize(child));
+    fileObjectsMap.put(getTreeItemPath(childFileItem), child);
+
+    if (!child.isReadable()) {
+      childFileItem.setForeground(GuiResource.getInstance().getColorGray());
+    }
+
+    if (child.equals(activeFileObject)) {
+      wBrowser.setSelection(childFileItem);
+      wBrowser.showSelection();
+    }
+  }
+
+  private static boolean isDrillableArchive(FileObject file) throws FileSystemException {
+    return file != null && file.isFile() && getArchiveScheme(file.getName().getBaseName()) != null;
+  }
+
+  private static int compareBaseName(FileObject child1, FileObject child2) {
+    try {
+      String name1 = child1.getName().getBaseName();
+      String name2 = child2.getName().getBaseName();
+      return name1.compareToIgnoreCase(name2);
+    } catch (Exception e) {
+      return Integer.compare(System.identityHashCode(child1), System.identityHashCode(child2));
+    }
+  }
+
+  private static int compareUri(FileObject child1, FileObject child2) {
+    try {
+      return child1.getName().getURI().compareTo(child2.getName().getURI());
+    } catch (Exception e) {
+      return Integer.compare(System.identityHashCode(child1), System.identityHashCode(child2));
+    }
+  }
+
+  private static long safeLastModified(FileObject child) {
+    try {
+      return child.getContent().getLastModifiedTime();
+    } catch (Exception e) {
+      return Long.MIN_VALUE;
+    }
+  }
+
+  private static long safeSize(FileObject child) {
+    try {
+      if (child.isFolder()) {
+        return -1L;
+      }
+      return child.getContent().getSize();
+    } catch (Exception e) {
+      return Long.MIN_VALUE;
+    }
+  }
+
+  /** Case-insensitive filename filter for the current folder listing. */
+  private boolean shouldFilterOut(String name) {
+    return !Utils.isEmpty(filterText) && !filterMatcher.matches(name);
   }
 
   private Image getFileImage(FileObject file) {
@@ -1150,6 +1407,7 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     bookmarksToolbarWidgets.dispose();
     browserToolbarWidgets.dispose();
 
+    HopGuiKeyHandler.getInstance().removeParentObjectToHandle(this);
     shell.dispose();
   }
 
@@ -1244,7 +1502,7 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
           }
         }
 
-        if (HopVfs.getFileObject(filename).isFolder()) {
+        if (HopVfs.getFileObject(filename, variables).isFolder()) {
           String fullPath = FilenameUtils.concat(filename, saveFilename);
           wFilename.setText(fullPath);
           // Select the saveFilename part...
@@ -1293,9 +1551,11 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
       if (fileObject.isFile() || !fileObject.exists()) {
         fileObject = fileObject.getParent();
       }
-      FileObject navigateUpParent = fileObject.getParent();
-      if (navigateUpParent != null) {
-        navigateTo(HopVfs.getFilename(navigateUpParent), true);
+      if (fileObject != null) {
+        FileObject navigateUpParent = fileObject.getParent();
+        if (navigateUpParent != null) {
+          navigateTo(HopVfs.getFilename(navigateUpParent), true);
+        }
       }
     } catch (Exception e) {
       showError(
@@ -1338,6 +1598,114 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
 
   @GuiToolbarElement(
       root = BROWSER_TOOLBAR_PARENT_ID,
+      id = BROWSER_ITEM_ID_DRILL_INTO,
+      toolTip = "i18n::HopVfsFileDialog.DrillInto.Tooltip.Message",
+      image = "ui/images/zipfile.svg")
+  public void drillIntoArchive() {
+    FileObject file = getSelectedFileObject();
+    if (file == null) {
+      return;
+    }
+    try {
+      String archiveUri = buildArchiveBrowseUri(file);
+      if (archiveUri == null) {
+        return;
+      }
+      navigateTo(archiveUri, true);
+    } catch (Exception e) {
+      showError(
+          BaseMessages.getString(PKG, "HopVfsFileDialog.DrillInto.Error.Message", file.toString()),
+          e);
+    }
+  }
+
+  /**
+   * Map a file name or path to a Commons VFS archive scheme that supports browsing with {@code !/}.
+   *
+   * @param nameOrPath file name, path, or URI
+   * @return scheme such as {@code zip}, {@code jar}, {@code tar}, {@code tgz}, {@code tbz2}, or
+   *     {@code null} if the file is not a drillable archive
+   */
+  static String getArchiveScheme(String nameOrPath) {
+    if (StringUtils.isEmpty(nameOrPath)) {
+      return null;
+    }
+    String base = nameOrPath;
+    int bang = base.lastIndexOf('!');
+    if (bang >= 0) {
+      base = base.substring(bang + 1);
+    }
+    int slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));
+    if (slash >= 0) {
+      base = base.substring(slash + 1);
+    }
+    String lower = base.toLowerCase();
+    // Compound suffixes before short ones (.tar.gz before .gz)
+    if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
+      return "tgz";
+    }
+    if (lower.endsWith(".tar.bz2") || lower.endsWith(".tbz2")) {
+      return "tbz2";
+    }
+    if (lower.endsWith(".tar")) {
+      return "tar";
+    }
+    if (lower.endsWith(".zip")) {
+      return "zip";
+    }
+    if (lower.endsWith(".jar")
+        || lower.endsWith(".war")
+        || lower.endsWith(".ear")
+        || lower.endsWith(".par")
+        || lower.endsWith(".sar")
+        || lower.endsWith(".ejb3")) {
+      return "jar";
+    }
+    return null;
+  }
+
+  /**
+   * Build a VFS URI that opens an archive for browsing ({@code scheme:archFileUri!/}).
+   *
+   * @param scheme VFS archive scheme (zip, jar, tar, tgz, tbz2)
+   * @param archFileUri path or URI of the archive file
+   * @return browse URI, or {@code null} if inputs are incomplete
+   */
+  static String buildArchiveBrowseUri(String scheme, String archFileUri) {
+    if (StringUtils.isEmpty(scheme) || StringUtils.isEmpty(archFileUri)) {
+      return null;
+    }
+    return scheme + ":" + archFileUri + "!/";
+  }
+
+  /**
+   * Build a VFS URI that opens the given archive for browsing (scheme + archive + {@code !/}).
+   *
+   * @param file archive file object
+   * @return browse URI, or {@code null} if not a supported archive
+   */
+  static String buildArchiveBrowseUri(FileObject file) {
+    if (file == null) {
+      return null;
+    }
+    String scheme = getArchiveScheme(file.getName().getBaseName());
+    if (scheme == null) {
+      return null;
+    }
+    String archFileUri;
+    String root = file.getName().getRootURI();
+    if (root != null && root.startsWith("file:")) {
+      // Local files: match Hop issue style zip:/path/to/archive.zip!/
+      archFileUri = HopVfs.getFilename(file);
+    } else {
+      // Nested / remote: keep full URI (e.g. jar:zip:...!/nested.jar!/)
+      archFileUri = file.getName().getURI();
+    }
+    return buildArchiveBrowseUri(scheme, archFileUri);
+  }
+
+  @GuiToolbarElement(
+      root = BROWSER_TOOLBAR_PARENT_ID,
       id = BROWSER_ITEM_ID_RENAME,
       toolTip = "i18n::HopVfsFileDialog.RenameFile.Tooltip.Message",
       image = "ui/images/rename.svg")
@@ -1371,7 +1739,7 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
                         HopVfs.getFileObject(
                             HopVfs.getFilename(file.getParent()) + "/" + renameText.getText(),
                             variables);
-                    file.moveTo(newFile);
+                    HopVfs.moveFile(file, newFile);
                   } catch (Exception e) {
                     showError(
                         BaseMessages.getString(
@@ -1385,6 +1753,8 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
                 break;
               case SWT.ESC:
                 renameText.dispose();
+                break;
+              default:
                 break;
             }
           });
@@ -1401,7 +1771,6 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
       id = BROWSER_ITEM_ID_DELETE,
       toolTip = "i18n::HopVfsFileDialog.DeleteFile.Tooltip.Message",
       image = "ui/images/delete.svg")
-  // FIXME: Keyboard don't work
   @GuiKeyboardShortcut(key = SWT.DEL)
   @GuiOsxKeyboardShortcut(key = SWT.DEL)
   public void deleteFile() {
@@ -1545,6 +1914,16 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     this.fileName = fileName;
   }
 
+  @Override
+  public void setMultiSelection(boolean multiSelection) {
+    this.multiSelection = multiSelection;
+  }
+
+  @Override
+  public String[] getFileNames() {
+    return selectedFilenames == null ? new String[0] : selectedFilenames.clone();
+  }
+
   /**
    * @param filterExtensions The filterExtensions to set
    */
@@ -1583,10 +1962,14 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
     FileObject file = getSelectedFileObject();
 
     boolean isEnabled = false;
+    boolean canDrillInto = false;
     if (file != null) {
       try {
         // Protect root can be modified
-        if (file.getParent() != null) isEnabled = true;
+        if (file.getParent() != null) {
+          isEnabled = true;
+        }
+        canDrillInto = isDrillableArchive(file);
       } catch (FileSystemException e) {
         // Ignore
       }
@@ -1594,5 +1977,6 @@ public class HopVfsFileDialog implements IFileDialog, IDirectoryDialog {
 
     browserToolbarWidgets.enableToolbarItem(BROWSER_ITEM_ID_DELETE, isEnabled);
     browserToolbarWidgets.enableToolbarItem(BROWSER_ITEM_ID_RENAME, isEnabled);
+    browserToolbarWidgets.enableToolbarItem(BROWSER_ITEM_ID_DRILL_INTO, canDrillInto);
   }
 }

@@ -16,16 +16,16 @@ under the License.
 ////
 :documentationPath: /pipeline/transforms/
 :language: en_US
-:description: The Parquet File Input transform reads (primitive) values from an Apache Parquet file.
+:description: The Parquet file input transform reads (primitive) values from an Apache Parquet file.
 
-= image:transforms/icons/parquet_input.svg[Parquet File Input transform Icon, role="image-doc-icon"] Parquet File Input
+= image:transforms/icons/parquet_input.svg[Parquet file input transform Icon, role="image-doc-icon"] Parquet file input
 
 [%noheader,cols="3a,1a", role="table-no-borders" ]
 |===
 |
 == Description
 
-The Parquet File Input transform reads (primitive) values from an Apache Parquet file.
+The Parquet file input transform reads (primitive) values from an Apache Parquet file.
 
 For more information on this see: http://parquet.apache.org/[Apache Parquet].
 
@@ -34,9 +34,11 @@ For more information on this see: http://parquet.apache.org/[Apache Parquet].
 [%noheader,cols="2,1a",frame=none, role="table-supported-engines"]
 !===
 !Hop Engine! image:check_mark.svg[Supported, 24]
-!Spark! image:check_mark.svg[Supported, 24]
-!Flink! image:check_mark.svg[Supported, 24]
-!Dataflow! image:check_mark.svg[Supported, 24]
+!Single Threaded! image:check_mark.svg[Supported, 24]
+!Native Spark! image:check_mark.svg[Supported, 24]
+!Beam Spark! image:check_mark.svg[Supported, 24]
+!Beam Flink! image:check_mark.svg[Supported, 24]
+!Beam Dataflow! image:check_mark.svg[Supported, 24]
 !===
 |===
 
@@ -62,6 +64,15 @@ Make sure to allocate enough memory to allow this.
 |Specify the input field.
 Use a transform like Get File Names to obtain file names.
 Any supported file location is fine.
+
+|Metadata filename
+|If you specify a filename here, you can leave the fields section empty and Hop will automatically determine
+the output fields.  It prevents you from having to define all the fields when this metadata is already in
+a parquet file schema.
+
+|Output null row when empty
+|In case you want to extract file metadata and there were no rows found in the parquet file(s) you will receive one empty row.
+This row can then be used to extract metadata with the xref:pipeline/transforms/metastructure.adoc[Metadata structure of stream] transform.
 
 |Fields
 |In this table you can specify all the fields you want to obtain from the parquet files as well as their desired Hop output type.

@@ -17,11 +17,16 @@
 
 package org.apache.hop.databases.h2;
 
+import java.util.List;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
+import org.apache.hop.core.database.types.DatabaseTypes;
+import org.apache.hop.core.database.types.IDatabaseTypeRule;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.util.Utils;
@@ -30,9 +35,30 @@ import org.apache.hop.core.util.Utils;
 @DatabaseMetaPlugin(
     type = "H2",
     typeDescription = "H2",
-    documentationUrl = "/database/databases/h2.html")
+    documentationUrl = "/database/databases/h2.html",
+    classLoaderGroup = "h2-db")
 @GuiPlugin(id = "GUI-H2DatabaseMeta")
 public class H2DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  private static final List<IDatabaseTypeRule> TYPE_RULES =
+      DatabaseTypes.rules()
+          // H2 has both of these as column types of its own.
+          .write(IValueMeta.TYPE_UUID)
+          .as("UUID")
+          .write(IValueMeta.TYPE_JSON)
+          .as("JSON")
+          .build();
+
+  @Override
+  public List<IDatabaseTypeRule> getTypeRules() {
+    return TYPE_RULES;
+  }
+
+  @Override
+  public String getLimitClause(int nrRows) {
+    return " LIMIT " + nrRows;
+  }
+
   @Override
   public int[] getAccessTypeList() {
     return new int[] {DatabaseMeta.TYPE_ACCESS_NATIVE};
@@ -49,6 +75,19 @@ public class H2DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   @Override
   public String getDriverClass() {
     return "org.h2.Driver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("com.h2database:h2")
+        .defaultVersion("2.4.240")
+        .licenseCategory("B")
+        .licenseName("EPL-1.0 / MPL-2.0")
+        .licenseUrl("https://www.h2database.com/html/license.html")
+        .vendor("H2 Database Engine")
+        .vendorUrl("https://www.h2database.com/")
+        .build();
   }
 
   @Override
@@ -124,7 +163,7 @@ public class H2DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -144,7 +183,8 @@ public class H2DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " ALTER "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -179,35 +219,26 @@ public class H2DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
         ) {
           retval += "IDENTITY";
         } else {
-          if (type == IValueMeta.TYPE_INTEGER) {
-            // Integer values...
-            if (length < 3) {
-              retval += "TINYINT";
-            } else if (length < 5) {
-              retval += "SMALLINT";
-            } else if (length < 10) {
-              retval += "INT";
-            } else if (length < 20) {
-              retval += "BIGINT";
-            } else {
-              retval += "DECIMAL(" + length + ")";
+          switch (type) {
+            case IValueMeta.TYPE_INTEGER -> {
+              if (length < 3) {
+                retval += "TINYINT";
+              } else if (length < 5) {
+                retval += "SMALLINT";
+              } else if (length < 10) {
+                retval += "INT";
+              } else if (length < 20) {
+                retval += "BIGINT";
+              } else {
+                retval += "DECIMAL(" + length + ")";
+              }
             }
-          } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-            // Fixed point value...
-            if (length
-                < 1) { // user configured no value for length. Use 16 digits, which is comparable to
-              // mantissa 2^53 of IEEE 754 binary64 "double".
-              length = 16;
+            case IValueMeta.TYPE_BIGNUMBER -> {
+              int len = (length < 1) ? 16 : length;
+              int p = (precision < 1) ? 16 : precision;
+              retval += "DECIMAL(" + len + "," + p + ")";
             }
-            if (precision
-                < 1) { // user configured no value for precision. Use 16 digits, which is comparable
-              // to IEEE 754 binary64 "double".
-              precision = 16;
-            }
-            retval += "DECIMAL(" + length + "," + precision + ")";
-          } else {
-            // Floating point value with double precision...
-            retval += "DOUBLE PRECISION";
+            default -> retval += "DOUBLE PRECISION";
           }
         }
         break;

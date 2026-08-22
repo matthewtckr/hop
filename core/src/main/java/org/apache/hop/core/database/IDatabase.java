@@ -23,6 +23,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import org.apache.hop.core.exception.HopDatabaseException;
 import org.apache.hop.core.exception.HopValueException;
 import org.apache.hop.core.row.IValueMeta;
@@ -239,6 +240,22 @@ public interface IDatabase extends Cloneable {
   String getLimitClause(int nrRows);
 
   /**
+   * The clause that limits the number of rows when the database puts it directly after SELECT,
+   * rather than at the end of the statement.
+   *
+   * <p>SQL Server and Sybase IQ write {@code SELECT TOP 10 * FROM t}, where PostgreSQL writes
+   * {@code SELECT * FROM t LIMIT 10}. A database uses one form or the other, so a dialect overrides
+   * this or {@link #getLimitClause(int)}, not both.
+   *
+   * @param nrRows the number of rows to limit the result to
+   * @return the clause to place after SELECT, with a leading space, or an empty string when this
+   *     database limits rows at the end of the statement instead
+   */
+  default String getLimitClausePrefix(int nrRows) {
+    return "";
+  }
+
+  /**
    * Returns the minimal SQL to launch in order to determine the layout of the resultset for a given
    * database table
    *
@@ -262,6 +279,18 @@ public interface IDatabase extends Cloneable {
    * @return the name of the JDBC driver class for the specific database
    */
   String getDriverClass();
+
+  /**
+   * Optional descriptor that lets Hop download this database's JDBC driver on demand. The default
+   * is {@code null}, meaning there is no downloadable driver. Database plugins - including
+   * external, third-party ones - override this to point Hop at their driver's Maven coordinate and
+   * license, so the driver definition lives next to the rest of the database metadata.
+   *
+   * @return the driver download descriptor, or {@code null} when none is available
+   */
+  default DriverDownload getDriverDownload() {
+    return null;
+  }
 
   /**
    * @param hostname the hostname
@@ -621,6 +650,22 @@ public interface IDatabase extends Cloneable {
   boolean isSupportsOptionsInURL();
 
   /**
+   * JDBC connection properties contributed by the database plugin itself, on top of the extra
+   * options the user entered on the Options tab.
+   *
+   * <p>This is the hook for plugin-specific settings that have to reach the driver as properties
+   * rather than as part of the URL: TLS key stores, wallet locations and the like. The user's own
+   * extra options are applied <em>after</em> these, so an explicit entry on the Options tab always
+   * wins over a value computed here.
+   *
+   * @param variables the variables to resolve the values with
+   * @return the properties to add to the connection, never {@code null}
+   */
+  default Properties getConnectionProperties(IVariables variables) {
+    return new Properties();
+  }
+
+  /**
    * @return extra help text on the supported options on the selected database platform.
    */
   String getExtraOptionsHelpText();
@@ -720,6 +765,12 @@ public interface IDatabase extends Cloneable {
   boolean isRequiringTransactionsOnQueries();
 
   /** Handles the special case of Oracle where NUMBER(38) is interpreted as Integer or BigNumber */
+  /**
+   * @deprecated An Oracle-specific option that has no business on the interface every dialect *
+   *     implements. Oracle now expresses it through its own {@link #getTypeRules()}; this accessor
+   *     * remains so that existing dialects and callers keep working.
+   */
+  @Deprecated(since = "2.20")
   boolean isStrictBigNumberInterpretation();
 
   /**
@@ -830,6 +881,16 @@ public interface IDatabase extends Cloneable {
   boolean isExplorable();
 
   /**
+   * @return true if this is a relational database for which the connection can be tested.
+   */
+  boolean isTestable();
+
+  /**
+   * @return true if this is a relational database for which exploring is disabled
+   */
+  boolean isExploringDisabled();
+
+  /**
    * @return The SQL on this database to get a list of sequences.
    */
   String getSqlListOfSequences();
@@ -840,7 +901,7 @@ public interface IDatabase extends Cloneable {
    *
    * @param string
    * @return A string that is properly quoted for use in a SQL statement (insert, update, delete,
-   *     etc)
+   *     etc.)
    */
   String quoteSqlString(String string);
 
@@ -879,75 +940,189 @@ public interface IDatabase extends Cloneable {
   List<SqlScriptStatement> getSqlScriptStatements(String sqlScript);
 
   /**
+   * What the driver said about the server this connection reached, or null when nobody has asked it
+   * yet. See {@link org.apache.hop.core.database.types.ServerInfo}.
+   */
+  default org.apache.hop.core.database.types.ServerInfo getServerInfo() {
+    return null;
+  }
+
+  /** Hands the dialect what the driver said about the server. */
+  default void setServerInfo(org.apache.hop.core.database.types.ServerInfo serverInfo) {
+    // A dialect that does not keep it simply never overrules a declared type.
+  }
+
+  /**
+   * Whether this server has the column type this dialect just named.
+   *
+   * <p>Only a dialect can answer this, because only it knows which version of its database grew
+   * which type, and how to tell: {@code DatabaseMetaData.getTypeInfo()} looks like the answer but
+   * several drivers compile that list in rather than asking the server. So the default is yes, and
+   * a dialect with a version dependent type says otherwise by overriding this.
+   *
+   * <p>A no means the column is written as text instead; see {@link
+   * org.apache.hop.core.database.types.ColumnTypeFallback}.
+   *
+   * @param columnType the type name, without any size after it, upper case
+   */
+  default boolean isColumnTypeAvailable(String columnType) {
+    return true;
+  }
+
+  /**
+   * The column type rules this dialect contributes, most specific first.
+   *
+   * <p>Rules are inherited through the class hierarchy in the ordinary Java way, so a dialect that
+   * extends another starts from its rules and can prepend its own. This is the replacement for the
+   * {@code isXVariant()} methods below: instead of core asking "is this Postgres-like?" and
+   * switching on the answer, the dialect states what it does.
+   *
+   * @return the rules, empty by default
+   */
+  default java.util.List<org.apache.hop.core.database.types.IDatabaseTypeRule> getTypeRules() {
+    return java.util.List.of();
+  }
+
+  /**
    * @return true if the database is a MySQL variant, like MySQL 5.1, InfiniDB, InfoBright, and so
    *     on.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isMySqlVariant();
 
   /**
    * @return true if the database is a Postgres variant like Postgres, Greenplum, Redshift, and so
    *     on.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isPostgresVariant();
 
   /**
    * @return true if the database is a Sybase variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isSybaseVariant();
 
   /**
    * @return true if the database is a SybaseIQ variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isSybaseIQVariant();
 
   /**
    * @return true if the database is a neoview variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isNeoviewVariant();
 
   /**
    * @return true if the database is a DuckDB variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isDuckDbVariant();
 
   /**
    * @return true if the database is a DuckDB variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isExasolVariant();
 
   /**
    * @return true if the database is an Informix variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isInformixVariant();
 
   /**
    * @return true if the database is a MS SQL Server (native) variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isMsSqlServerNativeVariant();
 
   /**
    * @return true if the database is a MS SQL Server variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isMsSqlServerVariant();
 
   /**
    * @return true if the database is an Oracle variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isOracleVariant();
 
   /**
    * @return true if the database is a Netezza variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isNetezzaVariant();
 
   /**
    * @return true if the database is a SQLite variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isSqliteVariant();
 
   /**
    * @return true if the database is a Terradata variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   boolean isTeradataVariant();
 
   /**
@@ -1183,4 +1358,54 @@ public interface IDatabase extends Cloneable {
    *     the clause for.
    */
   String getSqlInsertClauseBeforeFields(IVariables variables, String schemaTable);
+
+  /**
+   * Returns a list of UI element IDs that should be excluded from the database editor. Databricks
+   * doesn't need database name or manual URL fields.
+   *
+   * @return List of element IDs to exclude
+   */
+  List<String> getRemoveItems();
+
+  /**
+   * Returns whether URL information should be hidden in test connection dialogs. Databricks URLs
+   * may contain sensitive authentication tokens.
+   *
+   * @return true to hide URL information in test connection results
+   */
+  boolean isHideUrlInTestConnection();
+
+  // SSH Tunnel configuration methods
+
+  boolean isSshTunnelEnabled();
+
+  void setSshTunnelEnabled(boolean enabled);
+
+  String getSshTunnelHost();
+
+  void setSshTunnelHost(String host);
+
+  String getSshTunnelPort();
+
+  void setSshTunnelPort(String port);
+
+  String getSshTunnelUsername();
+
+  void setSshTunnelUsername(String username);
+
+  String getSshTunnelPassword();
+
+  void setSshTunnelPassword(String password);
+
+  boolean isSshTunnelUsePrivateKey();
+
+  void setSshTunnelUsePrivateKey(boolean usePrivateKey);
+
+  String getSshTunnelPrivateKeyFile();
+
+  void setSshTunnelPrivateKeyFile(String privateKeyFile);
+
+  String getSshTunnelPassphrase();
+
+  void setSshTunnelPassphrase(String passphrase);
 }

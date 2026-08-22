@@ -17,11 +17,17 @@
 
 package org.apache.hop.databases.duckdb;
 
+import java.util.List;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
+import org.apache.hop.core.database.types.DatabaseTypes;
+import org.apache.hop.core.database.types.IDatabaseTypeRule;
+import org.apache.hop.core.database.types.JdbcDateValues;
 import org.apache.hop.core.exception.HopDatabaseException;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
@@ -30,11 +36,35 @@ import org.apache.hop.core.row.IValueMeta;
     type = "DuckDB",
     typeDescription = "DuckDB",
     image = "duckdb.svg",
-    documentationUrl = "/database/databases/duckdb.html")
+    documentationUrl = "/database/databases/duckdb.html",
+    classLoaderGroup = "duckdb-db")
 @GuiPlugin(id = "GUI-DuckDBDatabaseMeta")
 public class DuckDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
 
-  private static final Class<?> PKG = DuckDBDatabaseMeta.class;
+  /** DuckDB limits rows at the end of the statement. */
+  @Override
+  public String getLimitClause(int nrRows) {
+    return " LIMIT " + nrRows;
+  }
+
+  private static final List<IDatabaseTypeRule> TYPE_RULES =
+      DatabaseTypes.rules()
+          // A column that carries only a time cannot be read as a timestamp on DuckDB.
+          .bind(IValueMeta.TYPE_DATE, DuckDbTimeValues::isTimeColumn, DuckDbTimeValues.BINDING)
+          // As of DuckDB JDBC 0.10.0 the Calendar overloads of setDate and setTimestamp are not
+          // implemented, so a configured time zone cannot be passed to the driver.
+          .bind(IValueMeta.TYPE_DATE, JdbcDateValues.WITHOUT_CALENDAR_OVERLOADS)
+          // Both are DuckDB types of their own.
+          .write(IValueMeta.TYPE_UUID)
+          .as("UUID")
+          .write(IValueMeta.TYPE_JSON)
+          .as("JSON")
+          .build();
+
+  @Override
+  public List<IDatabaseTypeRule> getTypeRules() {
+    return TYPE_RULES;
+  }
 
   @Override
   public String getCreateTableStatement() {
@@ -58,8 +88,6 @@ public class DuckDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
 
     if (addFieldName) {
       retval += fieldname + " ";
-    } else {
-      retval += fieldname + " TYPE ";
     }
 
     int type = v.getType();
@@ -81,35 +109,26 @@ public class DuckDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
         ) {
           retval += "IDENTITY";
         } else {
-          if (type == IValueMeta.TYPE_INTEGER) {
-            // Integer values...
-            if (length < 3) {
-              retval += "TINYINT";
-            } else if (length < 5) {
-              retval += "SMALLINT";
-            } else if (length < 10) {
-              retval += "INT";
-            } else if (length < 20) {
-              retval += "BIGINT";
-            } else {
-              retval += "DECIMAL(" + length + ")";
+          switch (type) {
+            case IValueMeta.TYPE_INTEGER -> {
+              if (length < 3) {
+                retval += "TINYINT";
+              } else if (length < 5) {
+                retval += "SMALLINT";
+              } else if (length < 10) {
+                retval += "INT";
+              } else if (length < 20) {
+                retval += "BIGINT";
+              } else {
+                retval += "DECIMAL(" + length + ")";
+              }
             }
-          } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-            // Fixed point value...
-            if (length
-                < 1) { // user configured no value for length. Use 16 digits, which is comparable to
-              // mantissa 2^53 of IEEE 754 binary64 "double".
-              length = 16;
+            case IValueMeta.TYPE_BIGNUMBER -> {
+              int p = (precision < 1) ? 16 : precision;
+              int len = (length < 1) ? 16 : length;
+              retval += "DECIMAL(" + len + "," + p + ")";
             }
-            if (precision
-                < 1) { // user configured no value for precision. Use 16 digits, which is comparable
-              // to IEEE 754 binary64 "double".
-              precision = 16;
-            }
-            retval += "DECIMAL(" + length + "," + precision + ")";
-          } else {
-            // Floating point value with double precision...
-            retval += "DOUBLE";
+            default -> retval += "DOUBLE";
           }
         }
         break;
@@ -152,6 +171,20 @@ public class DuckDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   }
 
   @Override
+  @SuppressWarnings("java:S1313") // the driver version is not an IP address
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("org.duckdb:duckdb_jdbc")
+        .defaultVersion("1.5.4.0")
+        .licenseCategory("A")
+        .licenseName("MIT")
+        .licenseUrl("https://github.com/duckdb/duckdb-java/blob/main/LICENSE")
+        .vendor("DuckDB")
+        .vendorUrl("https://duckdb.org/docs/stable/clients/java")
+        .build();
+  }
+
+  @Override
   public boolean isDuckDbVariant() {
     return true;
   }
@@ -173,7 +206,8 @@ public class DuckDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " ADD COLUMN "
-        + getFieldDefinition(v, tk, pk, useAutoIncrement, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoIncrement, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   @Override
@@ -184,20 +218,17 @@ public class DuckDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
       boolean useAutoIncrement,
       String pk,
       boolean semicolon) {
+    // The column name and the TYPE keyword belong to the ALTER syntax, not to the column
+    // definition. Asking for a definition without a field name has to return the type on its own,
+    // the way it does for every other dialect. See issue #3738, which was fixed the other way
+    // around, inside getFieldDefinition.
     return "ALTER TABLE "
         + tableName
         + " ALTER COLUMN "
-        + getFieldDefinition(v, tk, pk, useAutoIncrement, false, false);
-  }
-
-  @Override
-  public boolean isSupportsBooleanDataType() {
-    return true;
-  }
-
-  @Override
-  public boolean isSupportsTimestampDataType() {
-    return true;
+        + v.getName()
+        + " TYPE "
+        + getColumnDefinition(
+            v, tk, pk, useAutoIncrement, false, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -206,7 +237,19 @@ public class DuckDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   }
 
   @Override
+  public String getSqlListOfSchemas() {
+    return "SELECT CONCAT(catalog_name, '.', schema_name) AS name FROM information_schema.schemata"
+        + " ORDER BY catalog_name, schema_name";
+  }
+
+  @Override
   public String[] getTableTypes() {
-    return new String[] {"BASE TABLE", "LOCAL TEMPORARY"};
+    return new String[] {"TABLE", "BASE TABLE", "LOCAL TEMPORARY"};
+  }
+
+  @Override
+  public void addDefaultOptions() {
+    setSupportsBooleanDataType(true);
+    setSupportsTimestampDataType(true);
   }
 }

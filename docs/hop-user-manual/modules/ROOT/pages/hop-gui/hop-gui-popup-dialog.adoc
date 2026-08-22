@@ -43,6 +43,33 @@ image:hop-gui/popup-collapsed.png[Hop Gui Popup Dialog - Collapsed, width="65%"]
 
 image:hop-gui/popup-no-categories-no-fixed-width.png[Hop Gui Popup Dialog - No categories, No fixed width, width="65%"]
 
+== Adding transforms and actions
+
+When you open the popup dialog from a **pipeline** or **workflow** canvas (single-click on the background), the dialog lists every transform or action you can add.
+
+* **Click** a transform or action to place it at the canvas location where you opened the dialog.
+* **Click-drag** a transform or action from the dialog onto the canvas to place it where you release the mouse. In Hop Gui the icon follows the pointer; in Hop Web use drag-and-drop onto the canvas. Release outside the canvas (or press Esc in Hop Gui) to cancel.
+* **ALT-Click** (Option-Click on macOS) a transform or action to add or remove it as a *favorite* without closing the dialog. Favorites appear in their own category near the top of the list for quicker access.
+
+Hover over an item to see its description and these shortcuts in the tooltip.
+
+TIP: Dropping a new transform or action on top of an existing hop can split that hop (same confirmation dialog as when you move an icon onto a hop).
+
+[[palette-tree]]
+== Palette tree
+
+Pipeline and workflow graphs also have an optional Spoon-style palette tree on the left of the canvas.
+
+* Use the **palette** toolbar button on the graph to show or hide the tree. It is hidden by default; the choice is remembered across restarts.
+* Categories (with **Favorites** at the top when you have any) list every transform or action, each with a small icon. Hover for the description.
+* Filter the tree from the text field above it. **Expand all**, **Collapse all**, and **Clear filter** sit on the toolbar under the filter.
+* **Drag** an item onto the canvas to place it. **Shift-drag** also creates a hop from the selected transform/action (or the last one in the graph).
+* **Double-click** (or press Enter) places the item at the last canvas click, or at the center of the visible canvas.
+* **Shift-double-click** adds the item you clicked (not the canvas selection), hops from the selected or last chained transform/action, places it to the right, and selects it so the next Shift-double-click continues the chain.
+* **ALT-Click** (Option-Click on macOS) or the tree context menu adds or removes a favorite.
+
+The canvas popup dialog described above stays available.
+
 == Creating Items
 
 When you create a new item, the dialog will show you a list of metadata items that can be created with a single click of a button.
@@ -144,8 +171,7 @@ When clicking on a transform icon, the popup contains a number of actions to wor
 ** **Add web service**: use the output of this transform as a xref:hop-server/web-service.adoc[web service] with xref:hop-server/index.adoc[Hop Server].
 * Preview
 ** **View output**: view output of this transform in a running or finished pipeline.
-** **Preview output**: execute the pipeline and see the output of this transform
-** **Debug output**: execute the pipeline and debug the output of this transform. Execution will pause when the debugging conditions are met.
+** **Preview & debug output**: execute the pipeline, inspect rows from this transform, and optionally pause when a breakpoint condition is met (see xref:pipeline/run-preview-debug-pipeline.adoc[Run, Preview and Debug a Pipeline])
 ** **Sniff output**: take a look at 50 rows of output from the selected transform in a running pipeline
 ** **Add data probe**: streams the output rows of this transform to a pipeline defined in a xref:metadata-types/pipeline-probe.adoc[pipeline probe].
 * Logging

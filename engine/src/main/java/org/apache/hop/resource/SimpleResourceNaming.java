@@ -65,19 +65,12 @@ public class SimpleResourceNaming implements IResourceNaming {
   @Override
   public String nameResource(
       String prefix, String originalFilePath, String extension, FileNamingType namingType) {
-    switch (namingType) {
-      case DATA_FILE:
-        return handleDataFile(prefix, originalFilePath, extension);
-
-      case SHELL_SCRIPT:
-        return handleScript(prefix, originalFilePath, extension);
-
-      case PIPELINE, WORKFLOW:
-        return handlePipelineOrJob(prefix, originalFilePath, extension);
-
-      default:
-        throw new AssertionError("Unknown file naming type: " + namingType);
-    }
+    return switch (namingType) {
+      case DATA_FILE -> handleDataFile(prefix, originalFilePath, extension);
+      case SHELL_SCRIPT -> handleScript(prefix, originalFilePath, extension);
+      case PIPELINE, WORKFLOW -> handlePipelineOrJob(prefix, originalFilePath, extension);
+      default -> throw new AssertionError("Unknown file naming type: " + namingType);
+    };
   }
 
   private String handlePipelineOrJob(String prefix, String originalFilePath, String extension) {
@@ -181,6 +174,7 @@ public class SimpleResourceNaming implements IResourceNaming {
     return null;
   }
 
+  @SuppressWarnings("javabugs:S2259") // callers always pass a resolved path
   protected String fixPath(String originalPathName) {
     // This should convert all of the following into foo\bar or foo/bar
     // D:\foo\bar

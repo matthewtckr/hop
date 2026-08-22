@@ -43,7 +43,6 @@ import org.eclipse.swt.widgets.Group;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.TableItem;
-import org.eclipse.swt.widgets.Text;
 
 public class ParquetOutputDialog extends BaseTransformDialog {
 
@@ -63,6 +62,7 @@ public class ParquetOutputDialog extends BaseTransformDialog {
   private Label wlFilenameSplitSize;
   private TextVar wFilenameSplitSize;
   private Button wFilenameCreateFolders;
+  private Button wFilenameCompressionBeforeExtension;
   private Combo wCompressionCodec;
   private Combo wVersion;
   private TextVar wRowGroupSize;
@@ -83,53 +83,11 @@ public class ParquetOutputDialog extends BaseTransformDialog {
 
   @Override
   public String open() {
+    createShell(BaseMessages.getString(PKG, "ParquetOutput.Name"));
 
-    Shell parent = getParent();
+    buildButtonBar().ok(e -> ok()).get(e -> getFields()).cancel(e -> cancel()).build();
 
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MIN | SWT.MAX);
-    PropsUi.setLook(shell);
-    setShellImage(shell, input);
-
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = PropsUi.getFormMargin();
-    formLayout.marginHeight = PropsUi.getFormMargin();
-
-    shell.setLayout(formLayout);
-    shell.setText(BaseMessages.getString(PKG, "ParquetOutput.Name"));
-
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
-
-    // Some buttons at the bottom
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, e -> ok());
-    wGet = new Button(shell, SWT.PUSH);
-    wGet.setText(BaseMessages.getString(PKG, "System.Button.GetFields"));
-    wGet.addListener(SWT.Selection, e -> getFields());
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, e -> cancel());
-    setButtonPositions(new Button[] {wOk, wGet, wCancel}, margin, null);
-
-    // TransformName line
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(BaseMessages.getString(PKG, "ParquetOutputDialog.TransformName.Label"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    fdlTransformName.top = new FormAttachment(0, margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(middle, 0);
-    fdTransformName.top = new FormAttachment(wlTransformName, 0, SWT.CENTER);
-    fdTransformName.right = new FormAttachment(100, 0);
-    wTransformName.setLayoutData(fdTransformName);
-    Control lastControl = wTransformName;
+    Control lastControl = wSpacer;
 
     Group wFileGroup = new Group(shell, SWT.SHADOW_ETCHED_IN);
     wFileGroup.setText(BaseMessages.getString(PKG, "ParquetOutputDialog.FilenameGroup.Label"));
@@ -145,22 +103,25 @@ public class ParquetOutputDialog extends BaseTransformDialog {
     wlFilenameBase.setText(BaseMessages.getString(PKG, "ParquetOutputDialog.FilenameBase.Label"));
     PropsUi.setLook(wlFilenameBase);
     FormData fdlFilenameBase = new FormData();
+    fdlFilenameBase.left = new FormAttachment(0, 0);
+    fdlFilenameBase.top = new FormAttachment(0, margin);
     fdlFilenameBase.right = new FormAttachment(middle, -margin);
     wlFilenameBase.setLayoutData(fdlFilenameBase);
     wFilenameBase = new TextVar(variables, wFileGroup, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
     PropsUi.setLook(wFilenameBase);
     FormData fdFilenameBase = new FormData();
     fdFilenameBase.left = new FormAttachment(middle, 0);
+    fdFilenameBase.top = new FormAttachment(wlFilenameBase, 0, SWT.CENTER);
     fdFilenameBase.right = new FormAttachment(90, 0);
     wFilenameBase.setLayoutData(fdFilenameBase);
     lastControl = wFilenameBase;
 
-    Button wbFilename = new Button(wFileGroup, SWT.PUSH);
+    Button wbFilename = new Button(wFileGroup, SWT.PUSH | SWT.CENTER);
     PropsUi.setLook(wbFilename);
     wbFilename.setText(BaseMessages.getString(PKG, "System.Button.Browse"));
     FormData fdbFilename = new FormData();
     fdbFilename.left = new FormAttachment(wFilenameBase, 0);
-    fdbFilename.top = new FormAttachment(0, -margin);
+    fdbFilename.top = new FormAttachment(wFilenameBase, 0, SWT.CENTER);
     wbFilename.setLayoutData(fdbFilename);
 
     wbFilename.addListener(
@@ -317,6 +278,7 @@ public class ParquetOutputDialog extends BaseTransformDialog {
     fdlFilenameSplitSize.top = new FormAttachment(lastControl, margin);
     wlFilenameSplitSize.setLayoutData(fdlFilenameSplitSize);
     wFilenameSplitSize = new TextVar(variables, wFileGroup, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    wFilenameSplitSize.enableExpandedInteger();
     PropsUi.setLook(wFilenameSplitSize);
     FormData fdFilenameSplitSize = new FormData();
     fdFilenameSplitSize.left = new FormAttachment(middle, 0);
@@ -341,6 +303,26 @@ public class ParquetOutputDialog extends BaseTransformDialog {
     fdFilenameCreateFolders.top = new FormAttachment(wlFilenameCreateFolders, 0, SWT.CENTER);
     fdFilenameCreateFolders.right = new FormAttachment(100, 0);
     wFilenameCreateFolders.setLayoutData(fdFilenameCreateFolders);
+    lastControl = wlFilenameCreateFolders;
+
+    Label wlFilenameCompressionBeforeExtension = new Label(wFileGroup, SWT.RIGHT);
+    wlFilenameCompressionBeforeExtension.setText(
+        BaseMessages.getString(
+            PKG, "ParquetOutputDialog.FilenameCompressionBeforeExtension.Label"));
+    PropsUi.setLook(wlFilenameCompressionBeforeExtension);
+    FormData fdlFilenameCompressionBeforeExtension = new FormData();
+    fdlFilenameCompressionBeforeExtension.left = new FormAttachment(0, 0);
+    fdlFilenameCompressionBeforeExtension.right = new FormAttachment(middle, -margin);
+    fdlFilenameCompressionBeforeExtension.top = new FormAttachment(lastControl, margin);
+    wlFilenameCompressionBeforeExtension.setLayoutData(fdlFilenameCompressionBeforeExtension);
+    wFilenameCompressionBeforeExtension = new Button(wFileGroup, SWT.CHECK);
+    PropsUi.setLook(wFilenameCompressionBeforeExtension);
+    FormData fdFilenameCompressionBeforeExtension = new FormData();
+    fdFilenameCompressionBeforeExtension.left = new FormAttachment(middle, 0);
+    fdFilenameCompressionBeforeExtension.top =
+        new FormAttachment(wlFilenameCompressionBeforeExtension, 0, SWT.CENTER);
+    fdFilenameCompressionBeforeExtension.right = new FormAttachment(100, 0);
+    wFilenameCompressionBeforeExtension.setLayoutData(fdFilenameCompressionBeforeExtension);
 
     // End of the file group
     //
@@ -396,6 +378,7 @@ public class ParquetOutputDialog extends BaseTransformDialog {
     fdlRowGroupSize.top = new FormAttachment(lastControl, margin);
     wlRowGroupSize.setLayoutData(fdlRowGroupSize);
     wRowGroupSize = new TextVar(variables, shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    wRowGroupSize.enableExpandedInteger();
     PropsUi.setLook(wRowGroupSize);
     FormData fdRowGroupSize = new FormData();
     fdRowGroupSize.left = new FormAttachment(middle, 0);
@@ -413,6 +396,7 @@ public class ParquetOutputDialog extends BaseTransformDialog {
     fdlDataPageSize.top = new FormAttachment(lastControl, margin);
     wlDataPageSize.setLayoutData(fdlDataPageSize);
     wDataPageSize = new TextVar(variables, shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    wDataPageSize.enableExpandedInteger();
     PropsUi.setLook(wDataPageSize);
     FormData fdDataPageSize = new FormData();
     fdDataPageSize.left = new FormAttachment(middle, 0);
@@ -431,6 +415,7 @@ public class ParquetOutputDialog extends BaseTransformDialog {
     fdlDictionaryPageSize.top = new FormAttachment(lastControl, margin);
     wlDictionaryPageSize.setLayoutData(fdlDictionaryPageSize);
     wDictionaryPageSize = new TextVar(variables, shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    wDictionaryPageSize.enableExpandedInteger();
     PropsUi.setLook(wDictionaryPageSize);
     FormData fdDictionaryPageSize = new FormData();
     fdDictionaryPageSize.left = new FormAttachment(middle, 0);
@@ -468,11 +453,11 @@ public class ParquetOutputDialog extends BaseTransformDialog {
     fdFields.left = new FormAttachment(0, 0);
     fdFields.top = new FormAttachment(wlFields, margin);
     fdFields.right = new FormAttachment(100, 0);
-    fdFields.bottom = new FormAttachment(wOk, -2 * margin);
+    fdFields.bottom = new FormAttachment(100, -50);
     wFields.setLayoutData(fdFields);
 
     getData();
-
+    focusTransformName();
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
     return returnValue;
   }
@@ -504,8 +489,6 @@ public class ParquetOutputDialog extends BaseTransformDialog {
     } catch (Exception e) {
       LogChannel.UI.logError("Error getting source fields", e);
     }
-
-    wTransformName.setText(Const.NVL(transformName, ""));
     wFilenameBase.setText(Const.NVL(input.getFilenameBase(), ""));
     wFilenameExtension.setText(Const.NVL(input.getFilenameExtension(), ""));
     wFilenameIncludeDate.setSelection(input.isFilenameIncludingDate());
@@ -516,6 +499,7 @@ public class ParquetOutputDialog extends BaseTransformDialog {
     wFilenameIncludeSplitNr.setSelection(input.isFilenameIncludingSplitNr());
     wFilenameSplitSize.setText(Const.NVL(input.getFileSplitSize(), ""));
     wFilenameCreateFolders.setSelection(input.isFilenameCreatingParentFolders());
+    wFilenameCompressionBeforeExtension.setSelection(input.isFilenameCompressionBeforeExtension());
     wCompressionCodec.setText(input.getCompressionCodec().name());
     wVersion.setText(input.getVersion().getDescription());
     wRowGroupSize.setText(Const.NVL(input.getRowGroupSize(), ""));
@@ -544,6 +528,7 @@ public class ParquetOutputDialog extends BaseTransformDialog {
     input.setFilenameIncludingSplitNr(wFilenameIncludeSplitNr.getSelection());
     input.setFileSplitSize(wFilenameSplitSize.getText());
     input.setFilenameCreatingParentFolders(wFilenameCreateFolders.getSelection());
+    input.setFilenameCompressionBeforeExtension(wFilenameCompressionBeforeExtension.getSelection());
 
     CompressionCodecName codec = CompressionCodecName.UNCOMPRESSED;
     try {

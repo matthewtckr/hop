@@ -66,9 +66,7 @@ public class StringSearcher {
 
     Class<? extends Object> baseClass = object.getClass();
     Field[] fields = baseClass.getDeclaredFields();
-    for (int i = 0; i < fields.length; i++) {
-      Field field = fields[i];
-
+    for (Field field : fields) {
       boolean processThisOne = true;
 
       if ((field.getModifiers() & Modifier.FINAL) > 0) {
@@ -178,6 +176,12 @@ public class StringSearcher {
       for (int j = 0; j < objectArray.length; j++) {
         findMetaData(((Object[]) obj)[j], level + 1, stringList, parentObject, grandParentObject);
       }
+    } else if (obj instanceof Iterable<?> iterable) {
+      for (Object element : iterable) {
+        if (element != null) {
+          stringSearchInObject(element, level, stringList, parentObject, grandParentObject, field);
+        }
+      }
     } else {
       findMetaData(obj, level + 1, stringList, parentObject, grandParentObject);
     }
@@ -239,10 +243,10 @@ public class StringSearcher {
 
     } catch (Exception e) {
       // Nope try case insensitive.
-      for (int i = 0; i < methods.length; i++) {
-        String methodName = methods[i].getName();
+      for (Method value : methods) {
+        String methodName = value.getName();
         if (methodName.equalsIgnoreCase(getter)) {
-          return methods[i];
+          return value;
         }
       }
     }

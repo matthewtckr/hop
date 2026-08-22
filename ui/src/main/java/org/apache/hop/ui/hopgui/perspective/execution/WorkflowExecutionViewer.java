@@ -61,23 +61,23 @@ import org.apache.hop.execution.ExecutionState;
 import org.apache.hop.execution.ExecutionType;
 import org.apache.hop.execution.IExecutionInfoLocation;
 import org.apache.hop.i18n.BaseMessages;
-import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelinePainter;
 import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.ErrorDialog;
 import org.apache.hop.ui.core.dialog.SelectRowDialog;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.gui.GuiToolbarWidgets;
+import org.apache.hop.ui.core.gui.IToolbarContainer;
 import org.apache.hop.ui.core.widget.ColumnInfo;
 import org.apache.hop.ui.core.widget.TableView;
 import org.apache.hop.ui.hopgui.CanvasFacade;
 import org.apache.hop.ui.hopgui.CanvasListener;
 import org.apache.hop.ui.hopgui.HopGui;
+import org.apache.hop.ui.hopgui.ToolbarFacade;
 import org.apache.hop.ui.hopgui.file.workflow.HopGuiWorkflowGraph;
-import org.apache.hop.ui.hopgui.file.workflow.HopWorkflowFileType;
-import org.apache.hop.ui.hopgui.perspective.TabItemHandler;
-import org.apache.hop.ui.hopgui.perspective.dataorch.HopDataOrchestrationPerspective;
+import org.apache.hop.ui.hopgui.perspective.explorer.ExplorerPerspective;
 import org.apache.hop.ui.hopgui.shared.BaseExecutionViewer;
+import org.apache.hop.ui.hopgui.shared.CanvasZoomHelper;
 import org.apache.hop.ui.hopgui.shared.SwtGc;
 import org.apache.hop.ui.util.EnvironmentUtils;
 import org.apache.hop.workflow.ActionResult;
@@ -103,11 +103,9 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Listener;
 import org.eclipse.swt.widgets.TableItem;
-import org.eclipse.swt.widgets.Text;
-import org.eclipse.swt.widgets.ToolBar;
 import org.w3c.dom.Node;
 
-@GuiPlugin
+@GuiPlugin(name = "i18n::WorkflowExecutionViewer.Name")
 public class WorkflowExecutionViewer extends BaseExecutionViewer
     implements IExecutionViewer, PaintListener, MouseListener {
   private static final Class<?> PKG = WorkflowExecutionViewer.class;
@@ -145,7 +143,7 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
   private org.eclipse.swt.widgets.List dataList;
   private TableView dataView;
 
-  private Map<String, List<ExecutionData>> actionExecutions;
+  private final Map<String, List<ExecutionData>> actionExecutions;
 
   public WorkflowExecutionViewer(
       Composite parent,
@@ -173,10 +171,12 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
 
     // A toolbar at the top
     //
-    toolBar = new ToolBar(this, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    IToolbarContainer toolBarContainer =
+        ToolbarFacade.createToolbarContainer(this, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    toolBar = toolBarContainer.getControl();
     toolBarWidgets = new GuiToolbarWidgets();
     toolBarWidgets.registerGuiPluginObject(this);
-    toolBarWidgets.createToolbarWidgets(toolBar, GUI_PLUGIN_TOOLBAR_PARENT_ID);
+    toolBarWidgets.createToolbarWidgets(toolBarContainer, GUI_PLUGIN_TOOLBAR_PARENT_ID);
     FormData layoutData = new FormData();
     layoutData.left = new FormAttachment(0, 0);
     layoutData.top = new FormAttachment(0, 0);
@@ -200,11 +200,20 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
     // The canvas at the top
     //
     canvas = new Canvas(sash, SWT.NO_BACKGROUND | SWT.BORDER);
+    canvas.setData("hop-zoom-canvas", "true"); // Mark this canvas for zoom handling
     Listener listener = CanvasListener.getInstance();
     canvas.addListener(SWT.MouseDown, listener);
     canvas.addListener(SWT.MouseMove, listener);
     canvas.addListener(SWT.MouseUp, listener);
     canvas.addListener(SWT.Paint, listener);
+    canvas.addListener(SWT.MouseWheel, listener);
+    canvas.addListener(SWT.MouseVerticalWheel, listener);
+
+    // For web/RAP, create a zoom handler to sync mouse wheel zoom back to server
+    if (EnvironmentUtils.getInstance().isWeb()) {
+      CanvasZoomHelper.createZoomHandler(this, canvas, this);
+    }
+
     FormData fdCanvas = new FormData();
     fdCanvas.left = new FormAttachment(0, 0);
     fdCanvas.top = new FormAttachment(0, 0);
@@ -292,17 +301,13 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
       // Calculate information staleness
       //
       String statusDescription = executionState.getStatusDescription();
-      if (Pipeline.STRING_RUNNING.equalsIgnoreCase(statusDescription)
-          || Pipeline.STRING_INITIALIZING.equalsIgnoreCase(statusDescription)) {
-        long loggingInterval = Const.toLong(location.getDataLoggingInterval(), 20000);
-        if (System.currentTimeMillis() - executionState.getUpdateTime().getTime()
-            > loggingInterval) {
-          // The information is stale, not getting updates!
-          //
-          TableItem item = infoView.add("Update state", STRING_STATE_STALE);
-          item.setBackground(GuiResource.getInstance().getColorLightBlue());
-          item.setForeground(GuiResource.getInstance().getColorWhite());
-        }
+      long loggingInterval = Const.toLong(location.getDataLoggingInterval(), 20000);
+      if (executionState.isStale(loggingInterval)) {
+        // The information is stale, not getting updates!
+        //
+        TableItem item = infoView.add("Update state", STRING_STATE_STALE);
+        item.setBackground(GuiResource.getInstance().getColorLightBlue());
+        item.setForeground(GuiResource.getInstance().getColorWhite());
       }
 
       infoView.add("Name", execution.getName());
@@ -312,6 +317,8 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
       infoView.add("Parent ID", execution.getParentId());
       infoView.add("Registration", formatDate(execution.getRegistrationDate()));
       infoView.add("Start", formatDate(execution.getExecutionStartDate()));
+      infoView.add("End", formatDate(executionState.getExecutionEndDate()));
+      infoView.add("Duration", formatExecutionDuration(execution, executionState));
       infoView.add("Type", executionState.getExecutionType().name());
       infoView.add("Status", statusDescription);
       infoView.add("Status Last updated", formatDate(executionState.getUpdateTime()));
@@ -466,10 +473,8 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
     logTab.setImage(GuiResource.getInstance().getImageShowLog());
     logTab.setText(BaseMessages.getString(PKG, "WorkflowExecutionViewer.LogTab.Title"));
 
-    loggingText = new Text(tabFolder, SWT.MULTI | SWT.H_SCROLL | SWT.V_SCROLL | SWT.READ_ONLY);
-    PropsUi.setLook(loggingText);
-
-    logTab.setControl(loggingText);
+    executionLogPanel = new ExecutionLogPanel();
+    logTab.setControl(executionLogPanel.create(tabFolder));
 
     // When the logging tab comes into focus, re-load the logging text
     //
@@ -523,7 +528,7 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
 
   @Override
   public Image getTitleImage() {
-    return GuiResource.getInstance().getImageWorkflow();
+    return ExecutionStatusIcon.imageFor(ExecutionType.Workflow, executionState, loggingInterval());
   }
 
   @Override
@@ -587,12 +592,6 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
     super.zoomFitToScreen();
   }
 
-  @Override
-  protected Point getArea() {
-    org.eclipse.swt.graphics.Rectangle rect = canvas.getClientArea();
-    return new Point(rect.width, rect.height);
-  }
-
   public void drawWorkflowImage(GC swtGc, int width, int height, float magnificationFactor) {
 
     IGc gc = new SwtGc(swtGc, width, height, iconSize);
@@ -643,7 +642,7 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
           if (!Utils.isEmpty(executionDataList)) {
             // Just consider the first
             //
-            ExecutionData executionData = executionDataList.get(0);
+            ExecutionData executionData = executionDataList.getFirst();
 
             RowBuffer rowBuffer = executionData.getDataSets().get(ExecutionDataBuilder.KEY_RESULT);
             if (rowBuffer != null) {
@@ -686,6 +685,8 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
 
         viewPort = workflowPainter.getViewPort();
         graphPort = workflowPainter.getGraphPort();
+        canvas.setData("viewPort", viewPort);
+        canvas.setData("graphPort", graphPort);
       } catch (Exception e) {
         new ErrorDialog(hopGui.getActiveShell(), CONST_ERROR, "Error drawing workflow image", e);
       }
@@ -711,7 +712,8 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
   public void refresh() {
     refreshStatus();
     refreshActionData();
-    setFocus();
+    perspective.updateViewerTabImage(this);
+    redraw();
   }
 
   @GuiToolbarElement(
@@ -731,15 +733,17 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
       root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
       id = TOOLBAR_ITEM_TO_EDITOR,
       toolTip = "i18n::WorkflowExecutionViewer.ToolbarElement.NavigateToEditor.Tooltip",
-      image = "ui/images/data_orch.svg")
+      image = "ui/images/edit.svg")
+  @GuiKeyboardShortcut(key = SWT.F3)
+  @GuiOsxKeyboardShortcut(key = SWT.F3)
   public void navigateToEditor() {
     try {
       // First try to see if this workflow is running in Hop GUI...
       //
-      HopDataOrchestrationPerspective perspective = HopGui.getDataOrchestrationPerspective();
-      TabItemHandler item = perspective.findWorkflow(execution.getId());
-      if (item != null) {
-        perspective.switchToTab(item);
+      ExplorerPerspective perspective = HopGui.getExplorerPerspective();
+      HopGuiWorkflowGraph workflowGraph = perspective.findWorkflow(execution.getId());
+      if (workflowGraph != null) {
+        perspective.setActiveFileTypeHandler(workflowGraph);
         perspective.activate();
         return;
       }
@@ -822,7 +826,12 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
     lastClick = new Point(real.x, real.y);
     boolean control = (event.stateMask & SWT.MOD1) != 0;
 
-    if (setupDragView(event.button, control, new Point(event.x, event.y))) {
+    Point clickScreen = new Point(event.x, event.y);
+    if (setupDragViewPort(clickScreen)) {
+      return;
+    }
+
+    if (setupDragView(event.button, control, clickScreen)) {
       return;
     }
 
@@ -843,6 +852,8 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
         //
         selectedAction = (ActionMeta) areaOwner.getParent();
         refreshActionData();
+        break;
+      default:
         break;
     }
 
@@ -876,7 +887,7 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
 
       // Get any execution data for the selected action
       //
-      selectedExecutionData = executionDataList.get(0);
+      selectedExecutionData = executionDataList.getFirst();
 
       Map<String, ExecutionDataSetMeta> setMetaData = selectedExecutionData.getSetMetaData();
       List<String> items = new ArrayList<>();
@@ -952,7 +963,7 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
       Execution child;
 
       if (childExecutions.size() == 1) {
-        child = childExecutions.get(0);
+        child = childExecutions.getFirst();
       } else {
         // Select the execution...
         //
@@ -1055,12 +1066,11 @@ public class WorkflowExecutionViewer extends BaseExecutionViewer
 
       WorkflowMeta workflowMeta = new WorkflowMeta(workflowNode, metadataProvider, variables);
 
-      HopDataOrchestrationPerspective p = HopGui.getDataOrchestrationPerspective();
       HopGuiWorkflowGraph graph =
-          (HopGuiWorkflowGraph) p.addWorkflow(hopGui, workflowMeta, new HopWorkflowFileType<>());
+          (HopGuiWorkflowGraph) HopGui.getExplorerPerspective().addWorkflow(workflowMeta);
       graph.setVariables(variables);
 
-      p.activate();
+      HopGui.getExplorerPerspective().activate();
     } catch (Exception e) {
       new ErrorDialog(getShell(), CONST_ERROR, "Error viewing the executor", e);
     }

@@ -20,7 +20,7 @@ package org.apache.hop.databases.cassandra.metadata;
 
 import java.util.HashMap;
 import java.util.Map;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.gui.plugin.GuiElementType;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
@@ -32,6 +32,7 @@ import org.apache.hop.databases.cassandra.spi.Keyspace;
 import org.apache.hop.databases.cassandra.util.CassandraUtils;
 import org.apache.hop.metadata.api.HopMetadata;
 import org.apache.hop.metadata.api.HopMetadataBase;
+import org.apache.hop.metadata.api.HopMetadataCategory;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadata;
@@ -42,8 +43,10 @@ import org.apache.hop.metadata.api.IHopMetadata;
     name = "i18n::CassandraConnection.name",
     description = "i18n::CassandraConnection.description",
     image = "Cassandra_logo.svg",
+    category = HopMetadataCategory.CONNECTIONS,
     documentationUrl = "/metadata-types/cassandra/cassandra-connection.html",
-    hopMetadataPropertyType = HopMetadataPropertyType.CASSANDRA_CONNECTION)
+    hopMetadataPropertyType = HopMetadataPropertyType.CASSANDRA_CONNECTION,
+    supportsGlobalReplace = true)
 public class CassandraConnection extends HopMetadataBase implements IHopMetadata {
 
   public static final String WIDGET_ID_HOSTNAME = "10000-hostname";

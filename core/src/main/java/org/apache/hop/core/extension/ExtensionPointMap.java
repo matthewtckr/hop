@@ -23,6 +23,7 @@ import com.google.common.collect.Table;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.gui.plugin.GuiRegistry;
 import org.apache.hop.core.logging.ILogChannel;
 import org.apache.hop.core.logging.LogChannel;
 import org.apache.hop.core.plugins.IPlugin;
@@ -82,6 +83,9 @@ public class ExtensionPointMap {
    * @param extensionPointPlugin
    */
   public void addExtensionPoint(IPlugin extensionPointPlugin) {
+    if (GuiRegistry.getDisabledGuiElements().contains(extensionPointPlugin.getIds()[0])) {
+      return;
+    }
     lock.writeLock().lock();
     try {
       for (String id : extensionPointPlugin.getIds()) {
@@ -149,6 +153,23 @@ public class ExtensionPointMap {
           extensionPoint.get().callExtensionPoint(log, variables, object);
         }
       }
+    } finally {
+      lock.readLock().unlock();
+    }
+  }
+
+  /**
+   * Is anything listening to this extension point id?
+   *
+   * <p>Lets the GUI leave out actions that only an optional plugin can perform: the marketplace
+   * button on the missing plugins dialog is hidden when the marketplace plugin isn't installed.
+   *
+   * @param id the id of the extension point interface
+   */
+  public boolean isRegistered(String id) {
+    lock.readLock().lock();
+    try {
+      return extensionPointPluginMap.containsRow(id);
     } finally {
       lock.readLock().unlock();
     }

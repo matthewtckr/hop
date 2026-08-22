@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Result;
 import org.apache.hop.core.exception.HopException;
@@ -43,6 +43,8 @@ import org.apache.hop.pipeline.transform.ITransformMeta;
 import org.apache.hop.pipeline.transform.RowAdapter;
 import org.apache.hop.pipeline.transform.TransformMeta;
 import org.apache.hop.pipeline.transforms.injector.InjectorMeta;
+import org.apache.hop.pipeline.transforms.kafka.shared.KafkaHeaders;
+import org.apache.hop.pipeline.transforms.kafka.shared.KafkaOption;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -83,7 +85,10 @@ public class KafkaConsumerInput
 
     data.incomingRowsBuffer = new ArrayList<>();
     data.batchDuration = Const.toInt(resolve(meta.getBatchDuration()), 0);
-    data.batchSize = Const.toInt(resolve(meta.getBatchSize()), 0);
+    data.batchSize = Const.toIntExpanded(resolve(meta.getBatchSize()), 0);
+    data.stopWhenIdle = meta.isStopWhenIdle();
+    data.maxIdleTimeMs = Const.toLong(resolve(meta.getMaxIdleTimeMs()), 500L);
+    data.lastRecordTime = System.currentTimeMillis();
 
     data.consumer = buildKafkaConsumer(this, meta);
 
@@ -222,10 +227,10 @@ public class KafkaConsumerInput
 
     // Set all the configuration options...
     //
-    for (String option : meta.getConfig().keySet()) {
-      String value = variables.resolve(meta.getConfig().get(option));
+    for (KafkaOption option : meta.getOptions()) {
+      String value = variables.resolve(option.getValue());
       if (StringUtils.isNotEmpty(value)) {
-        config.put(option, variables.resolve(value));
+        config.put(option.getProperty(), variables.resolve(value));
       }
     }
 
@@ -248,7 +253,7 @@ public class KafkaConsumerInput
 
     // The batch size : max poll size
     //
-    int batch = Const.toInt(variables.resolve(meta.getBatchSize()), 0);
+    int batch = Const.toIntExpanded(variables.resolve(meta.getBatchSize()), 0);
     if (batch > 0) {
       config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, batch);
     }
@@ -278,16 +283,36 @@ public class KafkaConsumerInput
 
     // Poll records...
     // If we get any, process them...
+    // When stop-when-idle is enabled, use a short poll timeout so idle time can be measured.
     //
     try {
-      Duration duration =
-          Duration.ofMillis(data.batchDuration > 0 ? data.batchDuration : Long.MAX_VALUE);
+      long pollMs =
+          data.stopWhenIdle ? 100L : (data.batchDuration > 0 ? data.batchDuration : Long.MAX_VALUE);
+      Duration duration = Duration.ofMillis(pollMs);
       ConsumerRecords<Object, Object> records = data.consumer.poll(duration);
 
       if (!data.isKafkaConsumerClosing) {
         if (records.isEmpty()) {
-          // We can just skip this one, poll again next iteration of this method
+          // No records: optionally stop after max idle time.
+          // Do not count idle until partitions are assigned — group join / rebalance can take
+          // longer than maxIdleTimeMs and would otherwise stop before any poll can succeed.
           //
+          if (data.stopWhenIdle) {
+            if (data.consumer.assignment() == null || data.consumer.assignment().isEmpty()) {
+              data.lastRecordTime = System.currentTimeMillis();
+            } else if ((System.currentTimeMillis() - data.lastRecordTime) >= data.maxIdleTimeMs) {
+              logBasic(
+                  "Kafka consumer idle timeout of "
+                      + data.maxIdleTimeMs
+                      + "ms exceeded, stopping gracefully");
+              data.isKafkaConsumerClosing = true;
+              if (data.executor != null) {
+                data.executor.getPipeline().stopAll();
+              }
+              setOutputDone();
+              return false;
+            }
+          }
         } else {
           // Grab the records...
           //
@@ -299,7 +324,10 @@ public class KafkaConsumerInput
             }
             incrementLinesInput();
           }
-          logBasic("Number of rows read: " + data.rowProducer.getRowSet().size());
+          data.lastRecordTime = System.currentTimeMillis();
+          if (isBasic()) {
+            logBasic("Number of rows read: " + data.rowProducer.getRowSet().size());
+          }
           // Pass them to the single threaded transformation and do an iteration...
           //
           data.executor.oneIteration();
@@ -307,7 +335,9 @@ public class KafkaConsumerInput
           if (data.executor.isStopped() || data.executor.getErrors() > 0) {
             // An error occurred in the sub-transformation
             //
-            logDebug("Executor's reported errors #: " + data.executor.getErrors());
+            if (isDebug()) {
+              logDebug("Executor's reported errors #: " + data.executor.getErrors());
+            }
             if (data.executor.getErrors() > 0 && errorHandlingConditionIsSatisfied()) {
               // If error handling is enabled return record that generates error in subpipeline
               // For future improvements in managing rows that generates error in sub pipeline
@@ -381,14 +411,30 @@ public class KafkaConsumerInput
 
     Object[] rowData = RowDataUtil.allocateRowData(data.outputRowMeta.size());
 
+    // Only fields carrying an output name are on the row, in the order KafkaConsumerInputMeta
+    // adds them, so each value is placed conditionally rather than at a fixed index.
     int index = 0;
-    rowData[index++] = record.key();
-    rowData[index++] = record.value();
-    rowData[index++] = record.topic();
-    rowData[index++] = (long) record.partition();
-    rowData[index++] = record.offset();
-    rowData[index] = record.timestamp();
+    index = putIfNamed(rowData, index, meta.getKeyField(), record.key());
+    index = putIfNamed(rowData, index, meta.getMessageField(), record.value());
+    index = putIfNamed(rowData, index, meta.getTopicField(), record.topic());
+    index = putIfNamed(rowData, index, meta.getPartitionField(), (long) record.partition());
+    index = putIfNamed(rowData, index, meta.getOffsetField(), record.offset());
+    index = putIfNamed(rowData, index, meta.getTimestampField(), record.timestamp());
+    putIfNamed(rowData, index, meta.getHeadersField(), KafkaHeaders.toJson(record.headers()));
 
     return rowData;
+  }
+
+  /**
+   * Writes a value at the given index only when the field contributes a column, and reports the
+   * next free index. A field with an empty output name is skipped by {@code
+   * KafkaConsumerInputMeta.getRowMeta}, so writing it here would shift every later column.
+   */
+  private int putIfNamed(Object[] rowData, int index, KafkaConsumerField field, Object value) {
+    if (field == null || StringUtils.isEmpty(field.getOutputName()) || index >= rowData.length) {
+      return index;
+    }
+    rowData[index] = value;
+    return index + 1;
   }
 }

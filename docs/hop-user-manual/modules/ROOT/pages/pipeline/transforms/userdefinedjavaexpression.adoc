@@ -32,9 +32,11 @@ This transform allows you to enter Java expressions that are used to calculate n
 [%noheader,cols="2,1a",frame=none, role="table-supported-engines"]
 !===
 !Hop Engine! image:check_mark.svg[Supported, 24]
-!Spark! image:question_mark.svg[Maybe Supported, 24]
-!Flink! image:question_mark.svg[Maybe Supported, 24]
-!Dataflow! image:question_mark.svg[Maybe Supported, 24]
+!Single Threaded! image:check_mark.svg[Supported, 24]
+!Native Spark! image:check_mark.svg[Supported, 24]
+!Beam Spark! image:question_mark.svg[Maybe Supported, 24]
+!Beam Flink! image:question_mark.svg[Maybe Supported, 24]
+!Beam Dataflow! image:question_mark.svg[Maybe Supported, 24]
 !===
 |===
 
@@ -78,6 +80,7 @@ If you want to overwrite an existing field, you need to define the same field he
 |Java expression|The Java expression to evaluate. See examples below.
 |Value type|The field's data type.
 |Length|The maximum length of a string in the new field.
+See xref:pipeline/formatting-values.adoc[Formatting numbers and dates].
 |Precision|The number of decimal places used to express numbers.
 |Replace value|Set this to be identical to the "New field" name when you want to replace the value in an existing field.
 |===

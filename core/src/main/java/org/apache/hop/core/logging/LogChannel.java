@@ -144,79 +144,107 @@ public class LogChannel implements ILogChannel {
   }
 
   public void println(ILogMessage message, Throwable e, LogLevel channelLogLevel) {
-    println(message, channelLogLevel);
+    if (message instanceof LogMessage logMessage) {
+      if (e != null) {
+        // Pre-render the trace (bounded memory), attach the throwable for SLF4J, and bump to ERROR.
+        logMessage.setStackTrace(Const.getStackTracker(e));
+        logMessage.setThrowable(e);
+        logMessage.setLevel(LogLevel.ERROR);
+      }
+      println(message, channelLogLevel);
+      // Release the throwable so the buffered event doesn't retain the exception graph.
+      logMessage.setThrowable(null);
+    } else {
+      // Non-standard ILogMessage can't carry a throwable: fall back to the legacy two-event path.
+      println(message, channelLogLevel);
+      String stackTrace = Const.getStackTracker(e);
+      LogMessage traceMessage =
+          new LogMessage(stackTrace, message.getLogChannelId(), LogLevel.ERROR, simplified);
+      println(traceMessage, channelLogLevel);
+    }
+  }
 
-    String stackTrace = Const.getStackTracker(e);
-    LogMessage traceMessage =
-        new LogMessage(stackTrace, message.getLogChannelId(), LogLevel.ERROR, simplified);
-    println(traceMessage, channelLogLevel);
+  public void logWithLevel(String s, LogLevel logMessageLevel) {
+    if (logMessageLevel.isVisible(logLevel)) {
+      println(new LogMessage(s, logChannelId, logMessageLevel, simplified), logLevel);
+    }
+  }
+
+  public void logWithLevel(String s, Throwable e, LogLevel logMessageLevel) {
+    if (logMessageLevel.isVisible(logLevel)) {
+      println(new LogMessage(s, logChannelId, logMessageLevel, simplified), e, logLevel);
+    }
+  }
+
+  public void logWithLevel(String s, LogLevel logMessageLevel, Object... arguments) {
+    if (logMessageLevel.isVisible(logLevel)) {
+      println(new LogMessage(s, logChannelId, arguments, logMessageLevel, simplified), logLevel);
+    }
   }
 
   @Override
   public void logMinimal(String s) {
-    println(new LogMessage(s, logChannelId, LogLevel.MINIMAL, simplified), logLevel);
+    logWithLevel(s, LogLevel.MINIMAL);
   }
 
   @Override
   public void logBasic(String s) {
-    println(new LogMessage(s, logChannelId, LogLevel.BASIC, simplified), logLevel);
+    logWithLevel(s, LogLevel.BASIC);
   }
 
   @Override
   public void logError(String s) {
-    println(new LogMessage(s, logChannelId, LogLevel.ERROR, simplified), logLevel);
+    logWithLevel(s, LogLevel.ERROR);
   }
 
   @Override
   public void logError(String s, Throwable e) {
-    println(new LogMessage(s, logChannelId, LogLevel.ERROR, simplified), e, logLevel);
+    logWithLevel(s, e, LogLevel.ERROR);
   }
 
   @Override
   public void logBasic(String s, Object... arguments) {
-    println(new LogMessage(s, logChannelId, arguments, LogLevel.BASIC, simplified), logLevel);
+    logWithLevel(s, LogLevel.BASIC, arguments);
   }
 
   @Override
   public void logDetailed(String s, Object... arguments) {
-    println(new LogMessage(s, logChannelId, arguments, LogLevel.DETAILED, simplified), logLevel);
+    logWithLevel(s, LogLevel.DETAILED, arguments);
   }
 
   @Override
   public void logError(String s, Object... arguments) {
-    println(new LogMessage(s, logChannelId, arguments, LogLevel.ERROR, simplified), logLevel);
+    logWithLevel(s, LogLevel.ERROR, arguments);
   }
 
   @Override
   public void logDetailed(String s) {
-    println(new LogMessage(s, logChannelId, LogLevel.DETAILED, simplified), logLevel);
+    logWithLevel(s, LogLevel.DETAILED);
   }
 
   @Override
   public void logDebug(String s) {
-    println(new LogMessage(s, logChannelId, LogLevel.DEBUG, simplified), logLevel);
+    logWithLevel(s, LogLevel.DEBUG);
   }
 
   @Override
   public void logDebug(String message, Object... arguments) {
-    println(new LogMessage(message, logChannelId, arguments, LogLevel.DEBUG, simplified), logLevel);
+    logWithLevel(message, LogLevel.DEBUG, arguments);
   }
 
   @Override
   public void logRowlevel(String s) {
-    println(new LogMessage(s, logChannelId, LogLevel.ROWLEVEL, simplified), logLevel);
+    logWithLevel(s, LogLevel.ROWLEVEL);
   }
 
   @Override
   public void logMinimal(String message, Object... arguments) {
-    println(
-        new LogMessage(message, logChannelId, arguments, LogLevel.MINIMAL, simplified), logLevel);
+    logWithLevel(message, LogLevel.MINIMAL, arguments);
   }
 
   @Override
   public void logRowlevel(String message, Object... arguments) {
-    println(
-        new LogMessage(message, logChannelId, arguments, LogLevel.ROWLEVEL, simplified), logLevel);
+    logWithLevel(message, LogLevel.ROWLEVEL, arguments);
   }
 
   @Override

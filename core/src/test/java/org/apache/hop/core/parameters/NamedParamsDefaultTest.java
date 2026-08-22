@@ -16,24 +16,26 @@
  */
 package org.apache.hop.core.parameters;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.spy;
 
 import org.apache.hop.core.variables.Variables;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-public class NamedParamsDefaultTest {
+/** Unit test for {@link INamedParameters} */
+class NamedParamsDefaultTest {
   INamedParameters namedParams;
 
-  @Before
-  public void setUp() {
+  @BeforeEach
+  void setUp() {
     namedParams = spy(new NamedParameters());
   }
 
   @Test
-  public void testParameters() throws Exception {
+  void testParameters() throws Exception {
     assertNull(namedParams.getParameterValue("var1"));
     assertNull(namedParams.getParameterDefault("var1"));
     assertNull(namedParams.getParameterDescription("var1"));
@@ -76,9 +78,54 @@ public class NamedParamsDefaultTest {
     assertEquals("CCC", variables.getVariable("var3"));
   }
 
-  @Test(expected = DuplicateParamException.class)
-  public void testAddParameterDefinitionWithException() throws DuplicateParamException {
+  @Test
+  void testActivateParametersPrefersExistingVariableOverNonEmptyDefault() throws Exception {
+    // Nested pipelines often declare HOSTNAME default "localhost"; that must not clobber env.
+    Variables variables = new Variables();
+    variables.setVariable("HOSTNAME", "http");
+
+    namedParams.addParameterDefinition("HOSTNAME", "localhost", "HTTP host");
+    namedParams.addParameterDefinition("ONLY_DEFAULT", "from-default", "No prior variable");
+
+    namedParams.activateParameters(variables);
+
+    assertEquals("http", variables.getVariable("HOSTNAME"));
+    assertEquals("from-default", variables.getVariable("ONLY_DEFAULT"));
+  }
+
+  @Test
+  void testActivateParametersEmptyDefaultDoesNotAdoptExistingVariable() throws Exception {
+    // Empty parameter default means unset: do not silently keep a same-named parent variable
+    // (integration tests main-0004 / main-0006).
+    Variables variables = new Variables();
+    variables.setVariable("TEST_PARAM", "from-parent-variable");
+
+    namedParams.addParameterDefinition("TEST_PARAM", "", "Empty default");
+
+    namedParams.activateParameters(variables);
+
+    assertEquals("", variables.getVariable("TEST_PARAM"));
+  }
+
+  @Test
+  void testActivateParametersExplicitValueWinsOverExistingVariable() throws Exception {
+    Variables variables = new Variables();
+    variables.setVariable("HOSTNAME", "http");
+
+    namedParams.addParameterDefinition("HOSTNAME", "localhost", "HTTP host");
+    namedParams.setParameterValue("HOSTNAME", "explicit-host");
+
+    namedParams.activateParameters(variables);
+
+    assertEquals("explicit-host", variables.getVariable("HOSTNAME"));
+  }
+
+  @Test
+  void testAddParameterDefinitionWithException() throws DuplicateParamException {
     namedParams.addParameterDefinition("key", "value", "description");
-    namedParams.addParameterDefinition("key", "value", "description");
+
+    assertThrows(
+        DuplicateParamException.class,
+        () -> namedParams.addParameterDefinition("key", "value", "description"));
   }
 }

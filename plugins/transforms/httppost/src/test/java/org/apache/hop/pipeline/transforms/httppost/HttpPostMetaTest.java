@@ -17,29 +17,30 @@
 
 package org.apache.hop.pipeline.transforms.httppost;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.Arrays;
 import java.util.Random;
 import java.util.UUID;
+import org.apache.hop.core.Const;
 import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.pipeline.transforms.loadsave.LoadSaveTester;
 import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidator;
 import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidatorFactory;
 import org.apache.hop.pipeline.transforms.loadsave.validator.ListLoadSaveValidator;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-public class HttpPostMetaTest {
-  @Before
-  public void testLoadSaveRoundTrip() throws HopException {
+class HttpPostMetaTest {
+  @BeforeEach
+  void testLoadSaveRoundTrip() throws HopException {
     HopEnvironment.init();
   }
 
   @Test
-  public void testSerialization() throws Exception {
+  void testSerialization() throws Exception {
     LoadSaveTester<HttpPostMeta> tester = new LoadSaveTester<>(HttpPostMeta.class);
     IFieldLoadSaveValidatorFactory factory = tester.getFieldLoadSaveValidatorFactory();
     factory.registerValidator(
@@ -53,12 +54,12 @@ public class HttpPostMetaTest {
   }
 
   @Test
-  public void setDefault() {
+  void setDefault() {
     HttpPostMeta meta = new HttpPostMeta();
     assertNull(meta.getEncoding());
 
     meta.setDefault();
-    assertEquals("UTF-8", meta.getEncoding());
+    assertEquals(Const.UTF_8, meta.getEncoding());
   }
 
   public static final class HttpPostLookupFieldValidator

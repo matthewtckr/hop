@@ -23,7 +23,7 @@ import java.util.List;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.annotations.Transform;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopTransformException;
@@ -38,7 +38,7 @@ import org.apache.hop.pipeline.transform.TransformMeta;
 
 @Transform(
     id = "AvroEncode",
-    name = "Avro Encode",
+    name = "Avro encode",
     description = "Encodes Hop fields into an Avro Record typed field",
     image = "avro_encode.svg",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Transform",

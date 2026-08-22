@@ -104,9 +104,6 @@ public class GoogleAnalyticsDialog extends BaseTransformDialog {
 
   private TextVar wGaPropertyId;
 
-  private int middle;
-  private int margin;
-
   private ModifyListener lsMod;
 
   static final String REFERENCE_SORT_URI =
@@ -131,65 +128,17 @@ public class GoogleAnalyticsDialog extends BaseTransformDialog {
 
   @Override
   public String open() {
-    Shell parent = getParent();
+    createShell(BaseMessages.getString(PKG, "GoogleAnalyticsDialog.Shell.Title"));
 
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MIN | SWT.MAX);
-    PropsUi.setLook(shell);
-    setShellImage(shell, getInput());
+    buildButtonBar()
+        .ok(e -> ok())
+        .get(e -> getFields())
+        .preview(e -> preview())
+        .cancel(e -> cancel())
+        .build();
 
     lsMod = e -> getInput().setChanged();
     backupChanged = getInput().hasChanged();
-
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = Const.FORM_MARGIN;
-    formLayout.marginHeight = Const.FORM_MARGIN;
-
-    shell.setLayout(formLayout);
-    shell.setText(BaseMessages.getString(PKG, "GoogleAnalyticsDialog.Shell.Title"));
-
-    middle = props.getMiddlePct();
-    margin = Const.MARGIN;
-
-    // Buttons at the very bottom
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, e -> ok());
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, e -> cancel());
-    wGet = new Button(shell, SWT.PUSH);
-    wGet.setText(BaseMessages.getString(PKG, "System.Button.GetFields"));
-    wGet.addListener(SWT.Selection, e -> getFields());
-    wPreview = new Button(shell, SWT.PUSH);
-    wPreview.setText(BaseMessages.getString(PKG, "System.Button.Preview"));
-    wPreview.addListener(SWT.Selection, e -> preview());
-    BaseTransformDialog.positionBottomButtons(
-        shell, new Button[] {wOk, wGet, wPreview, wCancel}, margin, null);
-
-    /*************************************************
-     * // TRANSFORM NAME ENTRY
-     *************************************************/
-
-    // TransformName line
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(BaseMessages.getString(PKG, "System.TransformName.Label"));
-    wlTransformName.setToolTipText(BaseMessages.getString(PKG, "System.TransformName.Tooltip"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    fdlTransformName.top = new FormAttachment(0, margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    wTransformName.addModifyListener(lsMod);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(middle, 0);
-    fdTransformName.top = new FormAttachment(0, margin);
-    fdTransformName.right = new FormAttachment(100, 0);
-    wTransformName.setLayoutData(fdTransformName);
 
     /*************************************************
      * // GOOGLE ANALYTICS CONNECTION GROUP
@@ -206,7 +155,7 @@ public class GoogleAnalyticsDialog extends BaseTransformDialog {
     FormData fdConnect = new FormData();
     fdConnect.left = new FormAttachment(0, 0);
     fdConnect.right = new FormAttachment(100, 0);
-    fdConnect.top = new FormAttachment(wTransformName, margin);
+    fdConnect.top = new FormAttachment(wSpacer, margin);
     gConnect.setLayoutData(fdConnect);
 
     // Google Analytics app name
@@ -223,7 +172,7 @@ public class GoogleAnalyticsDialog extends BaseTransformDialog {
     wGaAppName.setToolTipText(BaseMessages.getString(PKG, "GoogleAnalyticsDialog.AppName.Tooltip"));
     PropsUi.setLook(wGaAppName);
     FormData fdGaAppName = new FormData();
-    fdGaAppName.top = new FormAttachment(wTransformName, margin);
+    fdGaAppName.top = new FormAttachment(wSpacer, margin);
     fdGaAppName.left = new FormAttachment(middle, 0);
     fdGaAppName.right = new FormAttachment(100, 0);
     wGaAppName.setLayoutData(fdGaAppName);
@@ -408,7 +357,7 @@ public class GoogleAnalyticsDialog extends BaseTransformDialog {
     FormData fdlLimit = new FormData();
     fdlLimit.left = new FormAttachment(0, 0);
     fdlLimit.right = new FormAttachment(middle, -margin);
-    fdlLimit.bottom = new FormAttachment(wOk, -2 * margin);
+    fdlLimit.bottom = new FormAttachment(wOk, -margin);
     wlLimit.setLayoutData(fdlLimit);
     wLimit = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
     wLimit.setToolTipText(BaseMessages.getString(PKG, "GoogleAnalyticsDialog.LimitSize.Tooltip"));
@@ -505,10 +454,8 @@ public class GoogleAnalyticsDialog extends BaseTransformDialog {
     getData();
 
     getInput().setChanged(backupChanged);
-    wTransformName.setFocus();
-
     shell.setTabList(new Control[] {wTransformName, gConnect, gQuery, getTableView()});
-
+    focusTransformName();
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 
     return transformName;
@@ -525,45 +472,45 @@ public class GoogleAnalyticsDialog extends BaseTransformDialog {
   }
 
   private RunReportResponse getReportResponse() {
-    BetaAnalyticsDataClient analyticsData = null;
-    try {
-      InputStream inputStream = new FileInputStream(keyFilename.getText());
+    try (InputStream inputStream = new FileInputStream(keyFilename.getText())) {
       Credentials credentials = ServiceAccountCredentials.fromStream(inputStream);
 
       BetaAnalyticsDataSettings settings =
           BetaAnalyticsDataSettings.newHttpJsonBuilder()
               .setCredentialsProvider(FixedCredentialsProvider.create(credentials))
               .build();
-      analyticsData = BetaAnalyticsDataClient.create(settings);
+
+      try (BetaAnalyticsDataClient analyticsData = BetaAnalyticsDataClient.create(settings)) {
+        List<Dimension> dimensionList = new ArrayList<>();
+        String dimensionString = wQuDimensions.getText();
+        for (String dimension : dimensionString.split(",")) {
+          dimensionList.add(Dimension.newBuilder().setName(dimension).build());
+        }
+        List<Metric> metricList = new ArrayList<>();
+        String metricsString = wQuMetrics.getText();
+        for (String metric : metricsString.split(",")) {
+          metricList.add(Metric.newBuilder().setName(metric).build());
+        }
+        RunReportRequest request =
+            RunReportRequest.newBuilder()
+                .setProperty("properties/" + wGaPropertyId.getText())
+                .addAllDimensions(dimensionList)
+                .addAllMetrics(metricList)
+                .addDateRanges(
+                    DateRange.newBuilder()
+                        .setStartDate(wQuStartDate.getText())
+                        .setEndDate(wQuEndDate.getText()))
+                .build();
+        return analyticsData.runReport(request);
+      }
     } catch (IOException e) {
       new ErrorDialog(
           shell,
           "Error creating connection",
           "Error reading key file or creating Google Analytics connection",
           e);
+      return null;
     }
-
-    List<Dimension> dimensionList = new ArrayList<>();
-    String dimensionString = wQuDimensions.getText();
-    for (String dimension : dimensionString.split(",")) {
-      dimensionList.add(Dimension.newBuilder().setName(dimension).build());
-    }
-    List<Metric> metricList = new ArrayList<>();
-    String metricsString = wQuMetrics.getText();
-    for (String metric : metricsString.split(",")) {
-      metricList.add(Metric.newBuilder().setName(metric).build());
-    }
-    RunReportRequest request =
-        RunReportRequest.newBuilder()
-            .setProperty("properties/" + wGaPropertyId.getText())
-            .addAllDimensions(dimensionList)
-            .addAllMetrics(metricList)
-            .addDateRanges(
-                DateRange.newBuilder()
-                    .setStartDate(wQuStartDate.getText())
-                    .setEndDate(wQuEndDate.getText()))
-            .build();
-    return analyticsData.runReport(request);
   }
 
   // Visible for testing
@@ -572,8 +519,10 @@ public class GoogleAnalyticsDialog extends BaseTransformDialog {
     getTableView().removeAll();
 
     RunReportResponse response = getReportResponse();
-    List<DimensionHeader> dimensionHeaders = response.getDimensionHeadersList();
-    List<MetricHeader> metricHeaders = response.getMetricHeadersList();
+    List<DimensionHeader> dimensionHeaders =
+        response == null ? List.of() : response.getDimensionHeadersList();
+    List<MetricHeader> metricHeaders =
+        response == null ? List.of() : response.getMetricHeadersList();
 
     if (response == null || dimensionHeaders.isEmpty() || metricHeaders.isEmpty()) {
       MessageBox mb = new MessageBox(shell, SWT.OK | SWT.ICON_ERROR);
@@ -662,7 +611,7 @@ public class GoogleAnalyticsDialog extends BaseTransformDialog {
       googleAnalyticsFields.add(field);
     }
     meta.setGoogleAnalyticsFields(googleAnalyticsFields);
-    meta.setRowLimit(Const.toInt(wLimit.getText(), 0));
+    meta.setRowLimit(Const.toIntExpanded(wLimit.getText(), 0));
   }
 
   // Preview the data
@@ -796,9 +745,6 @@ public class GoogleAnalyticsDialog extends BaseTransformDialog {
     wLimit.setText(getInput().getRowLimit() + "");
 
     setActive();
-
-    wTransformName.selectAll();
-    wTransformName.setFocus();
   }
 
   private void cancel() {

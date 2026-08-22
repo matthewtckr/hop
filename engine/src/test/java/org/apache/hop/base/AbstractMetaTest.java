@@ -16,11 +16,11 @@
  */
 package org.apache.hop.base;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -46,41 +46,43 @@ import org.apache.hop.core.listeners.IContentChangedListener;
 import org.apache.hop.core.listeners.ICurrentDirectoryChangedListener;
 import org.apache.hop.core.listeners.IFilenameChangedListener;
 import org.apache.hop.core.listeners.INameChangedListener;
+import org.apache.hop.core.parameters.INamedParameters;
+import org.apache.hop.core.parameters.NamedParameters;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.undo.ChangeAction;
 import org.apache.hop.core.variables.IVariables;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEnvironmentExtension;
 import org.apache.hop.pipeline.transform.TransformMeta;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
-public class AbstractMetaTest {
+/** Unit test for {@link AbstractMeta} */
+@ExtendWith(RestoreHopEnvironmentExtension.class)
+class AbstractMetaTest {
   AbstractMeta meta;
 
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
-
-  @BeforeClass
-  public static void setUpBeforeClass() throws Exception {
+  @BeforeAll
+  static void setUpBeforeClass() throws Exception {
     PluginRegistry.addPluginType(DatabasePluginType.getInstance());
     PluginRegistry.init();
   }
 
-  @Before
-  public void setUp() {
+  @BeforeEach
+  void setUp() {
     meta = new AbstractMetaStub();
   }
 
   @Test
-  public void testGetSetFilename() {
+  void testGetSetFilename() {
     assertNull(meta.getFilename());
     meta.setFilename("myfile");
     assertEquals("myfile", meta.getFilename());
   }
 
   @Test
-  public void testAddNameChangedListener() {
+  void testAddNameChangedListener() {
     meta.fireNameChangedListeners("a", "a");
     meta.fireNameChangedListeners("a", "b");
     meta.addNameChangedListener(null);
@@ -96,7 +98,7 @@ public class AbstractMetaTest {
   }
 
   @Test
-  public void testAddFilenameChangedListener() {
+  void testAddFilenameChangedListener() {
     meta.fireFilenameChangedListeners("a", "a");
     meta.fireFilenameChangedListeners("a", "b");
     meta.addFilenameChangedListener(null);
@@ -112,7 +114,7 @@ public class AbstractMetaTest {
   }
 
   @Test
-  public void testAddRemoveFireContentChangedListener() {
+  void testAddRemoveFireContentChangedListener() {
     assertTrue(meta.getContentChangedListeners().isEmpty());
     IContentChangedListener listener = mock(IContentChangedListener.class);
     meta.addContentChangedListener(listener);
@@ -131,7 +133,7 @@ public class AbstractMetaTest {
   }
 
   @Test
-  public void testAddCurrentDirectoryChangedListener() {
+  void testAddCurrentDirectoryChangedListener() {
     meta.fireNameChangedListeners("a", "a");
     meta.fireNameChangedListeners("a", "b");
     meta.addCurrentDirectoryChangedListener(null);
@@ -148,7 +150,7 @@ public class AbstractMetaTest {
   }
 
   @Test
-  public void testAddRemoveViewUndo() {
+  void testAddRemoveViewUndo() {
     // addUndo() right now will fail with an NPE
     assertEquals(0, meta.getUndoSize());
     meta.clearUndo();
@@ -185,7 +187,9 @@ public class AbstractMetaTest {
     assertNotNull(meta.viewPreviousUndo());
     assertNotNull(meta.viewNextUndo());
     meta.addUndo(from, to, pos, prev, curr, AbstractMeta.TYPE_UNDO_DELETE, false);
-    meta.addUndo(from, to, pos, prev, curr, AbstractMeta.TYPE_UNDO_POSITION, false);
+    Point[] prevPos = new Point[] {new Point(10, 20)};
+    Point[] currPos = new Point[] {new Point(30, 40)};
+    meta.addUndo(from, to, pos, prevPos, currPos, AbstractMeta.TYPE_UNDO_POSITION, false);
     assertNotNull(meta.previousUndo());
     assertNotNull(meta.nextUndo());
     meta.setMaxUndo(1);
@@ -194,7 +198,50 @@ public class AbstractMetaTest {
   }
 
   @Test
-  public void testGetSetAttributes() {
+  void testAddUndoPositionSkipsEmptyOrMismatched() {
+    meta.clearUndo();
+    meta.setMaxUndo(10);
+    TransformMeta transformMeta = mock(TransformMeta.class);
+    Object[] from = new Object[] {transformMeta};
+    int[] pos = new int[] {0};
+
+    // Empty location arrays must not be recorded (and must not throw)
+    meta.addUndo(
+        new Object[0],
+        null,
+        new int[0],
+        new Point[0],
+        new Point[0],
+        AbstractMeta.TYPE_UNDO_POSITION,
+        false);
+    assertEquals(0, meta.getUndoSize());
+
+    // Length mismatch between previous/current locations
+    meta.addUndo(
+        from,
+        null,
+        pos,
+        new Point[] {new Point(1, 1)},
+        new Point[0],
+        AbstractMeta.TYPE_UNDO_POSITION,
+        false);
+    assertEquals(0, meta.getUndoSize());
+
+    // Valid position undo is recorded
+    meta.addUndo(
+        from,
+        null,
+        pos,
+        new Point[] {new Point(1, 1)},
+        new Point[] {new Point(2, 2)},
+        AbstractMeta.TYPE_UNDO_POSITION,
+        false);
+    assertEquals(1, meta.getUndoSize());
+    assertEquals(ChangeAction.ActionType.PositionTransform, meta.viewThisUndo().getType());
+  }
+
+  @Test
+  void testGetSetAttributes() {
     assertNull(meta.getAttributesMap());
     Map<String, Map<String, String>> attributesMap = new HashMap<>();
     meta.setAttributesMap(attributesMap);
@@ -215,7 +262,7 @@ public class AbstractMetaTest {
   }
 
   @Test
-  public void testNotes() {
+  void testNotes() {
     assertNull(meta.getNotes());
     // most note methods will NPE at this point, so call clear() to create an empty note list
     meta.clear();
@@ -243,7 +290,7 @@ public class AbstractMetaTest {
     List<NotePadMeta> selectedNotes = meta.getSelectedNotes();
     assertNotNull(selectedNotes);
     assertEquals(1, selectedNotes.size());
-    assertEquals(note2, selectedNotes.get(0));
+    assertEquals(note2, selectedNotes.getFirst());
     assertEquals(1, meta.indexOfNote(note2));
     meta.removeNote(2);
     assertEquals(2, meta.nrNotes());
@@ -268,7 +315,7 @@ public class AbstractMetaTest {
   }
 
   @Test
-  public void testAddDeleteModifyObserver() {
+  void testAddDeleteModifyObserver() {
     IHopObserver observer = mock(IHopObserver.class);
     meta.addObserver(observer);
     Object event = new Object();
@@ -281,17 +328,17 @@ public class AbstractMetaTest {
   }
 
   @Test
-  public void testHasMissingPlugins() {
+  void testHasMissingPlugins() {
     assertFalse(meta.hasMissingPlugins());
   }
 
   @Test
-  public void testCanSave() {
+  void testCanSave() {
     assertTrue(meta.canSave());
   }
 
   @Test
-  public void testHasChanged() {
+  void testHasChanged() {
     meta.clear();
     assertFalse(meta.hasChanged());
     meta.setChanged(true);
@@ -299,7 +346,7 @@ public class AbstractMetaTest {
   }
 
   @Test
-  public void testMultithreadHammeringOfListener() throws Exception {
+  void testMultithreadHammeringOfListener() throws Exception {
 
     CountDownLatch latch = new CountDownLatch(3);
     AbstractMetaListenerThread th1 =
@@ -329,7 +376,12 @@ public class AbstractMetaTest {
    * Stub class for AbstractMeta. No need to test the abstract methods here, they should be done in
    * unit tests for proper child classes.
    */
-  public static class AbstractMetaStub extends AbstractMeta {
+  static class AbstractMetaStub extends AbstractMeta {
+
+    @Override
+    protected INamedParameters getNamedParameters() {
+      return new NamedParameters();
+    }
 
     @Override
     protected String getExtension() {
@@ -378,17 +430,17 @@ public class AbstractMetaTest {
 
     // Reuse this method to set a mock internal variable variables
     @Override
-    public void setInternalHopVariables(IVariables var) {
+    public void setInternalHopVariables(IVariables variables) {
       // Do nothing
     }
 
     @Override
-    protected void setInternalFilenameHopVariables(IVariables var) {
+    protected void setInternalFilenameHopVariables(IVariables variables) {
       // Do nothing
     }
 
     @Override
-    protected void setInternalNameHopVariable(IVariables var) {
+    protected void setInternalNameHopVariable(IVariables variables) {
       // Do nothing
     }
 
@@ -438,13 +490,13 @@ public class AbstractMetaTest {
     }
   }
 
-  private class AbstractMetaListenerThread implements Runnable {
+  private static class AbstractMetaListenerThread implements Runnable {
     AbstractMeta metaToWork;
     int times;
     CountDownLatch whenDone;
     String message;
     int maxListeners;
-    private Random random;
+    private final Random random;
 
     AbstractMetaListenerThread(
         AbstractMeta aMeta, int times, CountDownLatch latch, int maxListeners) {
@@ -457,9 +509,7 @@ public class AbstractMetaTest {
 
     @Override
     public void run() {
-
       // Add a bunch of listeners to start with
-      //
       for (int i = 0; i < random.nextInt(maxListeners) / 2; i++) {
         metaToWork.addFilenameChangedListener(
             new MockFilenameChangeListener(random.nextInt(maxListeners)));

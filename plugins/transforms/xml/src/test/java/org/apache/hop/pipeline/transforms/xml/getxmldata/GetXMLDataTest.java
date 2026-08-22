@@ -17,10 +17,16 @@
 
 package org.apache.hop.pipeline.transforms.xml.getxmldata;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import junit.framework.TestCase;
+import org.apache.hop.core.Const;
 import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.RowMetaAndData;
 import org.apache.hop.core.exception.HopValueException;
@@ -29,27 +35,40 @@ import org.apache.hop.core.plugins.TransformPluginType;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.row.RowMeta;
+import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.core.row.value.ValueMetaString;
+import org.apache.hop.junit.rules.RestoreHopEnvironmentExtension;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineHopMeta;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.RowProducer;
 import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
 import org.apache.hop.pipeline.transform.ITransform;
+import org.apache.hop.pipeline.transform.TransformErrorMeta;
 import org.apache.hop.pipeline.transform.TransformMeta;
 import org.apache.hop.pipeline.transforms.dummy.DummyMeta;
 import org.apache.hop.pipeline.transforms.injector.InjectorMeta;
 import org.apache.hop.pipeline.transforms.xml.RowTransformCollector;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 
 /** Test class for the "Get XML Data" transform. */
-public class GetXMLDataTest extends TestCase {
+@ExtendWith(RestoreHopEnvironmentExtension.class)
+class GetXMLDataTest {
+  @BeforeEach
+  void init() throws Exception {
+    HopEnvironment.init();
+  }
+
   public IRowMeta createRowMetaInterface() {
     IRowMeta rm = new RowMeta();
 
     IValueMeta[] valuesMeta = {new ValueMetaString("field1")};
 
-    for (int i = 0; i < valuesMeta.length; i++) {
-      rm.addValueMeta(valuesMeta[i]);
+    for (IValueMeta iValueMeta : valuesMeta) {
+      rm.addValueMeta(iValueMeta);
     }
 
     return rm;
@@ -113,8 +132,8 @@ public class GetXMLDataTest extends TestCase {
       new ValueMetaString("merkmalname"), new ValueMetaString("merkmalswert")
     };
 
-    for (int i = 0; i < valuesMeta.length; i++) {
-      rm.addValueMeta(valuesMeta[i]);
+    for (IValueMeta iValueMeta : valuesMeta) {
+      rm.addValueMeta(iValueMeta);
     }
 
     return rm;
@@ -186,13 +205,10 @@ public class GetXMLDataTest extends TestCase {
    *
    * @throws Exception Upon any exception
    */
-  public void testGetXMLDataSimple1() throws Exception {
-    HopEnvironment.init();
-
-    //
+  @Test
+  void testGetXMLDataSimple1() throws Exception {
     // Create a new pipeline...
     //
-
     PipelineMeta pipelineMeta = new PipelineMeta();
     pipelineMeta.setName("getxmldata1");
 
@@ -227,70 +243,70 @@ public class GetXMLDataTest extends TestCase {
 
     fields[0].setName("objectid");
     fields[0].setXPath("ObjectID");
-    fields[0].setElementType(GetXmlDataField.ELEMENT_TYPE_NODE);
-    fields[0].setType(IValueMeta.TYPE_STRING);
+    fields[0].setElementType(GetXmlDataField.getElementTypeCode(GetXmlDataField.ELEMENT_TYPE_NODE));
+    fields[0].setType(ValueMetaFactory.getValueMetaName(IValueMeta.TYPE_STRING));
     fields[0].setFormat("");
     fields[0].setLength(-1);
     fields[0].setPrecision(-1);
     fields[0].setCurrencySymbol("");
     fields[0].setDecimalSymbol("");
     fields[0].setGroupSymbol("");
-    fields[0].setTrimType(GetXmlDataField.TYPE_TRIM_NONE);
+    fields[0].setTrimType(GetXmlDataField.getTrimTypeCode(GetXmlDataField.TYPE_TRIM_NONE));
 
     fields[1].setName("sapident");
     fields[1].setXPath("SAPIDENT");
-    fields[1].setElementType(GetXmlDataField.ELEMENT_TYPE_NODE);
-    fields[1].setType(IValueMeta.TYPE_STRING);
+    fields[1].setElementType(GetXmlDataField.getElementTypeCode(GetXmlDataField.ELEMENT_TYPE_NODE));
+    fields[1].setType(ValueMetaFactory.getValueMetaName(IValueMeta.TYPE_STRING));
     fields[1].setFormat("");
     fields[1].setLength(-1);
     fields[1].setPrecision(-1);
     fields[1].setCurrencySymbol("");
     fields[1].setDecimalSymbol("");
     fields[1].setGroupSymbol("");
-    fields[1].setTrimType(GetXmlDataField.TYPE_TRIM_NONE);
+    fields[1].setTrimType(GetXmlDataField.getTrimTypeCode(GetXmlDataField.TYPE_TRIM_NONE));
 
     fields[2].setName("quantity");
     fields[2].setXPath("Quantity");
-    fields[2].setElementType(GetXmlDataField.ELEMENT_TYPE_NODE);
-    fields[2].setType(IValueMeta.TYPE_STRING);
+    fields[2].setElementType(GetXmlDataField.getElementTypeCode(GetXmlDataField.ELEMENT_TYPE_NODE));
+    fields[2].setType(ValueMetaFactory.getValueMetaName(IValueMeta.TYPE_STRING));
     fields[2].setFormat("");
     fields[2].setLength(-1);
     fields[2].setPrecision(-1);
     fields[2].setCurrencySymbol("");
     fields[2].setDecimalSymbol("");
     fields[2].setGroupSymbol("");
-    fields[2].setTrimType(GetXmlDataField.TYPE_TRIM_NONE);
+    fields[2].setTrimType(GetXmlDataField.getTrimTypeCode(GetXmlDataField.TYPE_TRIM_NONE));
 
     fields[3].setName("merkmalname");
     fields[3].setXPath("Merkmalname");
-    fields[3].setElementType(GetXmlDataField.ELEMENT_TYPE_NODE);
-    fields[3].setType(IValueMeta.TYPE_STRING);
+    fields[3].setElementType(GetXmlDataField.getElementTypeCode(GetXmlDataField.ELEMENT_TYPE_NODE));
+    fields[3].setType(ValueMetaFactory.getValueMetaName(IValueMeta.TYPE_STRING));
     fields[3].setFormat("");
     fields[3].setLength(-1);
     fields[3].setPrecision(-1);
     fields[3].setCurrencySymbol("");
     fields[3].setDecimalSymbol("");
     fields[3].setGroupSymbol("");
-    fields[3].setTrimType(GetXmlDataField.TYPE_TRIM_NONE);
+    fields[3].setTrimType(GetXmlDataField.getTrimTypeCode(GetXmlDataField.TYPE_TRIM_NONE));
 
     fields[4].setName("merkmalswert");
     fields[4].setXPath("Merkmalswert");
-    fields[4].setElementType(GetXmlDataField.ELEMENT_TYPE_NODE);
-    fields[4].setType(IValueMeta.TYPE_STRING);
+    fields[4].setElementType(GetXmlDataField.getElementTypeCode(GetXmlDataField.ELEMENT_TYPE_NODE));
+    fields[4].setType(ValueMetaFactory.getValueMetaName(IValueMeta.TYPE_STRING));
     fields[4].setFormat("");
     fields[4].setLength(-1);
     fields[4].setPrecision(-1);
     fields[4].setCurrencySymbol("");
     fields[4].setDecimalSymbol("");
     fields[4].setGroupSymbol("");
-    fields[4].setTrimType(GetXmlDataField.TYPE_TRIM_NONE);
+    fields[4].setTrimType(GetXmlDataField.getTrimTypeCode(GetXmlDataField.TYPE_TRIM_NONE));
 
-    gxdm.setEncoding("UTF-8");
-    gxdm.setIsAFile(false);
+    gxdm.setEncoding(Const.UTF_8);
+    gxdm.setAFile(false);
     gxdm.setInFields(true);
     gxdm.setLoopXPath("Level1/Level2/Props");
-    gxdm.setXMLField("field1");
-    gxdm.setInputFields(fields);
+    gxdm.setXmlField("field1");
+    gxdm.setInputFields(java.util.Arrays.asList(fields));
 
     PipelineHopMeta hi = new PipelineHopMeta(injectorTransform, getXMLDataTransform);
     pipelineMeta.addPipelineHop(hi);
@@ -338,11 +354,8 @@ public class GetXMLDataTest extends TestCase {
     checkRows(goldenImageRows, resultRows);
   }
 
-  public void testInit() throws Exception {
-
-    HopEnvironment.init();
-
-    //
+  @Test
+  void testInit() throws Exception {
     // Create a new pipeline...
     //
     PipelineMeta pipelineMeta = new PipelineMeta();
@@ -379,22 +392,22 @@ public class GetXMLDataTest extends TestCase {
 
     fields[0].setName("objectid");
     fields[0].setXPath("${xml_path}");
-    fields[0].setElementType(GetXmlDataField.ELEMENT_TYPE_NODE);
-    fields[0].setType(IValueMeta.TYPE_STRING);
+    fields[0].setElementType(GetXmlDataField.getElementTypeCode(GetXmlDataField.ELEMENT_TYPE_NODE));
+    fields[0].setType(ValueMetaFactory.getValueMetaName(IValueMeta.TYPE_STRING));
     fields[0].setFormat("");
     fields[0].setLength(-1);
     fields[0].setPrecision(-1);
     fields[0].setCurrencySymbol("");
     fields[0].setDecimalSymbol("");
     fields[0].setGroupSymbol("");
-    fields[0].setTrimType(GetXmlDataField.TYPE_TRIM_NONE);
+    fields[0].setTrimType(GetXmlDataField.getTrimTypeCode(GetXmlDataField.TYPE_TRIM_NONE));
 
-    gxdm.setEncoding("UTF-8");
-    gxdm.setIsAFile(false);
+    gxdm.setEncoding(Const.UTF_8);
+    gxdm.setAFile(false);
     gxdm.setInFields(true);
     gxdm.setLoopXPath("Level1/Level2/Props");
-    gxdm.setXMLField("field1");
-    gxdm.setInputFields(fields);
+    gxdm.setXmlField("field1");
+    gxdm.setInputFields(java.util.Arrays.asList(fields));
 
     PipelineHopMeta hi = new PipelineHopMeta(injectorTransform, getXMLDataTransform);
     pipelineMeta.addPipelineHop(hi);
@@ -442,7 +455,196 @@ public class GetXMLDataTest extends TestCase {
         new GetXmlData(dummyTransform1, gxdm, getXMLDataData, 0, pipelineMeta, pipeline);
     getXmlData.setVariable("xml_path", "data/owner");
     getXmlData.init();
-    assertEquals("${xml_path}", gxdm.getInputFields()[0].getXPath());
-    assertEquals("data/owner", gxdm.getInputFields()[0].getResolvedXPath());
+    assertEquals("${xml_path}", gxdm.getInputFields().get(0).getXPath());
+    assertEquals("data/owner", gxdm.getInputFields().get(0).getResolvedXPath());
+  }
+
+  /** Build the five string fields used by the "in fields" test pipelines. */
+  private GetXmlDataField[] createXmlDataFields() {
+    String[] names = {"objectid", "sapident", "quantity", "merkmalname", "merkmalswert"};
+    String[] xpaths = {"ObjectID", "SAPIDENT", "Quantity", "Merkmalname", "Merkmalswert"};
+
+    GetXmlDataField[] fields = new GetXmlDataField[names.length];
+    for (int idx = 0; idx < fields.length; idx++) {
+      GetXmlDataField field = new GetXmlDataField();
+      field.setName(names[idx]);
+      field.setXPath(xpaths[idx]);
+      field.setElementType(GetXmlDataField.getElementTypeCode(GetXmlDataField.ELEMENT_TYPE_NODE));
+      field.setType(ValueMetaFactory.getValueMetaName(IValueMeta.TYPE_STRING));
+      field.setFormat("");
+      field.setLength(-1);
+      field.setPrecision(-1);
+      field.setCurrencySymbol("");
+      field.setDecimalSymbol("");
+      field.setGroupSymbol("");
+      field.setTrimType(GetXmlDataField.getTrimTypeCode(GetXmlDataField.TYPE_TRIM_NONE));
+      fields[idx] = field;
+    }
+    return fields;
+  }
+
+  /**
+   * With error handling enabled and XML coming from an input field, a row whose XML field is null
+   * (or otherwise unparseable) must be diverted to the error stream while the transform keeps
+   * processing the remaining rows, instead of aborting the whole transform. Regression test for the
+   * "transform still stops when it should continue" bug.
+   */
+  @Test
+  void testErrorHandlingContinuesOnBadXml() throws Exception {
+    PipelineMeta pipelineMeta = new PipelineMeta();
+    pipelineMeta.setName("getxmldata-errorhandling");
+
+    PluginRegistry registry = PluginRegistry.getInstance();
+
+    // Injector
+    String injectorTransformName = "injector transform";
+    InjectorMeta im = new InjectorMeta();
+    String injectorPid = registry.getPluginId(TransformPluginType.class, im);
+    TransformMeta injectorTransform = new TransformMeta(injectorPid, injectorTransformName, im);
+    pipelineMeta.addTransform(injectorTransform);
+
+    // Get XML Data, reading the XML from the incoming "field1"
+    String getXMLDataName = "get xml data transform";
+    GetXmlDataMeta gxdm = new GetXmlDataMeta();
+    gxdm.setEncoding(Const.UTF_8);
+    gxdm.setAFile(false);
+    gxdm.setInFields(true);
+    gxdm.setLoopXPath("Level1/Level2/Props");
+    gxdm.setXmlField("field1");
+    gxdm.setInputFields(java.util.Arrays.asList(createXmlDataFields()));
+    String getXMLDataPid = registry.getPluginId(TransformPluginType.class, gxdm);
+    TransformMeta getXMLDataTransform = new TransformMeta(getXMLDataPid, getXMLDataName, gxdm);
+    pipelineMeta.addTransform(getXMLDataTransform);
+    pipelineMeta.addPipelineHop(new PipelineHopMeta(injectorTransform, getXMLDataTransform));
+
+    // Main output
+    String dummyMainName = "dummy main";
+    DummyMeta dmMain = new DummyMeta();
+    String dummyMainPid = registry.getPluginId(TransformPluginType.class, dmMain);
+    TransformMeta dummyMain = new TransformMeta(dummyMainPid, dummyMainName, dmMain);
+    pipelineMeta.addTransform(dummyMain);
+    pipelineMeta.addPipelineHop(new PipelineHopMeta(getXMLDataTransform, dummyMain));
+
+    // Error output
+    String dummyErrorName = "dummy error";
+    DummyMeta dmError = new DummyMeta();
+    String dummyErrorPid = registry.getPluginId(TransformPluginType.class, dmError);
+    TransformMeta dummyError = new TransformMeta(dummyErrorPid, dummyErrorName, dmError);
+    pipelineMeta.addTransform(dummyError);
+    pipelineMeta.addPipelineHop(new PipelineHopMeta(getXMLDataTransform, dummyError));
+
+    // Enable error handling on Get XML Data, routing error rows to the error dummy
+    TransformErrorMeta errorMeta = new TransformErrorMeta(getXMLDataTransform, dummyError);
+    errorMeta.setEnabled(true);
+    getXMLDataTransform.setTransformErrorMeta(errorMeta);
+
+    Pipeline pipeline = new LocalPipelineEngine(pipelineMeta);
+    pipeline.prepareExecution();
+
+    // Capture the error rows emitted by the Get XML Data transform itself...
+    RowTransformCollector errorCollector = new RowTransformCollector();
+    pipeline.getTransform(getXMLDataName, 0).addRowListener(errorCollector);
+    // ...and the good rows arriving at the main output.
+    RowTransformCollector mainCollector = new RowTransformCollector();
+    pipeline.getTransform(dummyMainName, 0).addRowListener(mainCollector);
+
+    RowProducer rp = pipeline.addRowProducer(injectorTransformName, 0);
+    pipeline.startThreads();
+
+    // A good row, a row whose XML field is null (the bug trigger), then another good row.
+    IRowMeta rm = createRowMetaInterface();
+    rp.putRow(rm, new Object[] {getXML1()});
+    rp.putRow(rm, new Object[] {null});
+    rp.putRow(rm, new Object[] {getXML2()});
+    rp.finished();
+
+    pipeline.waitUntilFinished();
+
+    // The transform must keep going: no errors reported, so the pipeline did not abort.
+    assertEquals(0, pipeline.getResult().getNrErrors(), "transform should not report errors");
+
+    // Both good rows still produce their output (2 from XML1 + 1 from XML2).
+    assertEquals(3, mainCollector.getRowsWritten().size(), "good rows still flow through");
+
+    // The single bad row is diverted to error handling and carries the original (null) field.
+    assertEquals(1, errorCollector.getRowsError().size(), "bad row goes to error handling");
+    assertEquals(
+        null,
+        errorCollector.getRowsError().getFirst().getData()[0],
+        "error row keeps the offending input value");
+  }
+
+  /**
+   * The same guarantee has to hold when the XML comes from a file rather than a field. A file that
+   * cannot be parsed must be diverted to the error stream and the remaining files still read,
+   * instead of the transform calling stopAll() and taking the whole pipeline down with it.
+   * Regression test for #8000.
+   */
+  @Test
+  void testErrorHandlingContinuesOnBadXmlFile(@TempDir Path tempDir) throws Exception {
+    // Read in name order: a good file, an unparseable one, then another good file.
+    Files.writeString(tempDir.resolve("1-good.xml"), getXML1());
+    Files.writeString(tempDir.resolve("2-bad.xml"), "<Level1><Level2><Props>");
+    Files.writeString(tempDir.resolve("3-good.xml"), getXML2());
+
+    PipelineMeta pipelineMeta = new PipelineMeta();
+    pipelineMeta.setName("getxmldata-file-errorhandling");
+
+    PluginRegistry registry = PluginRegistry.getInstance();
+
+    // Get XML Data, reading every .xml in the temporary folder
+    String getXMLDataName = "get xml data transform";
+    GetXmlDataMeta gxdm = new GetXmlDataMeta();
+    gxdm.setEncoding(Const.UTF_8);
+    gxdm.setAFile(false);
+    gxdm.setInFields(false);
+    gxdm.setLoopXPath("Level1/Level2/Props");
+    gxdm.setInputFields(java.util.Arrays.asList(createXmlDataFields()));
+    gxdm.setFilesList(
+        Collections.singletonList(
+            new GetXmlFileItem(tempDir.toString(), ".*\\.xml$", "", "N", "N")));
+    String getXMLDataPid = registry.getPluginId(TransformPluginType.class, gxdm);
+    TransformMeta getXMLDataTransform = new TransformMeta(getXMLDataPid, getXMLDataName, gxdm);
+    pipelineMeta.addTransform(getXMLDataTransform);
+
+    // Main output
+    String dummyMainName = "dummy main";
+    DummyMeta dmMain = new DummyMeta();
+    String dummyMainPid = registry.getPluginId(TransformPluginType.class, dmMain);
+    TransformMeta dummyMain = new TransformMeta(dummyMainPid, dummyMainName, dmMain);
+    pipelineMeta.addTransform(dummyMain);
+    pipelineMeta.addPipelineHop(new PipelineHopMeta(getXMLDataTransform, dummyMain));
+
+    // Error output
+    String dummyErrorName = "dummy error";
+    DummyMeta dmError = new DummyMeta();
+    String dummyErrorPid = registry.getPluginId(TransformPluginType.class, dmError);
+    TransformMeta dummyError = new TransformMeta(dummyErrorPid, dummyErrorName, dmError);
+    pipelineMeta.addTransform(dummyError);
+    pipelineMeta.addPipelineHop(new PipelineHopMeta(getXMLDataTransform, dummyError));
+
+    TransformErrorMeta errorMeta = new TransformErrorMeta(getXMLDataTransform, dummyError);
+    errorMeta.setEnabled(true);
+    getXMLDataTransform.setTransformErrorMeta(errorMeta);
+
+    Pipeline pipeline = new LocalPipelineEngine(pipelineMeta);
+    pipeline.prepareExecution();
+
+    RowTransformCollector errorCollector = new RowTransformCollector();
+    pipeline.getTransform(getXMLDataName, 0).addRowListener(errorCollector);
+    RowTransformCollector mainCollector = new RowTransformCollector();
+    pipeline.getTransform(dummyMainName, 0).addRowListener(mainCollector);
+
+    pipeline.startThreads();
+    pipeline.waitUntilFinished();
+
+    // Without the fix the transform calls stopAll() and the pipeline reports an error.
+    assertEquals(0, pipeline.getResult().getNrErrors(), "transform should not report errors");
+
+    // Both readable files are still read: 2 rows from the first, 1 from the third.
+    assertEquals(3, mainCollector.getRowsWritten().size(), "good files are still read");
+
+    // The unreadable file produces exactly one error row.
+    assertEquals(1, errorCollector.getRowsError().size(), "bad file goes to error handling");
   }
 }

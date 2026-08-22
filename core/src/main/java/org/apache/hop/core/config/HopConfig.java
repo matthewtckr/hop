@@ -21,11 +21,13 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.config.plugin.ConfigFile;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.DescribedVariable;
 
@@ -33,11 +35,10 @@ import org.apache.hop.core.variables.DescribedVariable;
  * This class keeps track of storing and retrieving all the configuration options in Hop. This
  * includes all options of the various plugins in the Hop ecosystem.
  */
-public class HopConfig extends ConfigFile implements IConfigFile {
-
+public class HopConfig extends ConfigFile {
   private static final String HOP_GUI_PROPERTIES_KEY = "guiProperties";
 
-  private String configFilename;
+  @Setter @Getter private String configFilename;
 
   @JsonIgnore private static HopConfig instance;
 
@@ -46,7 +47,8 @@ public class HopConfig extends ConfigFile implements IConfigFile {
       this.configFilename = Const.HOP_CONFIG_FOLDER + Const.FILE_SEPARATOR + Const.HOP_CONFIG;
       readFromFile();
     } catch (Exception e) {
-      throw new RuntimeException("Error reading the hop config file '" + configFilename + "'", e);
+      throw new HopRuntimeException(
+          "Error reading the hop config file '" + configFilename + "'", e);
     }
   }
 
@@ -63,7 +65,7 @@ public class HopConfig extends ConfigFile implements IConfigFile {
       hopConfig.configMap.put(optionKey, optionValue);
       saveToFile();
     } catch (Exception e) {
-      throw new RuntimeException("Error saving configuration option '" + optionKey + "'", e);
+      throw new HopRuntimeException("Error saving configuration option '" + optionKey + "'", e);
     }
   }
 
@@ -73,7 +75,7 @@ public class HopConfig extends ConfigFile implements IConfigFile {
       hopConfig.configMap.putAll(extraOptions);
       hopConfig.saveToFile();
     } catch (Exception e) {
-      throw new RuntimeException("Error saving configuration options", e);
+      throw new HopRuntimeException("Error saving configuration options", e);
     }
   }
 
@@ -82,7 +84,7 @@ public class HopConfig extends ConfigFile implements IConfigFile {
       HopConfig hopConfig = getInstance();
       return hopConfig.configMap.get(optionKey);
     } catch (Exception e) {
-      throw new RuntimeException("Error reading option '" + optionKey + "'", e);
+      throw new HopRuntimeException("Error reading option '" + optionKey + "'", e);
     }
   }
 
@@ -97,7 +99,7 @@ public class HopConfig extends ConfigFile implements IConfigFile {
       }
       return value.toString();
     } catch (Exception e) {
-      throw new RuntimeException("Error reading option '" + optionKey + "'", e);
+      throw new HopRuntimeException("Error reading option '" + optionKey + "'", e);
     }
   }
 
@@ -136,7 +138,7 @@ public class HopConfig extends ConfigFile implements IConfigFile {
       Collections.sort(keys);
       return keys;
     } catch (Exception e) {
-      throw new RuntimeException("Error getting a list of sorted configuration keys", e);
+      throw new HopRuntimeException("Error getting a list of sorted configuration keys", e);
     }
   }
 
@@ -147,11 +149,19 @@ public class HopConfig extends ConfigFile implements IConfigFile {
         Map<String, String> map = new HashMap<>();
         getInstance().configMap.put(HOP_GUI_PROPERTIES_KEY, map);
         return map;
+      } else if (propertiesObject instanceof Map) {
+        @SuppressWarnings("unchecked")
+        Map<String, String> propertiesMap = (Map<String, String>) propertiesObject;
+        return propertiesMap;
       } else {
-        return (Map<String, String>) propertiesObject;
+        // If the object is not a Map, create a new one and log a warning
+        System.err.println("Warning: GUI properties object is not a Map, creating new one");
+        Map<String, String> map = new HashMap<>();
+        getInstance().configMap.put(HOP_GUI_PROPERTIES_KEY, map);
+        return map;
       }
     } catch (Exception e) {
-      throw new RuntimeException("Error getting GUI properties from the Hop configuration");
+      throw new HopRuntimeException("Error getting GUI properties from the Hop configuration", e);
     }
   }
 
@@ -163,20 +173,22 @@ public class HopConfig extends ConfigFile implements IConfigFile {
    * @return the value associated to the variable
    */
   public static String readStringVariable(String key, String defaultValue) {
-    String value = null;
-
-    ArrayList<DescribedVariable> variables =
-        (ArrayList<DescribedVariable>) getInstance().configMap.get(HOP_VARIABLES_KEY);
-    if (variables != null) {
-      Iterator<DescribedVariable> i = variables.iterator();
-
-      while (i.hasNext() && value == null) {
-        DescribedVariable v = i.next();
-        if (v.getName().equals(key)) value = v.getValue();
+    try {
+      List<DescribedVariable> variables = getInstance().getDescribedVariables();
+      if (variables != null) {
+        for (DescribedVariable v : variables) {
+          if (v.getName().equals(key)) {
+            return v.getValue();
+          }
+        }
       }
+    } catch (Exception e) {
+      // Log the error but don't fail the entire operation
+      // Return the default value instead
+      System.err.println("Error reading string variable '" + key + "': " + e.getMessage());
     }
 
-    return value == null ? defaultValue : value;
+    return defaultValue;
   }
 
   public static void setGuiProperty(String key, String value) {
@@ -191,29 +203,12 @@ public class HopConfig extends ConfigFile implements IConfigFile {
     readGuiProperties().putAll(map);
   }
 
-  /**
-   * Gets configFilename
-   *
-   * @return value of configFilename
-   */
-  @Override
-  public String getConfigFilename() {
-    return configFilename;
-  }
-
-  /**
-   * @param configFilename The configFilename to set
-   */
-  @Override
-  public void setConfigFilename(String configFilename) {
-    this.configFilename = configFilename;
-  }
-
   public void reload() {
     try {
       readFromFile();
     } catch (Exception e) {
-      throw new RuntimeException("Error reading the hop config file '" + configFilename + "'", e);
+      throw new HopRuntimeException(
+          "Error reading the hop config file '" + configFilename + "'", e);
     }
   }
 }

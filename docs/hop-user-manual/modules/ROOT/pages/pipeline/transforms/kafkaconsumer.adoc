@@ -16,16 +16,16 @@ under the License.
 ////
 :documentationPath: /pipeline/transforms/
 :language: en_US
-:description: The Kafka Consumer transform continuously pulls data from Kafka. It runs a sub-pipeline that executes according to message batch size or duration.
+:description: The Kafka consumer transform pulls data from a Kafka topic.
 
-= image:transforms/icons/KafkaConsumerInput.svg[Kafka Consumer transform Icon, role="image-doc-icon"] Kafka Consumer
+= image:transforms/icons/KafkaConsumerInput.svg[Kafka consumer transform Icon, role="image-doc-icon"] Kafka consumer
 
 [%noheader,cols="3a,1a", role="table-no-borders" ]
 |===
 |
 == Description
 
-The Kafka Consumer transform pulls streaming data from Kafka. It runs a sub-pipeline that executes according to message batch size or duration, letting you process a continuous stream of records in near-real-time.
+The Kafka consumer transform pulls streaming data from Kafka. It runs a sub-pipeline that executes according to message batch size or duration, letting you process a continuous stream of records in near-real-time.
 
 This sub-pipeline must start with an Injector transform.
 
@@ -40,18 +40,22 @@ Kafka scales topic consumption by distributing partitions among a consumer group
 
 A consumer group is a set of consumers sharing a common group identifier.
 
-Since the Kafka Consumer transform continuously ingests streaming data, you may want to use the Abort transform in your parent or sub-pipeline to stop consuming records from Kafka for specific workflows.
+By default the Kafka consumer transform continuously ingests streaming data.
+To stop after the topic has been drained, enable *Stop when idle* on the Batch tab (with an optional max idle time).
+You can also use the Abort transform in your parent or sub-pipeline to stop consuming records for other conditions.
 
-For example, you can run the parent pipeline on a timed schedule, or abort the sub-pipeline if sensor data exceeds a preset range.
+For example, you can run the parent pipeline on a timed schedule, drain a topic once per hour with stop-when-idle, or abort the sub-pipeline if sensor data exceeds a preset range.
 
 |
 == Supported Engines
 [%noheader,cols="2,1a",frame=none, role="table-supported-engines"]
 !===
 !Hop Engine! image:check_mark.svg[Supported, 24]
-!Spark! image:question_mark.svg[Maybe Supported, 24]
-!Flink! image:question_mark.svg[Maybe Supported, 24]
-!Dataflow! image:question_mark.svg[Maybe Supported, 24]
+!Single Threaded! image:check_mark.svg[Supported, 24]
+!Native Spark! image:cross.svg[Not Supported, 24]
+!Beam Spark! image:cross.svg[Not Supported, 24]
+!Beam Flink! image:cross.svg[Not Supported, 24]
+!Beam Dataflow! image:cross.svg[Not Supported, 24]
 !===
 |===
 
@@ -77,10 +81,10 @@ For example, you can run the parent pipeline on a timed schedule, or abort the s
 |Bootstrap servers|Comma separated list of bootstrap servers in a Kafka cluster
 |Topics|Enter the name of each Kafka topic from which you want to consume streaming data (messages).
 |Consumer group|Enter the name of the group of which you want this consumer to be a member.
-Each Kafka Consumer transform will start a single thread for consuming. If left empty, it will be defaulted to _Apache Hop_.
+Each Kafka consumer transform will start a single thread for consuming. If left empty, it will be defaulted to _Apache Hop_.
 
 When part of a consumer group, each consumer is assigned a subset of the partitions from topics it has subscribed to, which locks those partitions.
-Each instance of a Kafka Consumer transform will only run a single consumer thread.
+Each instance of a Kafka consumer transform will only run a single consumer thread.
 |===
 
 === Batch
@@ -99,6 +103,12 @@ If set to a value of ‘0’, then Number of records triggers consumption.
 |Number of records|Specify a number.
 After every ‘X’ number of records, the specified pipeline will be executed and these ‘X’ records will be passed to the pipeline.
 If set to a value of ‘0’ then Duration triggers consumption.
+|Stop when idle|When enabled, the consumer stops gracefully after no records are received for the configured max idle time.
+This supports batch-style use cases such as draining a topic periodically instead of running forever.
+While this option is enabled, the consumer polls with a short (100 ms) timeout so idle time can be measured accurately.
+|Max idle time (ms)|The maximum time in milliseconds to wait without receiving records before stopping when *Stop when idle* is enabled.
+Defaults to 500.
+Supports variables.
 |Offset management a|Choose when to commit
 
 * when record read
@@ -124,8 +134,14 @@ You cannot have more consumers than the number of partitions.
 * **offset**: A sequential ID number assigned by Kafka to each record.
 It uniquely identifies each record within the partition.
 * **timestamp**: The time the message is received on the server.
+* **headers**: The record headers, as a JSON array of `{"name":..,"value":..}` objects.
+An array is used rather than a JSON object because Kafka keeps headers ordered and allows the same name to appear more than once.
+This value can be fed straight into the _Headers field_ of the Kafka Producer transform to pass headers through unchanged.
 
-|Output name|The _Output name_ can be mapped to subscriber and member requirements.
+|Output name a|The _Output name_ can be mapped to subscriber and member requirements.
+
+Leave the output name empty to keep that field off the output row.
+**headers** ships with an empty output name, so pipelines created before header support produce the same rows as before; give it a name to start reading headers.
 |Type a|The Type field defines the data format for streaming the record.
 You must choose the same data type that produced the records.
 This field applies to the ‘key’ and ‘message’ input names.
@@ -215,3 +231,7 @@ Here are some options you need to set to make this work on a Confluent Cloud Kaf
 |ALL
 
 |===
+
+== See also
+
+* xref:how-to-guides/cdc-log-sniffing.adoc[CDC: log sniffing] — consuming Debezium, GoldenGate, or similar change events from a Kafka topic

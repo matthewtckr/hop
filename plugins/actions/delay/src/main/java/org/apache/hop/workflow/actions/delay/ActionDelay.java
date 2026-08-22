@@ -60,17 +60,6 @@ public class ActionDelay extends ActionBase implements Cloneable {
     this("");
   }
 
-  public ActionDelay(ActionDelay other) {
-    super(other.getName(), other.getDescription(), other.getPluginId());
-    this.maximumTimeout = other.maximumTimeout;
-    this.scaleTime = other.scaleTime;
-  }
-
-  @Override
-  public Object clone() {
-    return new ActionDelay(this);
-  }
-
   /**
    * Execute this action and return the result. In this case it means, just set the result boolean
    * in the Result class.
@@ -83,26 +72,26 @@ public class ActionDelay extends ActionBase implements Cloneable {
     Result result = previousResult;
     result.setResult(false);
     int multiple;
-    String waitscale;
+    String waitscale =
+        switch (scaleTime) {
+          case 0 -> {
+            // Second
+            multiple = 1000;
+            yield BaseMessages.getString(PKG, "ActionDelay.SScaleTime.Label");
+          }
+          case 1 -> {
+            // Minute
+            multiple = 60000;
+            yield BaseMessages.getString(PKG, "ActionDelay.MnScaleTime.Label");
+          }
+          default -> {
+            // Hour
+            multiple = 3600000;
+            yield BaseMessages.getString(PKG, "ActionDelay.HrScaleTime.Label");
+          }
+        };
 
     // Scale time
-    switch (scaleTime) {
-      case 0:
-        // Second
-        multiple = 1000;
-        waitscale = BaseMessages.getString(PKG, "ActionDelay.SScaleTime.Label");
-        break;
-      case 1:
-        // Minute
-        multiple = 60000;
-        waitscale = BaseMessages.getString(PKG, "ActionDelay.MnScaleTime.Label");
-        break;
-      default:
-        // Hour
-        multiple = 3600000;
-        waitscale = BaseMessages.getString(PKG, "ActionDelay.HrScaleTime.Label");
-        break;
-    }
 
     try {
       // starttime (in seconds ,Minutes or Hours)
@@ -123,12 +112,14 @@ public class ActionDelay extends ActionBase implements Cloneable {
       //
       if (iMaximumTimeout < 0) {
         iMaximumTimeout = Const.toInt(DEFAULT_MAXIMUM_TIMEOUT, 0);
-        logBasic(
-            BaseMessages.getString(
-                PKG,
-                "ActionDelay.MaximumTimeReset.Label",
-                String.valueOf(iMaximumTimeout),
-                String.valueOf(waitscale)));
+        if (isBasic()) {
+          logBasic(
+              BaseMessages.getString(
+                  PKG,
+                  "ActionDelay.MaximumTimeReset.Label",
+                  String.valueOf(iMaximumTimeout),
+                  String.valueOf(waitscale)));
+        }
       }
 
       // Loop until the delay time has expired.

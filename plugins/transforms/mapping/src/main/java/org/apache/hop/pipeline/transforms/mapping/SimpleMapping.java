@@ -17,9 +17,8 @@
 
 package org.apache.hop.pipeline.transforms.mapping;
 
-import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.i18n.BaseMessages;
@@ -29,7 +28,6 @@ import org.apache.hop.pipeline.RowProducer;
 import org.apache.hop.pipeline.SingleThreadedPipelineExecutor;
 import org.apache.hop.pipeline.TransformWithMappingMeta;
 import org.apache.hop.pipeline.config.PipelineRunConfiguration;
-import org.apache.hop.pipeline.engine.IEngineComponent;
 import org.apache.hop.pipeline.engine.PipelineEngineFactory;
 import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
 import org.apache.hop.pipeline.engines.local.LocalPipelineRunConfiguration;
@@ -122,7 +120,13 @@ public class SimpleMapping extends BaseTransform<SimpleMappingMeta, SimpleMappin
   }
 
   public void prepareMappingExecution() throws HopException {
-    if (data.isBeamContext()) {
+    boolean singleThreaded =
+        data.isBeamContext()
+            || (getPipeline() != null
+                && getPipeline().getPipelineMeta() != null
+                && getPipeline().getPipelineMeta().getPipelineType()
+                    == PipelineMeta.PipelineType.SingleThreaded);
+    if (singleThreaded) {
       data.mappingPipelineMeta.setPipelineType(PipelineMeta.PipelineType.SingleThreaded);
     }
     SimpleMappingData simpleMappingData = getData();
@@ -158,7 +162,10 @@ public class SimpleMapping extends BaseTransform<SimpleMappingMeta, SimpleMappin
       simpleMappingData.mappingPipeline =
           (LocalPipelineEngine)
               PipelineEngineFactory.createPipelineEngine(
-                  this, runConfigName, metadataProvider, simpleMappingData.mappingPipelineMeta);
+                  getPipeline(),
+                  runConfigName,
+                  metadataProvider,
+                  simpleMappingData.mappingPipelineMeta);
     }
 
     // Copy the parameters over...
@@ -236,29 +243,11 @@ public class SimpleMapping extends BaseTransform<SimpleMappingMeta, SimpleMappin
   }
 
   public static List<MappingInput> findMappingInputs(Pipeline mappingPipeline) {
-    List<MappingInput> list = new ArrayList<>();
-
-    List<IEngineComponent> components = mappingPipeline.getComponents();
-    for (IEngineComponent component : components) {
-      if (component instanceof MappingInput mappingInput) {
-        list.add(mappingInput);
-      }
-    }
-
-    return list;
+    return MappingTransforms.findMappingInputs(mappingPipeline);
   }
 
   private List<MappingOutput> findMappingOutputs(Pipeline mappingPipeline) {
-    List<MappingOutput> list = new ArrayList<>();
-
-    List<IEngineComponent> components = mappingPipeline.getComponents();
-    for (IEngineComponent component : components) {
-      if (component instanceof MappingOutput mappingOutput) {
-        list.add(mappingOutput);
-      }
-    }
-
-    return list;
+    return MappingTransforms.findMappingOutputs(mappingPipeline);
   }
 
   @Override
@@ -283,7 +272,13 @@ public class SimpleMapping extends BaseTransform<SimpleMappingMeta, SimpleMappin
           // We don't want to process one-row batches in a parallel engine where we need to wait for
           // the threads to finish.
           //
-          if (data.isBeamContext()) {
+          boolean singleThreaded =
+              data.isBeamContext()
+                  || (getPipeline() != null
+                      && getPipeline().getPipelineMeta() != null
+                      && getPipeline().getPipelineMeta().getPipelineType()
+                          == PipelineMeta.PipelineType.SingleThreaded);
+          if (singleThreaded) {
             data.executor = new SingleThreadedPipelineExecutor(data.mappingPipeline);
           }
 
@@ -294,8 +289,17 @@ public class SimpleMapping extends BaseTransform<SimpleMappingMeta, SimpleMappin
           return false;
         }
       } catch (Exception e) {
-        logError("Unable to load the mapping pipeline because of an error : " + e.toString());
+        // Include resolved path + PROJECT_HOME so Spark executors surface the real cause
+        // (missing package file, wrong PROJECT_HOME) instead of only a later dispose() NPE.
+        logError(
+            "Unable to load the mapping pipeline '"
+                + resolve(meta.getFilename())
+                + "' (PROJECT_HOME="
+                + getVariable("PROJECT_HOME")
+                + "): "
+                + e);
         logError(Const.getStackTracker(e));
+        setErrors(1);
       }
     }
     return false;
@@ -303,33 +307,37 @@ public class SimpleMapping extends BaseTransform<SimpleMappingMeta, SimpleMappin
 
   @Override
   public void dispose() {
-    if (data.isBeamContext()) {
-      try {
-        data.executor.dispose();
-      } catch (Exception e) {
-        logError("Error calling dispose() on single threaded Simple Mapping executor", e);
-        setErrors(1);
+    // mappingPipeline is null when init() failed before prepareMappingExecution completed
+    // (e.g. child .hpl not found). Pipeline.prepareExecution still calls dispose() on every
+    // transform — must not NPE and mask the original init error.
+    try {
+      if (data.executor != null) {
+        try {
+          data.executor.dispose();
+        } catch (Exception e) {
+          logError("Error calling dispose() on single threaded Simple Mapping executor", e);
+          setErrors(1);
+        }
+      } else if (data.mappingPipeline != null) {
+        // Close the running pipeline
+        if (data.wasStarted && !data.mappingPipeline.isFinished()) {
+          // Wait until the child pipeline has finished.
+          data.mappingPipeline.waitUntilFinished();
+        }
+        // See if there was an error in the sub-pipeline, in that case, flag error etc.
+        if (data.mappingPipeline.getErrors() > 0) {
+          logError(BaseMessages.getString(PKG, "SimpleMapping.Log.ErrorOccurredInSubPipeline"));
+          setErrors(1);
+        }
       }
-    } else {
-      // Close the running pipeline
-      if (data.wasStarted && !data.mappingPipeline.isFinished()) {
-        // Wait until the child pipeline has finished.
-        data.mappingPipeline.waitUntilFinished();
-      }
+    } finally {
+      super.dispose();
     }
-
-    // See if there was an error in the sub-pipeline, in that case, flag error etc.
-    if (getData().mappingPipeline.getErrors() > 0) {
-      logError(BaseMessages.getString(PKG, "SimpleMapping.Log.ErrorOccurredInSubPipeline"));
-      setErrors(1);
-    }
-
-    super.dispose();
   }
 
   @Override
   public void batchComplete() throws HopException {
-    if (data.isBeamContext()) {
+    if (data.executor != null) {
       // Execute all transforms single-threaded, one after the other.
       // This way input rows can end up in the mapping output transform.
       //

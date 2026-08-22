@@ -46,6 +46,7 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     image = "standardizephonenumber.svg",
     name = "i18n::StandardizePhoneNumber.Name",
     description = "i18n::StandardizePhoneNumber.Description",
+    keywords = "phone,number,standardize,libphonenumber,format",
     categoryDescription =
         "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.DataQuality",
     documentationUrl = "/pipeline/transforms/standardizephonenumber.html")
@@ -72,19 +73,6 @@ public class StandardizePhoneNumberMeta
 
   public StandardizePhoneNumberMeta() {
     super();
-  }
-
-  public StandardizePhoneNumberMeta(StandardizePhoneNumberMeta meta) {
-    super();
-
-    for (StandardizePhoneField field : meta.getFields()) {
-      fields.add(new StandardizePhoneField(field));
-    }
-  }
-
-  @Override
-  public Object clone() {
-    return new StandardizePhoneNumberMeta(this);
   }
 
   @Override

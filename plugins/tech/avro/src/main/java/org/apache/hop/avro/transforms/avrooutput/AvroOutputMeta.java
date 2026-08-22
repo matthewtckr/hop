@@ -401,17 +401,6 @@ public class AvroOutputMeta extends BaseTransformMeta<AvroOutput, AvroOutputData
   }
 
   @Override
-  public Object clone() {
-    AvroOutputMeta retval = new AvroOutputMeta();
-
-    for (AvroOutputField field : outputFields) {
-      retval.getOutputFields().add(new AvroOutputField(field));
-    }
-
-    return retval;
-  }
-
-  @Override
   public void setDefault() {
     createParentFolder = true; // Default createparentfolder to true
     createSchemaFile = false;
@@ -513,10 +502,10 @@ public class AvroOutputMeta extends BaseTransformMeta<AvroOutput, AvroOutputData
       boolean errorFound = false;
 
       // Starting from selected fields in ...
-      for (int i = 0; i < outputFields.size(); i++) {
-        int idx = prev.indexOfValue(outputFields.get(i).getName());
+      for (AvroOutputField outputField : outputFields) {
+        int idx = prev.indexOfValue(outputField.getName());
         if (idx < 0) {
-          errorMessage += "\t\t" + outputFields.get(i).getName() + Const.CR;
+          errorMessage += "\t\t" + outputField.getName() + Const.CR;
           errorFound = true;
         }
       }

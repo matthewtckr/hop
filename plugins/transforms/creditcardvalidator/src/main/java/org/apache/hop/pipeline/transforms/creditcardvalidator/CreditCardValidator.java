@@ -101,7 +101,7 @@ public class CreditCardValidator
         fieldValue = Const.getDigitsOnly(fieldValue);
       }
 
-      ReturnIndicator rt = CreditCardVerifier.CheckCC(fieldValue);
+      ReturnIndicator rt = CreditCardVerifier.checkCC(fieldValue);
 
       // Check if Card is Valid?
       isValid = rt.CardValid;
@@ -136,7 +136,7 @@ public class CreditCardValidator
             BaseMessages.getString(
                 PKG,
                 "CreditCardValidator.LineNumber",
-                getLinesRead() + " : " + getInputRowMeta().getString(row)));
+                getLinesRead() + " : " + data.outputRowMeta.getString(outputRow)));
       }
 
     } catch (Exception e) {

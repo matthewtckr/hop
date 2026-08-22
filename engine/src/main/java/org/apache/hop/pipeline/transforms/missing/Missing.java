@@ -17,31 +17,35 @@
 
 package org.apache.hop.pipeline.transforms.missing;
 
+import java.util.ArrayList;
+import java.util.List;
+import lombok.Getter;
+import lombok.Setter;
+import org.apache.hop.metadata.api.IMissingPlugin;
 import org.apache.hop.pipeline.transform.BaseTransformMeta;
 
-public class Missing extends BaseTransformMeta<MissingTransform, MissingData> {
-
+/**
+ * Stands in for a transform whose plugin isn't installed. It keeps the XML of the original
+ * transform untouched so that opening and saving the pipeline doesn't destroy the configuration of
+ * that transform.
+ */
+@Getter
+@Setter
+public class Missing extends BaseTransformMeta<MissingTransform, MissingData>
+    implements IMissingPlugin {
   private String transformName;
   private String missingPluginId;
+  private List<String> preservedXml = new ArrayList<>();
 
   public Missing(String transformName, String missingPluginId) {
     this.transformName = transformName;
     this.missingPluginId = missingPluginId;
   }
 
-  public String getTransformName() {
-    return transformName;
-  }
-
-  public void setTransformName(String transformName) {
-    this.transformName = transformName;
-  }
-
-  public String getMissingPluginId() {
-    return missingPluginId;
-  }
-
-  public void setMissingPluginId(String missingPluginId) {
-    this.missingPluginId = missingPluginId;
+  @Override
+  public Object clone() {
+    Missing clone = (Missing) super.clone();
+    clone.preservedXml = new ArrayList<>(preservedXml);
+    return clone;
   }
 }

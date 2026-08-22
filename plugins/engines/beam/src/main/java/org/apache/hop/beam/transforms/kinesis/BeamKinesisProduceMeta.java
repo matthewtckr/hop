@@ -17,7 +17,6 @@
 
 package org.apache.hop.beam.transforms.kinesis;
 
-import com.amazonaws.regions.Regions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -47,7 +46,8 @@ import org.apache.hop.pipeline.transforms.dummy.DummyData;
     image = "beam-kinesis-produce.svg",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.BigData",
     keywords = "i18n::BeamKinesisProduceMeta.keyword",
-    documentationUrl = "/pipeline/transforms/beamkinesisproduce.html")
+    documentationUrl = "/pipeline/transforms/beamkinesisproduce.html",
+    supportedEngines = {"Beam*"})
 public class BeamKinesisProduceMeta extends BaseTransformMeta<BeamKinesisProduce, DummyData>
     implements IBeamPipelineTransformHandler {
 
@@ -146,7 +146,7 @@ public class BeamKinesisProduceMeta extends BaseTransformMeta<BeamKinesisProduce
             JsonRowMeta.toJson(rowMeta),
             variables.resolve(accessKey),
             variables.resolve(secretKey),
-            Regions.DEFAULT_REGION,
+            "us-east-1",
             variables.resolve(streamName),
             dataFieldName,
             variables.resolve(dataType),

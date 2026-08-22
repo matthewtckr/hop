@@ -23,11 +23,18 @@ import java.sql.ResultSetMetaData;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
+import org.apache.hop.core.database.types.ColumnTypeRules;
+import org.apache.hop.core.database.types.DatabaseTypes;
+import org.apache.hop.core.database.types.IDatabaseTypeRule;
 import org.apache.hop.core.exception.HopDatabaseException;
 import org.apache.hop.core.gui.plugin.GuiElementType;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
@@ -48,6 +55,21 @@ import org.apache.hop.metadata.api.IHopMetadataProvider;
     classLoaderGroup = "mysql-db")
 @GuiPlugin(id = "GUI-MySQLDatabaseMeta")
 public class MySqlDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  private static final List<IDatabaseTypeRule> TYPE_RULES =
+      DatabaseTypes.rules()
+          // MySQL has a JSON type. It has no UUID and no address type, and both of those fall
+          // back to text on their own.
+          .write(IValueMeta.TYPE_JSON)
+          .as("JSON")
+          .include(ColumnTypeRules.MYSQL_COMPATIBLE)
+          .build();
+
+  @Override
+  public List<IDatabaseTypeRule> getTypeRules() {
+    return TYPE_RULES;
+  }
+
   private static final Class<?> PKG = MySqlDatabaseMeta.class;
   public static final String CONST_MYSQL_8 = "Mysql 8+";
 
@@ -59,6 +81,8 @@ public class MySqlDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
       label = "i18n:org.apache.hop.ui.core.database:DatabaseDialog.label.MySQLStreamResults")
   private boolean resultStreaming;
 
+  @Getter
+  @Setter
   @GuiWidgetElement(
       id = "mySqlDriverClass",
       order = "20",
@@ -150,22 +174,30 @@ public class MySqlDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   @Override
   public String getDriverClass() {
 
-    switch (driverClassName) {
-      case "Mysql":
-        return "org.gjt.mm.mysql.Driver";
-      case CONST_MYSQL_8:
-        return "com.mysql.cj.jdbc.Driver";
-      default:
-        return "com.mysql.cj.jdbc.Driver";
+    return switch (driverClassName) {
+      case "Mysql" -> "org.gjt.mm.mysql.Driver";
+      case CONST_MYSQL_8 -> "com.mysql.cj.jdbc.Driver";
+      default -> "com.mysql.cj.jdbc.Driver";
+    };
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    // Only offer MySQL Connector/J for databases that actually use it (Doris, Infobright, ...).
+    String driverClass = getDriverClass();
+    if (driverClass == null || !driverClass.contains("mysql")) {
+      return null;
     }
-  }
-
-  public String getDriverClassName() {
-    return driverClassName;
-  }
-
-  public void setDriverClassName(String driverClassName) {
-    this.driverClassName = driverClassName;
+    return DriverDownload.builder()
+        .mavenCoordinate("com.mysql:mysql-connector-j")
+        .defaultVersion("9.7.0")
+        .licenseCategory("X")
+        .licenseName("GPLv2 with Universal FOSS Exception")
+        .licenseUrl("https://github.com/mysql/mysql-connector-j/blob/release/9.x/LICENSE")
+        .vendor("Oracle / MySQL")
+        .vendorUrl("https://dev.mysql.com/downloads/connector/j/")
+        .excludes(List.of("com.google.protobuf:protobuf-java"))
+        .build();
   }
 
   @Override
@@ -228,14 +260,6 @@ public class MySqlDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   }
 
   /**
-   * @return true if the database supports a boolean, bit, logical
-   */
-  @Override
-  public boolean isSupportsBooleanDataType() {
-    return true;
-  }
-
-  /**
    * Generates the SQL statement to add a column to the specified table
    *
    * @param tableName The table to add
@@ -252,7 +276,7 @@ public class MySqlDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -272,7 +296,8 @@ public class MySqlDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " MODIFY "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -730,6 +755,8 @@ public class MySqlDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     addExtraOption(getPluginId(), "defaultFetchSize", "500");
     addExtraOption(getPluginId(), "useCursorFetch", "true");
     addExtraOption(getPluginId(), "zeroDateTimeBehaviorValue", "CONVERT_TO_NULL");
+    setSupportsTimestampDataType(true);
+    setSupportsBooleanDataType(true);
   }
 
   @Override
@@ -795,10 +822,5 @@ public class MySqlDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     names.add(CONST_MYSQL_8);
     names.add("Mysql");
     return names;
-  }
-
-  @Override
-  public boolean isSupportsTimestampDataType() {
-    return true;
   }
 }

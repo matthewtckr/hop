@@ -36,6 +36,7 @@ import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.engine.EngineComponent;
 import org.apache.hop.pipeline.transform.IRowListener;
+import org.apache.hop.pipeline.transform.IRowToListener;
 import org.apache.hop.pipeline.transform.ITransform;
 import org.apache.hop.pipeline.transform.ITransformData;
 import org.apache.hop.pipeline.transform.ITransformFinishedListener;
@@ -60,6 +61,11 @@ public class ScriptValuesDummy implements ITransform {
 
   @Override
   public void addRowListener(IRowListener rowListener) {
+    // Do nothing
+  }
+
+  @Override
+  public void addRowToListener(IRowToListener rowToListener) {
     // Do nothing
   }
 
@@ -91,6 +97,21 @@ public class ScriptValuesDummy implements ITransform {
   @Override
   public long getLinesRead() {
     return 0;
+  }
+
+  @Override
+  public Long getDataVolume() {
+    return null;
+  }
+
+  @Override
+  public Long getDataVolumeIn() {
+    return null;
+  }
+
+  @Override
+  public Long getDataVolumeOut() {
+    return null;
   }
 
   @Override
@@ -129,6 +150,11 @@ public class ScriptValuesDummy implements ITransform {
 
   @Override
   public List<IRowListener> getRowListeners() {
+    return null;
+  }
+
+  @Override
+  public List<IRowToListener> getRowToListeners() {
     return null;
   }
 
@@ -192,6 +218,11 @@ public class ScriptValuesDummy implements ITransform {
 
   @Override
   public void removeRowListener(IRowListener rowListener) {
+    // Do nothing
+  }
+
+  @Override
+  public void removeRowToListener(IRowToListener rowToListener) {
     // Do nothing
   }
 

@@ -42,6 +42,7 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     image = "google-sheets-input.svg",
     name = "i18n::GoogleSheetsInput.transform.Name",
     description = "i18n::GoogleSheetsInput.transform.Name",
+    keywords = "google,sheets,spreadsheet,gsheet,read",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Input",
     documentationUrl = "/pipeline/transforms/google-sheets-input.html")
 public class GoogleSheetsInputMeta
@@ -185,9 +186,7 @@ public class GoogleSheetsInputMeta
       throws HopTransformException {
     try {
       rowMeta.clear(); // Start with a clean slate, eats the input
-      for (int i = 0; i < inputFields.size(); i++) {
-        GoogleSheetsInputField field = inputFields.get(i);
-
+      for (GoogleSheetsInputField field : inputFields) {
         int type = field.getType();
         if (type == IValueMeta.TYPE_NONE) {
           type = IValueMeta.TYPE_STRING;

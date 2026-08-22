@@ -29,6 +29,13 @@ Apache Hop makes fervent usage of VFS.
 Beyond the standard VFS file system types, we have added a number which are present in the various technology stacks supported by Hop.
 Like the standard file systems each has its own unique name scheme which you can use.
 
+[IMPORTANT]
+====
+**Native Spark** Dataset I/O (*Spark file input/output*, Lake Table PATH) does *not* use Hop VFS.
+Those transforms expect **Spark/Hadoop URIs** (for example `s3a://`, `hdfs://`, `file:///`), which are a different dialect from Hop schemes such as `s3://` or named MinIO connections.
+See xref:pipeline/spark/paths-and-filesystems.adoc[Paths and file systems on native Spark].
+====
+
 == Apache Hop VFS File Systems
 
 The table below provides a quick overview of the VFS file systems supported by Apache Hop.
@@ -38,10 +45,13 @@ Click the File system name to access more detailed file system documentation.
 |===
 |File System|Description|URI Format
 |xref:vfs/aws-s3-vfs.adoc[AWS S3]|Provides access to Amazon S3 Buckets|`s3://`
-|xref:vfs/azure-blob-storage-vfs.adoc[Azure Blob Storage]|Provides access to Azure Blob Storage|`azure://`
+|xref:vfs/azure-blob-storage-vfs.adoc[Azure Blob Storage]|Provides access to Azure Blob Storage|`azure://` (alias: `azfs://`)
+|xref:vfs/databricks-vfs.adoc[Databricks Volumes / Workspace]|UC Volumes and Workspace files via Files API; scheme from xref:metadata-types/databricks-vfs-connection.adoc[Databricks VFS Connection]|`+<vfsName>:///Volumes/…+` or `+…/Workspace/…+`
 |xref:vfs/dropbox-vfs.adoc[Dropbox]|Provides access to Dropbox|`dropbox://`
 |xref:vfs/google-cloud-storage-vfs.adoc[Google Cloud Storage]|Provides access to Google Cloud Storage buckets|`gs://`
 |xref:vfs/google-drive-vfs.adoc[Google Drive]|Provides access to Google Drive folders|`googledrive://`
+|xref:metadata-types/minio-connection.adoc[Minio connection]|Provides access to S3-compatible endpoints via a named Minio connection (metadata)|`+<connectionName>://+`
+|xref:metadata-types/webdav-connection.adoc[WebDAV Connection]|Provides access to WebDAV servers, either via the static schemes or a named connection (metadata)|`webdav4://`, `webdav4s://`, or `+<connectionName>://+`
 |===
 
 == Apache VFS File System Types
@@ -70,17 +80,13 @@ Examples
 
 * `+gz:/my/gz/file.gz+`
 
-//
-// CIFS
-//
-|CIFS*||
 |File|Provides access to the files on the local physical file system.
 a|URI Format
 
 `+[file://] absolute-path+`
 
 Where `absolute-path` is a valid absolute file name for the local platform.
-UNC names are supported under Windows.
+UNC paths are accepted by Apache VFS, but are not reliably supported in Hop — see <<windows-unc-paths, Windows UNC paths>>.
 
 Examples
 
@@ -98,7 +104,7 @@ Examples
 |FTP|Provides access to the files on an FTP server.
 a|URI Format
 
-`+tp://[ username[: password]@] hostname[: port][ relative-path]+`
+`+ftp://[ username[: password]@] hostname[: port][ relative-path]+`
 
 Examples
 
@@ -125,21 +131,6 @@ Examples
 // GZIP
 //
 |GZIP|see 'bzip2'|
-//
-// HDFS
-//
-|HDFS|Provides access to files in an Apache Hadoop File System (HDFS).
-On Windows the integration test is disabled by default, as it requires binaries.
-a|
-URI Format
-
-`+hdfs:// hostname[: port][ absolute-path]+`
-
-Examples
-
-* `+hdfs://somehost:8080/downloads/some_dir+`
-* `+hdfs://somehost:8080/downloads/some_file.ext+`
-
 //
 // HTTP
 //
@@ -174,6 +165,7 @@ Examples
 // Jar, Zip and Tar
 //
 |Jar, Zip and Tar|Provides read-only access to the contents of Zip, Jar and Tar files.
+The `jar` provider is also registered under the `war`, `par`, `ear`, `sar`, and `ejb3` schemes for convenience when working with Java EE archive types.
 a|
 URI Format
 
@@ -201,23 +193,6 @@ Examples
 * `+tgz:file://anyhost/dir/mytar.tgz!/somepath/somefile+`
 
 //
-// mime
-//
-|mime*|This (sandbox) filesystem can read mails and its attachements like archives.
-If a part in the parsed mail has no name, a dummy name will be generated.
-The dummy name is: _body_part_X where X will be replaced by the part number.
-a|
-URI Format
-
-`+mime:// mime-file-uri[! absolute-path]+`
-
-Examples
-
-* `+mime:file:///your/path/mail/anymail.mime!/+`
-* `+mime:file:///your/path/mail/anymail.mime!/filename.pdf+`
-* `+mime:file:///your/path/mail/anymail.mime!/_body_part_0+`
-
-//
 // RAM
 //
 |RAM|A filesystem which stores all the data in memory (one byte array for each file content).
@@ -233,19 +208,6 @@ File System Options
 Examples
 
 * `+ram:///any/path/to/file.txt+`
-
-//
-// RES
-//
-|RES|This is not really a filesystem, it just tries to lookup a resource using javas ClassLoader.getResource() and creates a VFS url for further processing.
-a|
-URI Format
-
-`+res://[ path]+`
-
-Examples
-
-* `+res://path/in/classpath/image.png` might result in `jar:file://my/path/to/images.jar!/path/in/classpath/image.png+`
 
 //
 // SFTP
@@ -285,11 +247,12 @@ Examples
 //
 // WebDAV
 //
-|WebDAV|Provides access to files on a WebDAV server through the modules `commons-vfs2-jackrabbit1` and `commons-vfs2-jackrabbit2`.
+|WebDAV|Provides access through `commons-vfs2-jackrabbit2`. Hop registers providers in link:https://github.com/apache/hop/blob/main/core/src/main/java/org/apache/hop/core/vfs/HopVfs.java[HopVfs.java].
 a|
-URI Format
+URI Format — Apache Commons VFS 2 schemes (not legacy `webdav://`):
 
-`+webdav://[ username[: password]@] hostname[: port][ absolute-path]+`
+* `+webdav4://[ username[: password]@] hostname[: port][ absolute-path]+` (HTTP)
+* `+webdav4s://[ username[: password]@] hostname[: port][ absolute-path]+` (HTTPS)
 
 File System Options
 
@@ -299,7 +262,8 @@ If not set the user name used to authenticate will be used.
 
 Examples
 
-* `+webdav://somehost:8080/dist+`
+* `+webdav4://someuser@somehost:8080/remote.php/dav/files/someuser/+`
+* `+webdav4s://someuser@cloud.example.com/remote.php/dav/files/someuser/+`
 
 //
 // Zip
@@ -307,4 +271,58 @@ Examples
 |Zip|see 'jar'|
 |===
 
-*) VFS file system type in development
+[#windows-unc-paths]
+== Windows UNC paths
+
+The table above describes the file system types provided by Apache VFS itself.
+Apache VFS accepts UNC paths such as `+file://///somehost/someshare/afile.txt+`, but **UNC paths are not reliably supported in Hop**.
+They work in some cases and fail in others, and which transforms work is not predictable: the same file may be readable through one transform and not another, because different transforms reach the file system by different routes.
+
+WARNING: Do not rely on UNC paths in pipelines or workflows you intend to run unattended.
+
+Use a mounted drive or folder instead, and point Hop at the mount:
+
+* On Windows, map the share to a drive letter and use that letter, for example `+file:///Z:/somedir/afile.txt+`.
+* On Linux and macOS, mount the share and use the local path, for example `+file:///mnt/someshare/afile.txt+`.
+
+Referring to the mount through a variable keeps the pipeline portable across operating systems:
+
+[source]
+----
+# Windows
+NETWORK_PATH=Z:
+# Linux, macOS
+NETWORK_PATH=/mnt/someshare
+----
+
+== Supported operations
+
+The matrix below shows which operations each registered provider exposes, taken from the capability set each provider declares in code.
+Capabilities can drift between commons-vfs2 releases, so the authoritative reference is the `capabilities` collection on each `FileProvider` / `FileSystem` class (in `commons-vfs2` for the standard providers, and in `plugins/tech/<plugin>` for the Hop-managed ones).
+A ✓ means the capability is declared by the provider; ✗ means it isn't.
+Server-side restrictions (read-only mounts, bucket policies, account permissions, ...) can still block individual operations at runtime.
+
+[options="header",cols="2,1,1,1,1,1,1,1,1,1"]
+|===
+|Scheme|Read|Write|Append|List|Create/Delete|Rename|Random read|Random write|Last-modified
+
+// Hop-managed providers
+|`s3`               |✓|✓|✗|✓|✓|✓|✓|✗|read
+|`azure`            |✓|✓|✗|✓|✓|✓|✗|✗|read
+|`gs`               |✓|✓|✗|✓|✓|✗|✗|✗|read/set
+|`googledrive`      |✓|✓|✗|✓|✓|✓|✓|✗|read
+|`dropbox`          |✓|✓|✗|✓|✓|✓|✗|✗|read
+|`+<minio-conn>+`   |✓|✓|✗|✓|✓|✓|✓|✗|read
+|`webdav4`, `webdav4s`, named WebDAV connection |✓|✓|✗|✓|✓|✓|✓|✗|read
+
+// Apache VFS providers
+|`file`, `tmp`, `files-cache` |✓|✓|✓|✓|✓|✓|✓|✓|read/set
+|`ram`              |✓|✓|✓|✓|✓|✓|✓|✓|read/set
+|`zip`              |✓|✗|✗|✓|✗|✗|✗|✗|read
+|`jar` (and `war`/`par`/`ear`/`sar`/`ejb3`) |✓|✗|✗|✓|✗|✗|✗|✗|read
+|`tar` (and `tbz2`/`tgz`) |✓|✗|✗|✓|✗|✗|✗|✗|read
+|`gz`, `bz2`        |✓|✓|✗|✓|✗|✗|✗|✗|read
+|`http`, `https`    |✓|✗|✗|✗|✗|✗|✓|✗|read
+|`ftp`, `ftps`      |✓|✓|✓|✓|✓|✓|✓|✗|read
+|`sftp`             |✓|✓|✓|✓|✓|✓|✓|✗|read/set
+|===

@@ -21,13 +21,15 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.Objects;
 import lombok.Getter;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.extension.ExtensionPointHandler;
 import org.apache.hop.core.extension.HopExtensionPoint;
 import org.apache.hop.core.plugins.IPlugin;
 import org.apache.hop.core.plugins.PluginRegistry;
+import org.apache.hop.core.security.HopSecurity;
+import org.apache.hop.core.security.Permission;
 import org.apache.hop.core.util.TranslateUtil;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.i18n.BaseMessages;
@@ -40,6 +42,7 @@ import org.apache.hop.ui.core.bus.HopGuiEvents;
 import org.apache.hop.ui.core.dialog.ErrorDialog;
 import org.apache.hop.ui.core.dialog.MessageBox;
 import org.apache.hop.ui.core.gui.GuiResource;
+import org.apache.hop.ui.core.security.HopSecurityUi;
 import org.apache.hop.ui.hopgui.HopGui;
 import org.apache.hop.ui.hopgui.perspective.metadata.MetadataPerspective;
 import org.apache.hop.ui.util.HelpUtils;
@@ -57,7 +60,7 @@ public abstract class MetadataEditor<T extends IHopMetadata> extends MetadataFil
   private static final Class<?> PKG = MetadataEditorDialog.class;
 
   @Getter protected HopGui hopGui;
-  protected MetadataManager<T> manager;
+  @Getter protected MetadataManager<T> manager;
   protected T metadata;
 
   protected String title;
@@ -103,6 +106,17 @@ public abstract class MetadataEditor<T extends IHopMetadata> extends MetadataFil
             annotation.image(),
             ConstUi.LARGE_ICON_SIZE,
             ConstUi.LARGE_ICON_SIZE));
+  }
+
+  /**
+   * Mark this editor as creating a brand-new metadata object that has not been persisted yet.
+   *
+   * <p>Create-before-dialog hooks may suggest a default name on the object. That suggested name
+   * must not be treated as an existing persisted identity: changing it must create a new object,
+   * not rename (and delete) another metadata entry that already uses the suggested name.
+   */
+  public void markAsNew() {
+    this.originalName = null;
   }
 
   @Override
@@ -195,15 +209,25 @@ public abstract class MetadataEditor<T extends IHopMetadata> extends MetadataFil
 
   @Override
   public void setChanged() {
+    // Do not mark dirty when the user cannot write metadata (read-only editor)
+    if (!HopSecurity.allows(Permission.METADATA_WRITE)) {
+      return;
+    }
     if (!this.isChanged) {
       this.isChanged = true;
+      // Update tab decoration and toolbar only. Do not fire MetadataChanged and do not reload
+      // the metadata tree: dirty is not a persisted store change (see issue #7791).
       MetadataPerspective.getInstance().updateEditor(this);
-      try {
-        hopGui.getEventsHandler().fire(HopGuiEvents.MetadataChanged.name());
-      } catch (HopException e) {
-        throw new RuntimeException(e);
-      }
     }
+  }
+
+  /**
+   * Called when the metadata modal dialog or metadata perspective tab becomes active again, so
+   * editors can reload metadata-backed combo items (e.g. execution information locations) that may
+   * have changed while the window was in the background.
+   */
+  public void refreshOnDialogActivate() {
+    // default: no-op
   }
 
   /** Inline usage: copy information from the metadata onto the various widgets */
@@ -253,6 +277,9 @@ public abstract class MetadataEditor<T extends IHopMetadata> extends MetadataFil
 
   @Override
   public void save() throws HopException {
+    if (!HopSecurityUi.check(Permission.METADATA_WRITE)) {
+      return;
+    }
 
     getWidgetsContent(metadata);
     String name = metadata.getName();
@@ -273,10 +300,15 @@ public abstract class MetadataEditor<T extends IHopMetadata> extends MetadataFil
     IHopMetadataSerializer<T> serializer = manager.getSerializer();
 
     if (StringUtils.isEmpty(originalName)) {
+      // New object (including create dialog with a suggested default name via markAsNew())
       isCreated = true;
+      if (serializer.exists(name)) {
+        throw new HopException(
+            BaseMessages.getString(PKG, "MetadataEditor.Error.NameAlreadyExists", name));
+      }
     }
 
-    // If rename
+    // If rename of an already-persisted object
     //
     else if (!originalName.equals(name)) {
 
@@ -317,10 +349,22 @@ public abstract class MetadataEditor<T extends IHopMetadata> extends MetadataFil
       if (serializer.exists(originalName)) {
         serializer.delete(originalName);
       }
+      // Run global replace in pipelines/workflows if supported (same logic as rename from tree)
+      String objectKey = manager.getManagedClass().getAnnotation(HopMetadata.class).key();
+      MetadataPerspective.getInstance()
+          .performGlobalReplaceIfSupported(objectKey, originalName, name);
+    }
+
+    // After a successful create or rename, the persisted identity is the current name
+    if (isCreated || isRename) {
       this.originalName = metadata.getName();
     }
 
     MetadataPerspective.getInstance().updateEditor(this);
+
+    // Notify the GUI that the metadata store changed (tree refresh, plugins). Fire only after a
+    // successful persist — not when the editor is merely marked dirty (issue #7791).
+    hopGui.getEventsHandler().fire(HopGuiEvents.MetadataChanged.name());
   }
 
   @Override

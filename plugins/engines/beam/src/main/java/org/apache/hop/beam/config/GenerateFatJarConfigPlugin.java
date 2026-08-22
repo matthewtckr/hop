@@ -17,8 +17,9 @@
 
 package org.apache.hop.beam.config;
 
+import java.io.File;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.beam.gui.HopBeamGuiPlugin;
 import org.apache.hop.beam.pipeline.fatjar.FatJarBuilder;
 import org.apache.hop.core.config.plugin.ConfigPlugin;
@@ -40,6 +41,16 @@ public class GenerateFatJarConfigPlugin implements IConfigOptions {
           "Specify the filename of the fat jar to generate from your current software installation")
   private String fatJarFilename;
 
+  @CommandLine.Option(
+      names = {"-scv", "--spark-client-version"},
+      description =
+          "Spark client pack version to embed (directory lib/spark-clients/<version>), "
+              + "or special tokens: 'native' (embed Spark 4 from plugins/engines/spark/lib for hop-run), "
+              + "'native-provided' (exclude Spark/Scala — use with spark-submit; cluster provides Spark). "
+              + "When omitted, uses HOP_SPARK_CLIENT_VERSION or the default pack at lib/spark-client. "
+              + "For Beam packs, client and Spark cluster minor versions must match for client-mode submit.")
+  private String sparkClientVersion;
+
   @Override
   public boolean handleOption(
       ILogChannel log, IHasHopMetadataProvider hasHopMetadataProvider, IVariables variables)
@@ -60,7 +71,58 @@ public class GenerateFatJarConfigPlugin implements IConfigOptions {
     String realFatJarFilename = variables.resolve(fatJarFilename);
     log.logBasic("Generating a Hop fat jar file in : " + realFatJarFilename);
 
-    List<String> installedJarFilenames = HopBeamGuiPlugin.findInstalledJarFilenames();
+    String resolvedSparkClientVersion =
+        HopBeamGuiPlugin.resolveSparkClientVersion(
+            StringUtils.isNotEmpty(sparkClientVersion)
+                ? variables.resolve(sparkClientVersion)
+                : null);
+
+    if (HopBeamGuiPlugin.isNativeSparkClientVersion(resolvedSparkClientVersion)) {
+      boolean provided =
+          HopBeamGuiPlugin.isNativeProvidedSparkClientVersion(resolvedSparkClientVersion);
+      if (provided) {
+        log.logBasic(
+            "Native Spark fat jar mode (native-provided): excluding Beam Spark 3 / Scala 2.12 "
+                + "and all Spark/Scala runtime jars. Use with spark-submit — cluster provides Spark.");
+      } else {
+        log.logBasic(
+            "Native Spark 4 fat jar mode (native): excluding Beam Spark 3 client pack and Scala "
+                + "2.12 jars; including plugins/engines/spark/lib (Spark 4.x / Scala 2.13). "
+                + "For spark-submit prefer --spark-client-version=native-provided.");
+      }
+      File nativeSparkPlugin = new File("plugins/engines/spark");
+      if (!nativeSparkPlugin.isDirectory()) {
+        throw new HopException(
+            "Native Spark engine plugin not found at "
+                + nativeSparkPlugin.getPath()
+                + " — install plugins/engines/spark (with lib/) before generating a native fat jar");
+      }
+      File nativeLib = new File(nativeSparkPlugin, "lib");
+      if (!nativeLib.isDirectory() && !provided) {
+        log.logBasic(
+            "WARNING: plugins/engines/spark/lib is missing; fat jar may lack Spark 4 runtime jars");
+      }
+    } else {
+      File packDir = HopBeamGuiPlugin.resolveSparkClientPackDir(resolvedSparkClientVersion);
+      if (StringUtils.isNotBlank(resolvedSparkClientVersion)) {
+        log.logBasic(
+            "Using Spark client pack version "
+                + resolvedSparkClientVersion
+                + " from "
+                + packDir.getPath());
+        if (!packDir.isDirectory()) {
+          throw new HopException(
+              "Spark client pack not found: "
+                  + packDir.getPath()
+                  + " — materialise it with tools/spark-client-pack/materialize-pack.sh");
+        }
+      } else {
+        log.logBasic("Using default Spark client pack from " + packDir.getPath());
+      }
+    }
+
+    List<String> installedJarFilenames =
+        HopBeamGuiPlugin.findInstalledJarFilenames(resolvedSparkClientVersion);
     log.logBasic(
         "Found " + installedJarFilenames.size() + " jar files to combine into one fat jar file.");
 
@@ -87,5 +149,13 @@ public class GenerateFatJarConfigPlugin implements IConfigOptions {
    */
   public void setFatJarFilename(String fatJarFilename) {
     this.fatJarFilename = fatJarFilename;
+  }
+
+  public String getSparkClientVersion() {
+    return sparkClientVersion;
+  }
+
+  public void setSparkClientVersion(String sparkClientVersion) {
+    this.sparkClientVersion = sparkClientVersion;
   }
 }

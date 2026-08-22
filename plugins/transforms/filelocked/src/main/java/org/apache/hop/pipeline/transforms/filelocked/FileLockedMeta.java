@@ -40,7 +40,7 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     image = "filelocked.svg",
     name = "i18n::FileLocked.Name",
     description = "i18n::FileLocked.Description",
-    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Lookup",
+    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Utility",
     keywords = "i18n::FileLockedMeta.keyword",
     documentationUrl = "/pipeline/transforms/checkfilelocked.html")
 public class FileLockedMeta extends BaseTransformMeta<FileLocked, FileLockedData> {
@@ -101,13 +101,6 @@ public class FileLockedMeta extends BaseTransformMeta<FileLocked, FileLockedData
 
   public void setAddresultfilenames(boolean addresultfilenames) {
     this.addresultfilenames = addresultfilenames;
-  }
-
-  @Override
-  public Object clone() {
-    FileLockedMeta retval = (FileLockedMeta) super.clone();
-
-    return retval;
   }
 
   @Override

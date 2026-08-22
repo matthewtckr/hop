@@ -20,7 +20,9 @@ under the License.
 
 = Hop Server
 
-Hop Server is a lightweight server to run workflows and pipelines with the xref:pipeline/pipeline-run-configurations/native-remote-pipeline-engine.adoc[Remote pipeline] or xref:workflow/workflow-run-configurations/native-remote-workflow-engine.adoc[Remote workflow] run configurations.
+Hop Server is a lightweight server to run workflows and pipelines with the xref:pipeline/pipeline-run-configurations/native-remote-pipeline-engine.adoc[Remote pipeline], xref:workflow/workflow-run-configurations/native-remote-workflow-engine.adoc[Remote workflow], or xref:pipeline/pipeline-run-configurations/native-load-balancing-pipeline-engine.adoc[load-balancing] run configurations.
+
+How you get a project onto a Hop Server is covered in xref:hop-server/deploying.adoc[Deploying Hop Server].
 
 == Starting and Stopping Hop Server
 
@@ -39,16 +41,19 @@ On Windows, this is `hop-server.bat`, on Mac and Linux, run `./hop-server.sh`.
 
 [source,bash]
 ----
-Usage: <main class> [-k] [-gs] [-e=<environmentOption>] [-id=<id>]
+Usage: <main class> [-ahV] [-gs] [-e=<environmentOption>] [-id=<id>]
                     [-j=<projectOption>] [-l=<level>] [-n=<serverName>]
                     [-p=<password>] [-ps=<pipelineName>] [-u=<username>]
                     [-ws=<workflowName>] [-s=<systemProperties>[,
                     <systemProperties>...]]... [<parameters>...]
+Run a Hop server
       [<parameters>...]   One XML configuration file or a hostname and port
+  -a, --auth              Does the Hop web server have authentication enabled
   -e, --environment=<environmentOption>
                           The name of the lifecycle environment to use
   -gs, --general-status
                           List the general status of the server
+  -h, --help              Show this help message and exit.
       -id=<id>            Specify the ID of the pipeline or workflow to query
   -j, --project=<projectOption>
                           The name of the project to use
@@ -68,6 +73,7 @@ Usage: <main class> [-k] [-gs] [-e=<environmentOption>] [-id=<id>]
   -u, --userName=<username>
                           The server user name.  Required for administrative
                             operations only, not for starting the server.
+  -V, --version           Print version information and exit.
   -ws, --workflow-status=<workflowName>
                           List the status of the workflow with this name (also
                             specify the -id option)
@@ -83,6 +89,11 @@ The available Hop Server options are:
 |-h
 |--help
 |This help text
+
+|-a
+|--auth
+|Default: true +
+Allows you to disable the authentication needed to access the server
 
 |-p
 |--password
@@ -102,6 +113,7 @@ Specify a comma separated list of KEY=VALUE pairs.
 |-e
 |--environment
 |The name of the project lifecycle environment to enable before startup.
+The project name is taken from that environment, so you do not need `-j` as well.
 This is provided for by the 'projects' plugin.
 
 |-n
@@ -111,6 +123,7 @@ This is provided for by the 'projects' plugin.
 |-j
 |--project
 |The name of the project to enable before startup.
+Not needed when `-e` is set.
 This is provided for by the 'projects' plugin.
 
 |-gs
@@ -128,6 +141,11 @@ This is provided for by the 'projects' plugin.
 |-id
 |
 |Specify the ID of the pipeline or workflow to query
+
+|-swt
+|--shutdown-timeout
+|Default: 0 +
+The maximum number of seconds to wait for running pipelines and workflows to finish when the server shuts down (0 shuts down immediately). Can also be set with the `HOP_SERVER_SHUTDOWN_TIMEOUT` environment variable.
 
 |===
 
@@ -148,7 +166,7 @@ Example: `./hop-server.sh -e aura-gcp gs://apachehop/hop-server-config.xml`
 Example: `hop-server.bat 127.0.0.1 8080 --userName cluster --password cluster`
 
 [source,shell]
-hop-server <Interface address> <Port> [ShutdownPort] [-h] [-p <arg>] [-s] [-u <arg>]
+hop-server <Interface address> <Port> [-h] [-p <arg>] [-s] [-u <arg>]
 
 Example startup commands are:
 
@@ -201,7 +219,6 @@ The syntax of this configuration file is straightforward. Hostname and port are 
     <name>server-8181</name>
     <hostname>localhost</hostname>
     <port>8181</port>
-    <shutdownPort>8182</shutdownPort>
     <webAppName></webAppName>
     <username></username>
     <password></password>
@@ -232,17 +249,21 @@ The syntax of this configuration file is straightforward. Hostname and port are 
   <joining>true</joining>
 
   <!-- The maximum number of log lines kept in memory by the server.
-       The default is 0 which means: keep all lines
+       Leave this at 0 or leave the element out to use the HOP_MAX_LOG_SIZE_IN_LINES variable,
+       which keeps all log lines by default.
    -->
   <max_log_lines>0</max_log_lines>
 
   <!-- The time (in minutes) it takes for a log line to be cleaned up in memory.
-       The default is 0 which means: never clean up log lines
+       Leave this at 0 or leave the element out to use the HOP_MAX_LOG_TIMEOUT_IN_MINUTES variable,
+       which cleans up log lines after 1440 minutes (one day) by default.
   -->
   <max_log_timeout_minutes>1440</max_log_timeout_minutes>
 
-  <!-- The time (in minutes) it takes for a pipeline or workflow execution to be removed from the server status.
-       The default is 0 which means: never clean executions
+  <!-- The time (in minutes) it takes for a finished or stopped pipeline or workflow execution to be
+       removed from the server status.
+       Leave this at 0 or leave the element out to use the HOP_SERVER_OBJECT_TIMEOUT_MINUTES
+       variable, which removes executions after 1440 minutes (one day) by default.
   -->
   <object_timeout_minutes>1440</object_timeout_minutes>
 
@@ -267,6 +288,56 @@ The syntax of this configuration file is straightforward. Hostname and port are 
 
 </hop-server-config>
 ----
+
+==== Cleanup settings and where they come from
+
+`max_log_lines`, `max_log_timeout_minutes` and `object_timeout_minutes` keep the memory use of a
+long running server in check. Each of them is resolved separately, and the first of these that
+supplies a value wins:
+
+. the configuration file, when the element is set to a value larger than 0
+. the matching Java system property, for example `-DHOP_SERVER_OBJECT_TIMEOUT_MINUTES=60`
+. the variable in `hop-config.json`
+. the built-in default
+
+[cols="1,1,1", options="header"]
+|===
+|Configuration element |Variable |Default
+
+|`max_log_lines`
+|`HOP_MAX_LOG_SIZE_IN_LINES`
+|`0`: every log line is kept
+
+|`max_log_timeout_minutes`
+|`HOP_MAX_LOG_TIMEOUT_IN_MINUTES`
+|`1440`: log lines are cleaned up after one day
+
+|`object_timeout_minutes`
+|`HOP_SERVER_OBJECT_TIMEOUT_MINUTES`
+|`1440`: finished and stopped executions are removed from the server status after one day
+|===
+
+A server that is started without a configuration file, or without these elements, therefore keeps
+all of its log lines, cleans them up after a day, and removes finished executions from its status
+after a day. The `Configuration details` section of the status page reports the values the server
+is actually running with.
+
+WARNING: The default keeps *every* log line of *every* execution for a day. A server that runs a lot
+of short executions can run out of memory that way. Set `max_log_lines` to limit this.
+
+[NOTE]
+====
+These three settings are read from Java system properties, not from the environment of the process.
+Setting an environment variable on a container, for example `-e HOP_MAX_LOG_SIZE_IN_LINES=5000`,
+therefore has no effect: the value from `hop-config.json` is used instead. To override them in a
+container, pass them as system properties through `HOP_OPTIONS`:
+
+[source,shell]
+docker run -e HOP_OPTIONS="-Xmx2048m -DHOP_MAX_LOG_SIZE_IN_LINES=5000" ...
+
+Mind that `HOP_OPTIONS` replaces the default `-Xmx2048m`, so repeat the memory settings you need.
+Alternatively, set the elements in the server configuration file, which takes precedence over both.
+====
 
 Example startup commands with a configuration file are: +
 
@@ -419,9 +490,7 @@ Here is an example of how you would start a "long-lived" docker container:
 ----
 docker run \
   -p 8080:8080 \
-  -p 8079:8079 \
   -e HOP_SERVER_PORT=8080 \
-  -e HOP_SERVER_SHUTDOWNPORT=8079 \
   -e HOP_SERVER_USER=username \
   -e HOP_SERVER_PASS=password \
   apache/hop
@@ -429,29 +498,12 @@ docker run \
 
 === Stopping Hop Server
 
-In a testing setup where Hop Server was started from a terminal, the process can be terminated through `CTRL-C`.
+When Hop Server is started from a terminal, the process can be terminated through `CTRL-C`.
 
-In headless environments, the same hop-server command used to start the server can be used to stop it:
-A default listener on shutdown port is configured on port number `8079` when not specifying this in the command it will be used.
+Hop Server registers a JVM shutdown hook, so it also shuts down gracefully when the process receives a `SIGTERM`, for example through `kill <pid>`, `docker stop` or a `systemd` stop.
 
-[tabs]
-====
-Windows::
-+
---
-[source,shell]
-hop-server.bat 127.0.0.1 8080 -k -u cluster -p cluster
---
-
-Linux, macOS::
-+
---
-[source,shell]
- ./hop-server.sh 127.0.0.1 8080 -k -u cluster -p cluster
---
-====
-
-You can also trigger the command on a specific shutdown port
+In headless environments, Hop Server exposes a shutdown servlet on the `/shutdown` path.
+An authenticated `GET` request to that path triggers a graceful shutdown of the server:
 
 [tabs]
 ====
@@ -459,14 +511,43 @@ Windows::
 +
 --
 [source,shell]
-hop-server.bat 127.0.0.1 8080 8079 -k -u cluster -p cluster
+curl -u cluster:cluster http://127.0.0.1:8080/shutdown
 --
 
 Linux, macOS::
 +
 --
 [source,shell]
- ./hop-server.sh 127.0.0.1 8080 8079 -k -u cluster -p cluster
+ curl -u cluster:cluster http://127.0.0.1:8080/shutdown
+--
+====
+
+==== Graceful shutdown
+
+Whichever way a shutdown is triggered (`CTRL-C`, `SIGTERM` or the `/shutdown` servlet), Hop Server shuts down gracefully:
+
+* it immediately stops accepting new work: requests that add or start pipelines, workflows or packages are refused with an HTTP `503 Service Unavailable`, while status requests keep working,
+* the server status reports `Shutting down` (the status XML/JSON contains `shutting_down=Y`), which is useful as a Kubernetes readiness signal,
+* it waits for the running pipelines and workflows to finish before the process exits.
+
+By default the server waits `0` seconds, i.e. it shuts down immediately.
+Use the `--shutdown-timeout` option (or the `HOP_SERVER_SHUTDOWN_TIMEOUT` environment variable) to allow running executions to finish within a maximum number of seconds.
+When the timeout elapses while executions are still running, the server shuts down anyway.
+
+[tabs]
+====
+Windows::
++
+--
+[source,shell]
+hop-server.bat 127.0.0.1 8080 --shutdown-timeout 120
+--
+
+Linux, macOS::
++
+--
+[source,shell]
+ ./hop-server.sh 127.0.0.1 8080 --shutdown-timeout 120
 --
 ====
 

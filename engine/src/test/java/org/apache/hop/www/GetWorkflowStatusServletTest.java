@@ -17,45 +17,51 @@
 
 package org.apache.hop.www;
 
-import static junit.framework.Assert.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletOutputStream;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import javax.servlet.ServletException;
-import javax.servlet.ServletOutputStream;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
 import org.apache.hop.core.gui.Point;
 import org.apache.hop.core.logging.HopLogStore;
 import org.apache.hop.core.logging.ILogChannel;
+import org.apache.hop.core.xml.XmlHandler;
 import org.apache.hop.workflow.Workflow;
 import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.engine.IWorkflowEngine;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.owasp.encoder.Encode;
 
-public class GetWorkflowStatusServletTest {
+class GetWorkflowStatusServletTest {
   private WorkflowMap mockWorkflowMap;
 
   private GetWorkflowStatusServlet getWorkflowStatusServlet;
 
-  @Before
-  public void setup() {
+  @BeforeEach
+  void setup() {
     mockWorkflowMap = mock(WorkflowMap.class);
     getWorkflowStatusServlet = new GetWorkflowStatusServlet(mockWorkflowMap);
   }
 
   @Test
-  public void testGetJobStatusServletEscapesHtmlWhenPipelineNotFound()
+  void testGetJobStatusServletEscapesHtmlWhenPipelineNotFound()
       throws ServletException, IOException {
     HttpServletRequest mockHttpServletRequest = mock(HttpServletRequest.class);
     HttpServletResponse mockHttpServletResponse = mock(HttpServletResponse.class);
@@ -75,8 +81,7 @@ public class GetWorkflowStatusServletTest {
   }
 
   @Test
-  public void testGetJobStatusServletEscapesHtmlWhenPipelineFound()
-      throws ServletException, IOException {
+  void testGetJobStatusServletEscapesHtmlWhenPipelineFound() throws ServletException, IOException {
     HopLogStore.init();
     HttpServletRequest mockHttpServletRequest = mock(HttpServletRequest.class);
     HttpServletResponse mockHttpServletResponse = mock(HttpServletResponse.class);
@@ -101,8 +106,84 @@ public class GetWorkflowStatusServletTest {
     assertFalse(out.toString().contains(ServletTestUtils.BAD_STRING_TO_TEST));
   }
 
+  /**
+   * The workflow status has to report when the workflow started and ended, the way the pipeline
+   * status does. See issue #4052.
+   */
   @Test
-  public void testGetJobStatus() throws ServletException, IOException {
+  void statusReportsExecutionStartAndEndDate() throws ServletException, IOException {
+    Date startDate = new Date(1700000000000L);
+    Date endDate = new Date(1700000012345L);
+
+    String xml = getStatusOutput(startDate, endDate, "Y", null);
+
+    assertTrue(
+        xml.contains("<execution_start_date>" + XmlHandler.date2string(startDate)),
+        "The status should report the start date, was: " + xml);
+    assertTrue(
+        xml.contains("<execution_end_date>" + XmlHandler.date2string(endDate)),
+        "The status should report the end date, was: " + xml);
+  }
+
+  /** The same dates are reported in JSON, which is what the REST API of the server serves. */
+  @Test
+  void jsonStatusReportsExecutionStartAndEndDate() throws ServletException, IOException {
+    Date startDate = new Date(1700000000000L);
+    Date endDate = new Date(1700000012345L);
+
+    String json = getStatusOutput(startDate, endDate, null, "Y");
+
+    assertTrue(json.contains("\"executionStartDate\""), "The JSON should hold the start date");
+    assertTrue(json.contains("\"executionEndDate\""), "The JSON should hold the end date");
+    assertFalse(
+        json.contains("\"executionStartDate\" : null"),
+        "The start date should not be null: " + json);
+    assertFalse(
+        json.contains("\"executionEndDate\" : null"), "The end date should not be null: " + json);
+  }
+
+  /** Runs the servlet for a finished workflow and returns what it wrote to the response. */
+  private String getStatusOutput(Date startDate, Date endDate, String useXml, String useJson)
+      throws ServletException, IOException {
+    HopLogStore.init();
+    HttpServletRequest mockHttpServletRequest = mock(HttpServletRequest.class);
+    HttpServletResponse mockHttpServletResponse = mock(HttpServletResponse.class);
+    IWorkflowEngine<WorkflowMeta> mockWorkflow = Mockito.mock(Workflow.class);
+    WorkflowMeta mockWorkflowMeta = mock(WorkflowMeta.class);
+    ILogChannel mockLogChannelInterface = mock(ILogChannel.class);
+    ServletOutputStream outMock = mock(ServletOutputStream.class);
+
+    String id = "123";
+
+    when(mockHttpServletRequest.getContextPath()).thenReturn(GetWorkflowStatusServlet.CONTEXT_PATH);
+    when(mockHttpServletRequest.getParameter("id")).thenReturn(id);
+    when(mockHttpServletRequest.getParameter("xml")).thenReturn(useXml);
+    when(mockHttpServletRequest.getParameter("json")).thenReturn(useJson);
+    when(mockHttpServletResponse.getOutputStream()).thenReturn(outMock);
+    when(mockWorkflowMap.findWorkflow(id)).thenReturn(mockWorkflow);
+    Mockito.when(mockWorkflow.getWorkflowName()).thenReturn("a-workflow");
+    Mockito.when(mockWorkflow.getLogChannel()).thenReturn(mockLogChannelInterface);
+    Mockito.when(mockWorkflow.getWorkflowMeta()).thenReturn(mockWorkflowMeta);
+    Mockito.when(mockWorkflow.isFinished()).thenReturn(true);
+    Mockito.when(mockWorkflow.getLogChannelId()).thenReturn("logId");
+    Mockito.when(mockWorkflow.getExecutionStartDate()).thenReturn(startDate);
+    Mockito.when(mockWorkflow.getExecutionEndDate()).thenReturn(endDate);
+    Mockito.when(mockWorkflowMeta.getMaximum()).thenReturn(new Point(10, 10));
+    when(mockWorkflow.getStatusDescription()).thenReturn("Finished");
+
+    getWorkflowStatusServlet.doGet(mockHttpServletRequest, mockHttpServletResponse);
+
+    ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
+    verify(outMock, atLeastOnce()).write(captor.capture());
+    StringBuilder written = new StringBuilder();
+    for (byte[] data : captor.getAllValues()) {
+      written.append(new String(data, StandardCharsets.UTF_8));
+    }
+    return written.toString();
+  }
+
+  @Test
+  void testGetJobStatus() throws ServletException, IOException {
     HopLogStore.init();
     HttpServletRequest mockHttpServletRequest = mock(HttpServletRequest.class);
     HttpServletResponse mockHttpServletResponse = mock(HttpServletResponse.class);

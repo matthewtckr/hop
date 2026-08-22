@@ -24,6 +24,7 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.hop.core.Const;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.util.EnvUtil;
 import org.apache.hop.core.util.ExecutorUtil;
 
@@ -37,6 +38,9 @@ public class HopLogStore {
   private LoggingBuffer appender;
 
   private Timer logCleanerTimer;
+
+  /** The log line timeout the cleaner is running with, 0 or lower means: never clean up lines. */
+  private int maxLogTimeoutMinutes;
 
   private static AtomicBoolean initialized = new AtomicBoolean(false);
 
@@ -71,6 +75,7 @@ public class HopLogStore {
   }
 
   public void replaceLogCleaner(final int maxLogTimeoutMinutes) {
+    this.maxLogTimeoutMinutes = maxLogTimeoutMinutes;
     ExecutorUtil.cleanup(logCleanerTimer);
     logCleanerTimer = new Timer(true);
 
@@ -156,7 +161,7 @@ public class HopLogStore {
 
   public static HopLogStore getInstance() {
     if (store == null) {
-      throw new RuntimeException("Central Log Store is not initialized!!!");
+      throw new HopRuntimeException("Central Log Store is not initialized!!!");
     }
     return store;
   }
@@ -204,6 +209,16 @@ public class HopLogStore {
    */
   public static LoggingBuffer getAppender() {
     return getInstance().appender;
+  }
+
+  /**
+   * The log line timeout the log cleaner is actually running with, which is not necessarily the one
+   * that was asked for: a timeout of zero or lower makes it fall back to the default.
+   *
+   * @return the timeout in minutes, 0 or lower means that log lines are never cleaned up
+   */
+  public static int getMaxLogTimeoutMinutes() {
+    return getInstance().maxLogTimeoutMinutes;
   }
 
   /**

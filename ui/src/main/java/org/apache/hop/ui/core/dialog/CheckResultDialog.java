@@ -64,10 +64,6 @@ public class CheckResultDialog extends Dialog {
   private Shell shell;
   private final PropsUi props;
 
-  private Color red;
-  private Color green;
-  private Color yellow;
-
   private boolean showSuccessfulResults = false;
 
   private String transformName;
@@ -83,9 +79,9 @@ public class CheckResultDialog extends Dialog {
     Shell parent = getParent();
     Display display = parent.getDisplay();
 
-    red = display.getSystemColor(SWT.COLOR_RED);
-    green = display.getSystemColor(SWT.COLOR_GREEN);
-    yellow = display.getSystemColor(SWT.COLOR_YELLOW);
+    // Show successful results by default when there are no errors
+    showSuccessfulResults =
+        remarks.stream().noneMatch(cr -> cr.getType() == ICheckResult.TYPE_RESULT_ERROR);
 
     shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX);
     PropsUi.setLook(shell);
@@ -117,6 +113,7 @@ public class CheckResultDialog extends Dialog {
 
     wNoOK = new Button(shell, SWT.CHECK);
     wNoOK.setText(STRING_SHOW_SUCESSFUL);
+    wNoOK.setSelection(showSuccessfulResults);
     PropsUi.setLook(wNoOK);
     FormData fd = new FormData();
     fd.left = new FormAttachment(0, 0);
@@ -205,8 +202,7 @@ public class CheckResultDialog extends Dialog {
   public void getData() {
     wFields.table.removeAll();
 
-    for (int i = 0; i < remarks.size(); i++) {
-      ICheckResult cr = remarks.get(i);
+    for (ICheckResult cr : remarks) {
       if (showSuccessfulResults || cr.getType() != ICheckResult.TYPE_RESULT_OK) {
         TableItem ti = new TableItem(wFields.table, SWT.NONE);
         // MB - Support both Action and Transform Checking
@@ -220,22 +216,20 @@ public class CheckResultDialog extends Dialog {
         ti.setText(2, cr.getType() + " - " + cr.getTypeDesc());
         ti.setText(3, cr.getText());
 
-        Color col = ti.getBackground();
+        Color col = null;
         switch (cr.getType()) {
-          case ICheckResult.TYPE_RESULT_OK:
-            col = green;
-            break;
           case ICheckResult.TYPE_RESULT_ERROR:
-            col = red;
+            col = GuiResource.getInstance().getColorLightRed();
             break;
           case ICheckResult.TYPE_RESULT_WARNING:
-            col = yellow;
+            col = GuiResource.getInstance().getColorLight();
             break;
-          case ICheckResult.TYPE_RESULT_COMMENT:
           default:
             break;
         }
-        ti.setBackground(col);
+        if (col != null) {
+          ti.setBackground(col);
+        }
       }
     }
 

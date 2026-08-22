@@ -22,12 +22,17 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.logging.ILogChannel;
+import org.apache.hop.core.logging.LogChannel;
 import org.apache.hop.history.local.LocalAuditManager;
 
 public class AuditManager {
   private static AuditManager instance;
+
+  @Setter @Getter private static volatile IAuditManagerProvider sessionAuditManagerProvider;
 
   private IAuditManager activeAuditManager;
 
@@ -43,6 +48,18 @@ public class AuditManager {
   }
 
   public static final IAuditManager getActive() {
+    IAuditManager sessionManager = null;
+    if (sessionAuditManagerProvider != null) {
+      try {
+        sessionManager = sessionAuditManagerProvider.getActiveAuditManager();
+      } catch (Exception e) {
+        // Provider may depend on RWT/servlet context not available in all contexts
+        LogChannel.GENERAL.logDebug("Session audit manager provider returned no manager", e);
+      }
+    }
+    if (sessionManager != null) {
+      return sessionManager;
+    }
     return getInstance().getActiveAuditManager();
   }
 
@@ -133,5 +150,16 @@ public class AuditManager {
    */
   public static final void clearEvents() throws HopException {
     getActive().clearEvents();
+  }
+
+  /**
+   * Convenience method for clearing stored states for a given group and type.
+   *
+   * @param group The group (namespace, environment)
+   * @param type The type (shell, perspective, ...)
+   * @throws HopException
+   */
+  public static final void clearStates(String group, String type) throws HopException {
+    getActive().clearStates(group, type);
   }
 }

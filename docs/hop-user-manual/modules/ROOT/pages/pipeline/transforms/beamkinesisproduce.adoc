@@ -16,9 +16,9 @@ under the License.
 ////
 :documentationPath: /pipeline/transforms/
 :language: en_US
-:description: The Beam Kinesis Produce transform sends data to a Kinesis stream using the Beam pipeline execution engine.
+:description: The Beam Kinesis produce transform sends data to a Kinesis stream using the Beam pipeline execution engine.
 
-= image:transforms/icons/beam-kinesis-produce.svg[Beam Kinesis Produce Icon, role="image-doc-icon"] Beam Kinesis Produce
+= image:transforms/icons/beam-kinesis-produce.svg[Beam Kinesis produce Icon, role="image-doc-icon"] Beam Kinesis produce
 
 [%noheader,cols="3a,1a", role="table-no-borders" ]
 |===
@@ -31,9 +31,11 @@ The Beam link:https://aws.amazon.com/kinesis/[Kinesis] Produce transform sends d
 [%noheader,cols="2,1a",frame=none, role="table-supported-engines"]
 !===
 !Hop Engine! image:cross.svg[Not Supported, 24]
-!Spark! image:check_mark.svg[Supported, 24]
-!Flink! image:check_mark.svg[Supported, 24]
-!Dataflow! image:check_mark.svg[Supported, 24]
+!Single Threaded! image:cross.svg[Not Supported, 24]
+!Native Spark! image:cross.svg[Not Supported, 24]
+!Beam Spark! image:check_mark.svg[Supported, 24]
+!Beam Flink! image:check_mark.svg[Supported, 24]
+!Beam Dataflow! image:check_mark.svg[Supported, 24]
 !===
 |===
 

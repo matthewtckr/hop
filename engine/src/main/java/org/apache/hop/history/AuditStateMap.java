@@ -18,8 +18,13 @@ package org.apache.hop.history;
 
 import java.util.HashMap;
 import java.util.Map;
+import lombok.Getter;
+import lombok.Setter;
 
+@Setter
+@Getter
 public class AuditStateMap {
+
   private Map<String, AuditState> nameStateMap;
 
   public AuditStateMap() {
@@ -27,22 +32,6 @@ public class AuditStateMap {
   }
 
   public AuditStateMap(Map<String, AuditState> nameStateMap) {
-    this.nameStateMap = nameStateMap;
-  }
-
-  /**
-   * Gets nameStateMap
-   *
-   * @return value of nameStateMap
-   */
-  public Map<String, AuditState> getNameStateMap() {
-    return nameStateMap;
-  }
-
-  /**
-   * @param nameStateMap The nameStateMap to set
-   */
-  public void setNameStateMap(Map<String, AuditState> nameStateMap) {
     this.nameStateMap = nameStateMap;
   }
 
@@ -61,5 +50,18 @@ public class AuditStateMap {
 
   public AuditState get(String name) {
     return nameStateMap.get(name);
+  }
+
+  /**
+   * Remove the audit state stored under {@code name}.
+   *
+   * @param name The name of the object whose state should be removed
+   * @return the previous state, or {@code null} if there was none
+   */
+  public AuditState remove(String name) {
+    if (nameStateMap == null || name == null) {
+      return null;
+    }
+    return nameStateMap.remove(name);
   }
 }

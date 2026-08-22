@@ -24,8 +24,13 @@ import static org.apache.hop.pipeline.transforms.fuzzymatch.FuzzyMatchMeta.Algor
 import static org.apache.hop.pipeline.transforms.fuzzymatch.FuzzyMatchMeta.Algorithm.SOUNDEX;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import java.util.Objects;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.Setter;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
@@ -36,6 +41,7 @@ import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.row.value.ValueMetaInteger;
 import org.apache.hop.core.row.value.ValueMetaNumber;
 import org.apache.hop.core.row.value.ValueMetaString;
+import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.metadata.api.HopMetadataProperty;
@@ -52,6 +58,8 @@ import org.apache.hop.pipeline.transform.stream.IStream.StreamType;
 import org.apache.hop.pipeline.transform.stream.Stream;
 import org.apache.hop.pipeline.transform.stream.StreamIcon;
 
+@Getter
+@Setter
 @Transform(
     id = "FuzzyMatch",
     image = "fuzzymatch.svg",
@@ -64,6 +72,10 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
   private static final Class<?> PKG = FuzzyMatchMeta.class;
 
   public static final String DEFAULT_SEPARATOR = ",";
+  public static final int DEFAULT_MAX_MATCHES = 10;
+
+  /** Hard safety cap for Top-K to avoid runaway memory / row explosion. */
+  public static final int HARD_MAX_MATCHES = 100;
 
   /** Algorithms type */
   @HopMetadataProperty(key = "algorithm", storeWithCode = true)
@@ -104,9 +116,23 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
   @HopMetadataProperty(key = "separator")
   private String separator;
 
-  /** get closer matching value */
+  /**
+   * Legacy flag kept for backward compatibility with existing pipelines. Prefer {@link #matchMode}.
+   */
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
   @HopMetadataProperty(key = "closervalue")
   private boolean closerValue;
+
+  /** How multiple matches are returned. */
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  @HopMetadataProperty(key = "matchMode", storeWithCode = true)
+  private MatchMode matchMode;
+
+  /** Max matches for Top-K (ALL_ROWS / ALL_CONCAT). Default 10, hard-capped at 100. */
+  @HopMetadataProperty(key = "maxMatches")
+  private String maxMatches;
 
   /** return these field values from lookup */
   @HopMetadataProperty(groupKey = "lookup", key = "value")
@@ -116,33 +142,17 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
     super();
     this.algorithm = NONE;
     this.lookupValues = new ArrayList<>();
-  }
-
-  public FuzzyMatchMeta(FuzzyMatchMeta m) {
-    this();
-    this.algorithm = m.algorithm;
-    this.lookupField = m.lookupField;
-    this.mainStreamField = m.mainStreamField;
-    this.outputMatchField = m.outputMatchField;
-    this.outputValueField = m.outputValueField;
-    this.caseSensitive = m.caseSensitive;
-    this.minimalValue = m.minimalValue;
-    this.maximalValue = m.maximalValue;
-    this.separator = m.separator;
-    this.closerValue = m.closerValue;
-    m.lookupValues.forEach(v -> this.lookupValues.add(new FMLookupValue(v)));
-  }
-
-  @Override
-  public FuzzyMatchMeta clone() {
-    return new FuzzyMatchMeta(this);
+    this.matchMode = MatchMode.CLOSEST;
+    this.closerValue = true;
+    this.maxMatches = String.valueOf(DEFAULT_MAX_MATCHES);
   }
 
   @Override
   public void setDefault() {
     algorithm = NONE;
     separator = DEFAULT_SEPARATOR;
-    closerValue = true;
+    setMatchMode(MatchMode.CLOSEST);
+    maxMatches = String.valueOf(DEFAULT_MAX_MATCHES);
     minimalValue = "0";
     maximalValue = "1";
     caseSensitive = false;
@@ -150,6 +160,50 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
     mainStreamField = null;
     outputMatchField = BaseMessages.getString(PKG, "FuzzyMatchMeta.OutputMatchFieldname");
     outputValueField = BaseMessages.getString(PKG, "FuzzyMatchMeta.OutputValueFieldname");
+  }
+
+  public MatchMode getMatchMode() {
+    if (matchMode != null) {
+      return matchMode;
+    }
+    // Legacy pipelines only have closer value
+    return closerValue ? MatchMode.CLOSEST : MatchMode.ALL_CONCAT;
+  }
+
+  public void setMatchMode(MatchMode matchMode) {
+    this.matchMode = matchMode == null ? MatchMode.CLOSEST : matchMode;
+    this.closerValue = this.matchMode == MatchMode.CLOSEST;
+  }
+
+  /** use {@link #getMatchMode()} */
+  public boolean isCloserValue() {
+    return getMatchMode() == MatchMode.CLOSEST;
+  }
+
+  /** use {@link #setMatchMode(MatchMode)} */
+  public void setCloserValue(boolean closerValue) {
+    this.closerValue = closerValue;
+    // When loading legacy XML, matchMode may still be unset.
+    if (matchMode == null || matchMode == MatchMode.CLOSEST || matchMode == MatchMode.ALL_CONCAT) {
+      this.matchMode = closerValue ? MatchMode.CLOSEST : MatchMode.ALL_CONCAT;
+    }
+  }
+
+  public boolean isAllRowsMode() {
+    return getMatchMode() == MatchMode.ALL_ROWS;
+  }
+
+  public boolean isAllConcatMode() {
+    return getMatchMode() == MatchMode.ALL_CONCAT;
+  }
+
+  public boolean supportsAdditionalFields() {
+    return isCloserValue()
+        || isAllRowsMode()
+        || getAlgorithm() == DOUBLE_METAPHONE
+        || getAlgorithm() == SOUNDEX
+        || getAlgorithm() == REFINED_SOUNDEX
+        || getAlgorithm() == METAPHONE;
   }
 
   @Override
@@ -168,35 +222,34 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
     inputRowMeta.addValueMeta(v);
 
     String mainField = variables.resolve(getOutputValueField());
-    if (StringUtils.isNotEmpty(mainField) && isCloserValue()) {
-      switch (getAlgorithm()) {
-        case NONE:
-          throw new HopTransformException("Please specify the matching algorithm to use");
-        case LEVENSHTEIN:
-          v = new ValueMetaInteger(mainField);
-          v.setLength(IValueMeta.DEFAULT_INTEGER_LENGTH);
-          break;
-        case JARO, JARO_WINKLER, PAIR_SIMILARITY:
-          v = new ValueMetaNumber(mainField);
-          break;
-        default:
-          // Phonetic algorithms
-          v = new ValueMetaString(mainField);
-          break;
+    if (StringUtils.isNotEmpty(mainField)) {
+      if (isAllConcatMode()) {
+        // Concatenated measures are always a string list
+        v = new ValueMetaString(mainField);
+      } else {
+        switch (getAlgorithm()) {
+          case NONE:
+            throw new HopTransformException("Please specify the matching algorithm to use");
+          case LEVENSHTEIN, DAMERAU_LEVENSHTEIN, NEEDLEMAN_WUNSH:
+            // Distance algorithms return an integer measure
+            v = new ValueMetaInteger(mainField);
+            v.setLength(IValueMeta.DEFAULT_INTEGER_LENGTH);
+            break;
+          case JARO, JARO_WINKLER, PAIR_SIMILARITY:
+            v = new ValueMetaNumber(mainField);
+            break;
+          default:
+            // Phonetic algorithms
+            v = new ValueMetaString(mainField);
+            break;
+        }
       }
       v.setStorageType(IValueMeta.STORAGE_TYPE_NORMAL);
       v.setOrigin(name);
       inputRowMeta.addValueMeta(v);
     }
 
-    boolean activateAdditionalFields =
-        isCloserValue()
-            || (getAlgorithm() == DOUBLE_METAPHONE)
-            || (getAlgorithm() == SOUNDEX)
-            || (getAlgorithm() == REFINED_SOUNDEX)
-            || (getAlgorithm() == METAPHONE);
-
-    if (activateAdditionalFields) {
+    if (supportsAdditionalFields()) {
       if (info != null && info.length == 1 && info[0] != null) {
         for (FMLookupValue lookupValue : lookupValues) {
           v = info[0].searchValueMeta(lookupValue.getName());
@@ -204,9 +257,9 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
             // Configuration error/missing resources...
             v.setName(lookupValue.getName());
             v.setOrigin(name);
-            v.setStorageType(
-                IValueMeta.STORAGE_TYPE_NORMAL); // Only normal storage goes into the cache
-            inputRowMeta.addValueMeta(v);
+            // Only normal storage goes into the cache
+            v.setStorageType(IValueMeta.STORAGE_TYPE_NORMAL);
+            replaceValueMeta(inputRowMeta, lookupValue, v);
           } else {
             throw new HopTransformException(
                 BaseMessages.getString(
@@ -219,9 +272,32 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
         for (FMLookupValue lookupValue : lookupValues) {
           v = new ValueMetaString(lookupValue.getName());
           v.setOrigin(name);
-          inputRowMeta.addValueMeta(v);
+          replaceValueMeta(inputRowMeta, lookupValue, v);
         }
       }
+    }
+  }
+
+  /**
+   * Replaces or adds a value meta in the given row meta structure.
+   *
+   * @param inputRowMeta The row meta where the new field should be inserted.
+   * @param lookupValue The lookup configuration that may contain a rename target.
+   * @param newMeta The value meta to add or replace.
+   */
+  private void replaceValueMeta(
+      IRowMeta inputRowMeta, FMLookupValue lookupValue, IValueMeta newMeta) {
+    int index = inputRowMeta.indexOfValue(newMeta.getName());
+    // rename field name
+    if (Objects.nonNull(lookupValue) && !Utils.isEmpty(lookupValue.getRename())) {
+      newMeta.setName(lookupValue.getRename());
+    }
+
+    // add or replace valueMeta
+    if (index == -1) {
+      inputRowMeta.addValueMeta(newMeta);
+    } else {
+      inputRowMeta.setValueMeta(index, newMeta);
     }
   }
 
@@ -444,222 +520,36 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
     return ioMeta;
   }
 
-  /**
-   * Gets algorithm
-   *
-   * @return value of algorithm
-   */
-  public Algorithm getAlgorithm() {
-    return algorithm;
+  @Getter
+  public enum MatchMode implements IEnumHasCodeAndDescription {
+    CLOSEST("closest", BaseMessages.getString(PKG, "FuzzyMatchMeta.matchMode.Closest")),
+    ALL_ROWS("all_rows", BaseMessages.getString(PKG, "FuzzyMatchMeta.matchMode.AllRows")),
+    ALL_CONCAT("all_concat", BaseMessages.getString(PKG, "FuzzyMatchMeta.matchMode.AllConcat")),
+    ;
+    private final String code;
+    private final String description;
+
+    MatchMode(String code, String description) {
+      this.code = code;
+      this.description = description;
+    }
+
+    public static String[] getDescriptions() {
+      return Arrays.stream(MatchMode.values())
+          .map(MatchMode::getDescription)
+          .toArray(String[]::new);
+    }
+
+    public static MatchMode lookupDescription(String description) {
+      return IEnumHasCodeAndDescription.lookupDescription(MatchMode.class, description, CLOSEST);
+    }
+
+    public static MatchMode lookupCode(String code) {
+      return IEnumHasCode.lookupCode(MatchMode.class, code, CLOSEST);
+    }
   }
 
-  /**
-   * Sets algorithm
-   *
-   * @param algorithm value of algorithm
-   */
-  public void setAlgorithm(Algorithm algorithm) {
-    this.algorithm = algorithm;
-  }
-
-  /**
-   * Gets lookupTransformName
-   *
-   * @return value of lookupTransformName
-   */
-  public String getLookupTransformName() {
-    return lookupTransformName;
-  }
-
-  /**
-   * Sets lookupTransformName
-   *
-   * @param lookupTransformName value of lookupTransformName
-   */
-  public void setLookupTransformName(String lookupTransformName) {
-    this.lookupTransformName = lookupTransformName;
-  }
-
-  /**
-   * Gets lookupField
-   *
-   * @return value of lookupField
-   */
-  public String getLookupField() {
-    return lookupField;
-  }
-
-  /**
-   * Sets lookupField
-   *
-   * @param lookupField value of lookupField
-   */
-  public void setLookupField(String lookupField) {
-    this.lookupField = lookupField;
-  }
-
-  /**
-   * Gets mainStreamField
-   *
-   * @return value of mainStreamField
-   */
-  public String getMainStreamField() {
-    return mainStreamField;
-  }
-
-  /**
-   * Sets mainStreamField
-   *
-   * @param mainStreamField value of mainStreamField
-   */
-  public void setMainStreamField(String mainStreamField) {
-    this.mainStreamField = mainStreamField;
-  }
-
-  /**
-   * Gets outputmatchfield
-   *
-   * @return value of outputmatchfield
-   */
-  public String getOutputMatchField() {
-    return outputMatchField;
-  }
-
-  /**
-   * Sets outputmatchfield
-   *
-   * @param outputMatchField value of outputmatchfield
-   */
-  public void setOutputMatchField(String outputMatchField) {
-    this.outputMatchField = outputMatchField;
-  }
-
-  /**
-   * Gets outputValueField
-   *
-   * @return value of outputValueField
-   */
-  public String getOutputValueField() {
-    return outputValueField;
-  }
-
-  /**
-   * Sets outputValueField
-   *
-   * @param outputValueField value of outputValueField
-   */
-  public void setOutputValueField(String outputValueField) {
-    this.outputValueField = outputValueField;
-  }
-
-  /**
-   * Gets caseSensitive
-   *
-   * @return value of caseSensitive
-   */
-  public boolean isCaseSensitive() {
-    return caseSensitive;
-  }
-
-  /**
-   * Sets caseSensitive
-   *
-   * @param caseSensitive value of caseSensitive
-   */
-  public void setCaseSensitive(boolean caseSensitive) {
-    this.caseSensitive = caseSensitive;
-  }
-
-  /**
-   * Gets minimalValue
-   *
-   * @return value of minimalValue
-   */
-  public String getMinimalValue() {
-    return minimalValue;
-  }
-
-  /**
-   * Sets minimalValue
-   *
-   * @param minimalValue value of minimalValue
-   */
-  public void setMinimalValue(String minimalValue) {
-    this.minimalValue = minimalValue;
-  }
-
-  /**
-   * Gets maximalValue
-   *
-   * @return value of maximalValue
-   */
-  public String getMaximalValue() {
-    return maximalValue;
-  }
-
-  /**
-   * Sets maximalValue
-   *
-   * @param maximalValue value of maximalValue
-   */
-  public void setMaximalValue(String maximalValue) {
-    this.maximalValue = maximalValue;
-  }
-
-  /**
-   * Gets separator
-   *
-   * @return value of separator
-   */
-  public String getSeparator() {
-    return separator;
-  }
-
-  /**
-   * Sets separator
-   *
-   * @param separator value of separator
-   */
-  public void setSeparator(String separator) {
-    this.separator = separator;
-  }
-
-  /**
-   * Gets closerValue
-   *
-   * @return value of closerValue
-   */
-  public boolean isCloserValue() {
-    return closerValue;
-  }
-
-  /**
-   * Sets closerValue
-   *
-   * @param closerValue value of closerValue
-   */
-  public void setCloserValue(boolean closerValue) {
-    this.closerValue = closerValue;
-  }
-
-  /**
-   * Gets lookupValues
-   *
-   * @return value of lookupValues
-   */
-  public List<FMLookupValue> getLookupValues() {
-    return lookupValues;
-  }
-
-  /**
-   * Sets lookupValues
-   *
-   * @param lookupValues value of lookupValues
-   */
-  public void setLookupValues(List<FMLookupValue> lookupValues) {
-    this.lookupValues = lookupValues;
-  }
-
+  @Getter
   public enum Algorithm implements IEnumHasCodeAndDescription {
     NONE("", ""),
     LEVENSHTEIN("levenshtein", BaseMessages.getString(PKG, "FuzzyMatchMeta.algorithm.Levenshtein")),
@@ -689,7 +579,10 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
     }
 
     public static String[] getDescriptions() {
-      return IEnumHasCodeAndDescription.getDescriptions(Algorithm.class);
+      return Arrays.stream(Algorithm.values())
+          .filter(t -> t != Algorithm.NONE)
+          .map(Algorithm::getDescription)
+          .toArray(String[]::new);
     }
 
     public static Algorithm lookupDescription(String description) {
@@ -699,28 +592,10 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
     public static Algorithm lookupCode(String code) {
       return IEnumHasCode.lookupCode(Algorithm.class, code, NONE);
     }
-
-    /**
-     * Gets code
-     *
-     * @return value of code
-     */
-    @Override
-    public String getCode() {
-      return code;
-    }
-
-    /**
-     * Gets description
-     *
-     * @return value of description
-     */
-    @Override
-    public String getDescription() {
-      return description;
-    }
   }
 
+  @Getter
+  @Setter
   public static final class FMLookupValue {
     @HopMetadataProperty(key = "name")
     private String name;
@@ -737,42 +612,6 @@ public class FuzzyMatchMeta extends BaseTransformMeta<FuzzyMatch, FuzzyMatchData
 
     public FMLookupValue(String name, String rename) {
       this.name = name;
-      this.rename = rename;
-    }
-
-    /**
-     * Gets name
-     *
-     * @return value of name
-     */
-    public String getName() {
-      return name;
-    }
-
-    /**
-     * Sets name
-     *
-     * @param name value of name
-     */
-    public void setName(String name) {
-      this.name = name;
-    }
-
-    /**
-     * Gets rename
-     *
-     * @return value of rename
-     */
-    public String getRename() {
-      return rename;
-    }
-
-    /**
-     * Sets rename
-     *
-     * @param rename value of rename
-     */
-    public void setRename(String rename) {
       this.rename = rename;
     }
   }

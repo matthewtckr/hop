@@ -20,8 +20,9 @@ package org.apache.hop.pipeline.transforms.delete;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
+import org.apache.hop.core.Props;
 import org.apache.hop.core.database.Database;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.exception.HopException;
@@ -32,12 +33,14 @@ import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.TransformMeta;
 import org.apache.hop.ui.core.ConstUi;
+import org.apache.hop.ui.core.FormDataBuilder;
 import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.database.dialog.DatabaseExplorerDialog;
 import org.apache.hop.ui.core.dialog.BaseDialog;
 import org.apache.hop.ui.core.dialog.EnterSelectionDialog;
 import org.apache.hop.ui.core.dialog.ErrorDialog;
 import org.apache.hop.ui.core.dialog.MessageBox;
+import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.widget.ColumnInfo;
 import org.apache.hop.ui.core.widget.MetaSelectionLine;
 import org.apache.hop.ui.core.widget.TableView;
@@ -45,18 +48,19 @@ import org.apache.hop.ui.core.widget.TextVar;
 import org.apache.hop.ui.pipeline.transform.BaseTransformDialog;
 import org.apache.hop.ui.pipeline.transform.ITableItemInsertListener;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.custom.CTabFolder;
+import org.eclipse.swt.custom.CTabItem;
 import org.eclipse.swt.events.ModifyListener;
 import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
 import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
-import org.eclipse.swt.layout.FormLayout;
 import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.TableItem;
-import org.eclipse.swt.widgets.Text;
 
 public class DeleteDialog extends BaseTransformDialog {
   private static final Class<?> PKG = DeleteMeta.class;
@@ -70,6 +74,8 @@ public class DeleteDialog extends BaseTransformDialog {
   private TextVar wTable;
 
   private TextVar wCommit;
+
+  private Button wBatch;
 
   private final DeleteMeta input;
 
@@ -88,11 +94,9 @@ public class DeleteDialog extends BaseTransformDialog {
 
   @Override
   public String open() {
-    Shell parent = getParent();
+    createShell(BaseMessages.getString(PKG, "DeleteDialog.Shell.Title"));
 
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
-    PropsUi.setLook(shell);
-    setShellImage(shell, input);
+    buildButtonBar().ok(e -> ok()).cancel(e -> cancel()).build();
 
     ModifyListener lsMod = e -> input.setChanged();
     ModifyListener lsTableMod =
@@ -110,78 +114,100 @@ public class DeleteDialog extends BaseTransformDialog {
         };
     changed = input.hasChanged();
 
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = PropsUi.getFormMargin();
-    formLayout.marginHeight = PropsUi.getFormMargin();
+    CTabFolder wTabFolder = new CTabFolder(shell, SWT.BORDER);
+    PropsUi.setLook(wTabFolder, Props.WIDGET_STYLE_TAB);
 
-    shell.setLayout(formLayout);
-    shell.setText(BaseMessages.getString(PKG, "DeleteDialog.Shell.Title"));
+    addGeneralTab(wTabFolder, lsMod, lsTableMod, lsSelection);
+    addKeysTab(wTabFolder, lsMod);
 
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
+    wTabFolder.setLayoutData(
+        FormDataBuilder.builder()
+            .left()
+            .top(wSpacer, margin)
+            .right()
+            .bottom(wOk, -margin)
+            .result());
+    wTabFolder.setSelection(0);
 
-    // THE BUTTONS
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, e -> ok());
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, e -> cancel());
-    setButtonPositions(new Button[] {wOk, wCancel}, margin, null);
+    //
+    // Search the fields in the background
+    //
 
-    // TransformName line
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(BaseMessages.getString(PKG, "DeleteDialog.TransformName.Label"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    fdlTransformName.top = new FormAttachment(0, margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    wTransformName.addModifyListener(lsMod);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(middle, 0);
-    fdTransformName.top = new FormAttachment(0, margin);
-    fdTransformName.right = new FormAttachment(100, 0);
-    wTransformName.setLayoutData(fdTransformName);
+    final Runnable runnable =
+        () -> {
+          TransformMeta transformMeta = pipelineMeta.findTransform(transformName);
+          if (transformMeta != null) {
+            try {
+              IRowMeta row = pipelineMeta.getPrevTransformFields(variables, transformMeta);
+
+              // Remember these fields...
+              for (int i = 0; i < row.size(); i++) {
+                inputFields.add(row.getValueMeta(i).getName());
+              }
+              setComboBoxes();
+            } catch (HopException e) {
+              logError(BaseMessages.getString(PKG, "System.Dialog.GetFieldsFailed.Message"));
+            }
+          }
+        };
+    new Thread(runnable).start();
+
+    getData();
+    setTableFieldCombo();
+    setFlags();
+    focusTransformName();
+    BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
+
+    return transformName;
+  }
+
+  private void addGeneralTab(
+      CTabFolder wTabFolder,
+      ModifyListener lsMod,
+      ModifyListener lsTableMod,
+      SelectionListener lsSelection) {
+    CTabItem wGeneralTab = new CTabItem(wTabFolder, SWT.NONE);
+    wGeneralTab.setFont(GuiResource.getInstance().getFontDefault());
+    wGeneralTab.setText(BaseMessages.getString(PKG, "DeleteDialog.GeneralTab.Title"));
+
+    Composite composite = new Composite(wTabFolder, SWT.NONE);
+    composite.setLayout(props.createFormLayout());
+    PropsUi.setLook(composite);
 
     // Connection line
-    wConnection = addConnectionLine(shell, wTransformName, input.getConnection(), lsMod);
-    wConnection.addModifyListener(lsMod);
+    wConnection = addConnectionLine(composite, null, input.getConnection(), lsMod);
     wConnection.addSelectionListener(lsSelection);
 
     // Schema line...
-    Label wlSchema = new Label(shell, SWT.RIGHT);
+    Label wlSchema = new Label(composite, SWT.RIGHT);
     wlSchema.setText(BaseMessages.getString(PKG, "DeleteDialog.TargetSchema.Label"));
     PropsUi.setLook(wlSchema);
     FormData fdlSchema = new FormData();
     fdlSchema.left = new FormAttachment(0, 0);
     fdlSchema.right = new FormAttachment(middle, -margin);
-    fdlSchema.top = new FormAttachment(wConnection, margin * 2);
+    fdlSchema.top = new FormAttachment(wConnection, margin);
     wlSchema.setLayoutData(fdlSchema);
 
-    Button wbSchema = new Button(shell, SWT.PUSH | SWT.CENTER);
+    Button wbSchema = new Button(composite, SWT.PUSH | SWT.CENTER);
     PropsUi.setLook(wbSchema);
     wbSchema.setText(BaseMessages.getString(PKG, "System.Button.Browse"));
     FormData fdbSchema = new FormData();
-    fdbSchema.top = new FormAttachment(wConnection, 2 * margin);
+    fdbSchema.top = new FormAttachment(wConnection, margin);
     fdbSchema.right = new FormAttachment(100, 0);
     wbSchema.setLayoutData(fdbSchema);
+    wbSchema.addListener(SWT.Selection, e -> getSchemaNames());
 
-    wSchema = new TextVar(variables, shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    wSchema = new TextVar(variables, composite, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
     PropsUi.setLook(wSchema);
     wSchema.addModifyListener(lsTableMod);
     FormData fdSchema = new FormData();
     fdSchema.left = new FormAttachment(middle, 0);
-    fdSchema.top = new FormAttachment(wConnection, margin * 2);
+    fdSchema.top = new FormAttachment(wConnection, margin);
     fdSchema.right = new FormAttachment(wbSchema, -margin);
     wSchema.setLayoutData(fdSchema);
 
     // Table line...
-    Label wlTable = new Label(shell, SWT.RIGHT);
+    Label wlTable = new Label(composite, SWT.RIGHT);
     wlTable.setText(BaseMessages.getString(PKG, "DeleteDialog.TargetTable.Label"));
     PropsUi.setLook(wlTable);
     FormData fdlTable = new FormData();
@@ -190,15 +216,16 @@ public class DeleteDialog extends BaseTransformDialog {
     fdlTable.top = new FormAttachment(wbSchema, margin);
     wlTable.setLayoutData(fdlTable);
 
-    Button wbTable = new Button(shell, SWT.PUSH | SWT.CENTER);
+    Button wbTable = new Button(composite, SWT.PUSH | SWT.CENTER);
     PropsUi.setLook(wbTable);
     wbTable.setText(BaseMessages.getString(PKG, "DeleteDialog.Browse.Button"));
     FormData fdbTable = new FormData();
     fdbTable.right = new FormAttachment(100, 0);
     fdbTable.top = new FormAttachment(wbSchema, margin);
     wbTable.setLayoutData(fdbTable);
+    wbTable.addListener(SWT.Selection, e -> getTableName());
 
-    wTable = new TextVar(variables, shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    wTable = new TextVar(variables, composite, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
     PropsUi.setLook(wTable);
     wTable.addModifyListener(lsTableMod);
     FormData fdTable = new FormData();
@@ -208,7 +235,7 @@ public class DeleteDialog extends BaseTransformDialog {
     wTable.setLayoutData(fdTable);
 
     // Commit line
-    Label wlCommit = new Label(shell, SWT.RIGHT);
+    Label wlCommit = new Label(composite, SWT.RIGHT);
     wlCommit.setText(BaseMessages.getString(PKG, "DeleteDialog.Commit.Label"));
     PropsUi.setLook(wlCommit);
     FormData fdlCommit = new FormData();
@@ -216,7 +243,8 @@ public class DeleteDialog extends BaseTransformDialog {
     fdlCommit.top = new FormAttachment(wTable, margin);
     fdlCommit.right = new FormAttachment(middle, -margin);
     wlCommit.setLayoutData(fdlCommit);
-    wCommit = new TextVar(variables, shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    wCommit = new TextVar(variables, composite, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    wCommit.enableExpandedInteger();
     PropsUi.setLook(wCommit);
     wCommit.addModifyListener(lsMod);
     FormData fdCommit = new FormData();
@@ -225,12 +253,50 @@ public class DeleteDialog extends BaseTransformDialog {
     fdCommit.right = new FormAttachment(100, 0);
     wCommit.setLayoutData(fdCommit);
 
-    Label wlKey = new Label(shell, SWT.NONE);
+    // Batch delete
+    Label wlBatch = new Label(composite, SWT.RIGHT);
+    wlBatch.setText(BaseMessages.getString(PKG, "DeleteDialog.Batch.Label"));
+    PropsUi.setLook(wlBatch);
+    FormData fdlBatch = new FormData();
+    fdlBatch.left = new FormAttachment(0, 0);
+    fdlBatch.top = new FormAttachment(wCommit, margin);
+    fdlBatch.right = new FormAttachment(middle, -margin);
+    wlBatch.setLayoutData(fdlBatch);
+    wBatch = new Button(composite, SWT.CHECK);
+    PropsUi.setLook(wBatch);
+    FormData fdBatch = new FormData();
+    fdBatch.left = new FormAttachment(middle, 0);
+    fdBatch.top = new FormAttachment(wlBatch, 0, SWT.CENTER);
+    fdBatch.right = new FormAttachment(100, 0);
+    wBatch.setLayoutData(fdBatch);
+    wBatch.addSelectionListener(
+        new SelectionAdapter() {
+          @Override
+          public void widgetSelected(SelectionEvent arg0) {
+            setFlags();
+            input.setChanged();
+          }
+        });
+
+    wGeneralTab.setControl(composite);
+  }
+
+  private void addKeysTab(CTabFolder wTabFolder, ModifyListener lsMod) {
+    Composite composite = new Composite(wTabFolder, SWT.NONE);
+    composite.setLayout(props.createFormLayout());
+    PropsUi.setLook(composite);
+
+    CTabItem tabItem = new CTabItem(wTabFolder, SWT.NONE);
+    tabItem.setFont(GuiResource.getInstance().getFontDefault());
+    tabItem.setText(BaseMessages.getString(PKG, "DeleteDialog.KeysTab.Title"));
+    tabItem.setControl(composite);
+
+    Label wlKey = new Label(composite, SWT.NONE);
     wlKey.setText(BaseMessages.getString(PKG, "DeleteDialog.Key.Label"));
     PropsUi.setLook(wlKey);
     FormData fdlKey = new FormData();
     fdlKey.left = new FormAttachment(0, 0);
-    fdlKey.top = new FormAttachment(wCommit, margin);
+    fdlKey.top = new FormAttachment(0, 0);
     wlKey.setLayoutData(fdlKey);
 
     int nrKeyCols = 4;
@@ -268,72 +334,26 @@ public class DeleteDialog extends BaseTransformDialog {
     wKey =
         new TableView(
             variables,
-            shell,
+            composite,
             SWT.BORDER | SWT.FULL_SELECTION | SWT.MULTI | SWT.V_SCROLL | SWT.H_SCROLL,
             ciKey,
             nrKeyRows,
             lsMod,
             props);
 
-    wGet = new Button(shell, SWT.PUSH);
+    wGet = new Button(composite, SWT.PUSH);
     wGet.setText(BaseMessages.getString(PKG, "DeleteDialog.GetFields.Button"));
     wGet.addListener(SWT.Selection, e -> get());
-    fdGet = new FormData();
-    fdGet.right = new FormAttachment(100, 0);
-    fdGet.top = new FormAttachment(wlKey, margin);
-    wGet.setLayoutData(fdGet);
+    PropsUi.setLook(wGet);
+
+    setButtonPositions(new Button[] {wGet}, margin, null);
 
     FormData fdKey = new FormData();
     fdKey.left = new FormAttachment(0, 0);
     fdKey.top = new FormAttachment(wlKey, margin);
-    fdKey.right = new FormAttachment(wGet, -margin);
-    fdKey.bottom = new FormAttachment(wOk, -2 * margin);
+    fdKey.right = new FormAttachment(100, 0);
+    fdKey.bottom = new FormAttachment(wGet, -margin);
     wKey.setLayoutData(fdKey);
-
-    //
-    // Search the fields in the background
-    //
-
-    final Runnable runnable =
-        () -> {
-          TransformMeta transformMeta = pipelineMeta.findTransform(transformName);
-          if (transformMeta != null) {
-            try {
-              IRowMeta row = pipelineMeta.getPrevTransformFields(variables, transformMeta);
-
-              // Remember these fields...
-              for (int i = 0; i < row.size(); i++) {
-                inputFields.add(row.getValueMeta(i).getName());
-              }
-              setComboBoxes();
-            } catch (HopException e) {
-              logError(BaseMessages.getString(PKG, "System.Dialog.GetFieldsFailed.Message"));
-            }
-          }
-        };
-    new Thread(runnable).start();
-
-    wbSchema.addSelectionListener(
-        new SelectionAdapter() {
-          @Override
-          public void widgetSelected(SelectionEvent e) {
-            getSchemaNames();
-          }
-        });
-    wbTable.addSelectionListener(
-        new SelectionAdapter() {
-          @Override
-          public void widgetSelected(SelectionEvent e) {
-            getTableName();
-          }
-        });
-
-    getData();
-    setTableFieldCombo();
-
-    BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
-
-    return transformName;
   }
 
   protected void setComboBoxes() {
@@ -351,6 +371,7 @@ public class DeleteDialog extends BaseTransformDialog {
     }
 
     wCommit.setText(input.getCommitSizeVar());
+    wBatch.setSelection(input.isUseBatchUpdate());
 
     List<DeleteKeyField> keyFields = input.getLookup().getFields();
 
@@ -386,15 +407,31 @@ public class DeleteDialog extends BaseTransformDialog {
 
     wKey.setRowNums();
     wKey.optWidth(true);
-
-    wTransformName.selectAll();
-    wTransformName.setFocus();
   }
 
   private void cancel() {
     transformName = null;
     input.setChanged(changed);
     dispose();
+  }
+
+  /**
+   * Updates dialog control states based on the current configuration.
+   *
+   * <p>Batch deletes are disabled when this transform uses error handling and the selected database
+   * does not support batch updates together with error handling (for example mysql and look-likes).
+   */
+  public void setFlags() {
+    DatabaseMeta databaseMeta = pipelineMeta.findDatabase(wConnection.getText(), variables);
+    boolean hasErrorHandling = pipelineMeta.findTransform(transformName).isDoingErrorHandling();
+
+    boolean enableBatch = wBatch.getSelection();
+    enableBatch =
+        enableBatch
+            && !(databaseMeta != null
+                && databaseMeta.supportsErrorHandlingOnBatchUpdates()
+                && hasErrorHandling);
+    wBatch.setSelection(enableBatch);
   }
 
   private void setTableFieldCombo() {
@@ -454,6 +491,7 @@ public class DeleteDialog extends BaseTransformDialog {
     int nrkeys = wKey.nrNonEmpty();
 
     inf.setCommitSize(wCommit.getText());
+    inf.setUseBatchUpdate(wBatch.getSelection());
 
     if (log.isDebug()) {
       logDebug(BaseMessages.getString(PKG, "DeleteDialog.Log.FoundKeys", String.valueOf(nrkeys)));
@@ -530,7 +568,7 @@ public class DeleteDialog extends BaseTransformDialog {
             BaseMessages.getString(PKG, "DeleteDialog.ErrorGettingSchemas"),
             e);
       } finally {
-        database.disconnect();
+        database.close();
       }
     }
   }

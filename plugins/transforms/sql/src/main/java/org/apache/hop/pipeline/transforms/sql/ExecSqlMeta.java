@@ -248,12 +248,6 @@ public class ExecSqlMeta extends BaseTransformMeta<ExecSql, ExecSqlData> {
   }
 
   @Override
-  public Object clone() {
-    ExecSqlMeta retval = (ExecSqlMeta) super.clone();
-    return retval;
-  }
-
-  @Override
   public void setDefault() {
     sql = "";
     arguments = new ArrayList();
@@ -348,7 +342,7 @@ public class ExecSqlMeta extends BaseTransformMeta<ExecSql, ExecSqlData> {
                 transformMeta);
         remarks.add(cr);
       } finally {
-        db.disconnect();
+        db.close();
       }
     } else {
       cr =

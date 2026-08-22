@@ -19,12 +19,14 @@ package org.apache.hop.databases.hive;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.gui.plugin.GuiElementType;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.gui.plugin.GuiWidgetElement;
@@ -37,10 +39,10 @@ import org.apache.hop.metadata.api.HopMetadataProperty;
     type = "HIVE",
     typeDescription = "Apache Hive",
     image = "hive.svg",
-    documentationUrl = "/database/databases/apache-hive.html")
+    documentationUrl = "/database/databases/apache-hive.html",
+    classLoaderGroup = "hive-db")
 @GuiPlugin(id = "GUI-HiveDatabaseMeta")
 public class HiveDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
-  private static final Class<?> PKG = HiveDatabaseMeta.class;
 
   @GuiWidgetElement(
       id = "tablePartitions",
@@ -139,6 +141,20 @@ public class HiveDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   }
 
   @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("org.apache.hive:hive-jdbc:jar:standalone")
+        .defaultVersion("4.2.0")
+        .licenseCategory("A")
+        .licenseName("Apache-2.0")
+        .licenseUrl("https://www.apache.org/licenses/LICENSE-2.0")
+        .vendor("Apache Hive")
+        .vendorUrl("https://hive.apache.org/")
+        .excludes(List.of("*:*"))
+        .build();
+  }
+
+  @Override
   public String getURL(String hostname, String port, String databaseName) {
     // Split the hostnames and ports up using commas.
     List<String> hostnames = new ArrayList<>();
@@ -233,7 +249,7 @@ public class HiveDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -253,7 +269,8 @@ public class HiveDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " MODIFY "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -297,36 +314,28 @@ public class HiveDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
             retval += "BIGINT NOT NULL PRIMARY KEY";
           }
         } else {
-          if (type == IValueMeta.TYPE_INTEGER) {
-            // Integer values...
-            if (length < 3) {
-              retval += "TINYINT";
-            } else if (length < 5) {
-              retval += "SMALLINT";
-            } else if (length < 10) {
-              retval += "INT";
-            } else if (length < 20) {
-              retval += "BIGINT";
-            } else {
-              retval += "DECIMAL(" + length + ")";
-            }
-          } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-            // Fixed point value...
-            if (length
-                < 1) { // user configured no value for length. Use 16 digits, which is comparable to
-              // mantissa 2^53 of IEEE 754 binary64 "double".
-              length = 16;
-            }
-            if (precision
-                < 1) { // user configured no value for precision. Use 16 digits, which is comparable
-              // to IEEE 754 binary64 "double".
-              precision = 16;
-            }
-            retval += "DECIMAL(" + length + "," + precision + ")";
-          } else {
-            // Floating point value with double precision...
-            retval += "DOUBLE";
-          }
+          retval +=
+              switch (type) {
+                case IValueMeta.TYPE_INTEGER -> {
+                  if (length < 3) {
+                    yield "TINYINT";
+                  } else if (length < 5) {
+                    yield "SMALLINT";
+                  } else if (length < 10) {
+                    yield "INT";
+                  } else if (length < 20) {
+                    yield "BIGINT";
+                  } else {
+                    yield "DECIMAL(" + length + ")";
+                  }
+                }
+                case IValueMeta.TYPE_BIGNUMBER -> {
+                  int p = (precision < 1) ? 16 : precision;
+                  int len = (length < 1) ? 16 : length;
+                  yield "DECIMAL(" + len + "," + p + ")";
+                }
+                default -> "DOUBLE";
+              };
         }
         break;
       case IValueMeta.TYPE_STRING:
@@ -614,8 +623,6 @@ public class HiveDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     setForcingIdentifiersToLowerCase(true);
     setSupportsTimestampDataType(true);
     setSupportsBooleanDataType(true);
-
-    // addExtraOption(getPluginId(), "option", "value");
   }
 
   @Override

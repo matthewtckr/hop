@@ -36,20 +36,28 @@ import org.apache.hop.core.exception.HopFileException;
 import org.apache.hop.core.exception.HopTransformException;
 import org.apache.hop.core.exception.HopValueException;
 import org.apache.hop.core.fileinput.CharsetToolkit;
+import org.apache.hop.core.io.CountingOutputStream;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.lineage.LineageFileIoEmitter;
+import org.apache.hop.lineage.model.FileIoContentSchema;
+import org.apache.hop.lineage.model.FileIoOperation;
+import org.apache.hop.lineage.model.FileIoPathSyntax;
+import org.apache.hop.lineage.model.FileIoTabularColumn;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.BaseTransform;
 import org.apache.hop.pipeline.transform.TransformMeta;
+import org.apache.hop.staticschema.metadata.SchemaDefinition;
+import org.apache.hop.staticschema.metadata.SchemaFieldDefinition;
+import org.apache.hop.staticschema.util.SchemaDefinitionUtil;
 
 /** Converts input rows to text and then writes this text to one or more files. */
-public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFileOutputData>
-    extends BaseTransform<Meta, Data> {
+public class TextFileOutput extends BaseTransform<TextFileOutputMeta, TextFileOutputData> {
 
   private static final Class<?> PKG = TextFileOutputMeta.class;
 
@@ -59,22 +67,22 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
 
   public TextFileOutput(
       TransformMeta transformMeta,
-      Meta meta,
-      Data data,
+      TextFileOutputMeta meta,
+      TextFileOutputData data,
       int copyNr,
       PipelineMeta pipelineMeta,
       Pipeline pipeline) {
     super(transformMeta, meta, data, copyNr, pipelineMeta, pipeline);
   }
 
-  private void initFieldNumbers(IRowMeta outputRowMeta, TextFileField[] outputFields)
+  private void initFieldNumbers(IRowMeta outputRowMeta, List<TextFileField> outputFields)
       throws HopException {
-    data.fieldnrs = new int[outputFields.length];
-    for (int i = 0; i < outputFields.length; i++) {
-      data.fieldnrs[i] = outputRowMeta.indexOfValue(outputFields[i].getName());
+    data.fieldnrs = new int[outputFields.size()];
+    for (int i = 0; i < outputFields.size(); i++) {
+      data.fieldnrs[i] = outputRowMeta.indexOfValue(outputFields.get(i).getName());
       if (data.fieldnrs[i] < 0) {
         throw new HopTransformException(
-            "Field [" + outputFields[i].getName() + "] couldn't be found in the input stream!");
+            "Field [" + outputFields.get(i).getName() + "] couldn't be found in the input stream!");
       }
     }
   }
@@ -114,6 +122,7 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
     return compressionProvider;
   }
 
+  @SuppressWarnings("java:S2095") // the stream is owned by the transform and closed in closeFile()
   public void initFileStreamWriter(String filename) throws HopException {
     data.writer = null;
     try {
@@ -131,8 +140,7 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
         boolean writingToFileForFirstTime = fileStreams == null;
 
         if (writingToFileForFirstTime) { // Opening file for first time
-
-          if (meta.isAddToResultFiles()) {
+          if (meta.getFileSettings().isAddToResultFiles()) {
             // Add this to the result file names...
             ResultFile resultFile =
                 new ResultFile(
@@ -147,7 +155,7 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
           ICompressionProvider compressionProvider = getCompressionProvider();
           boolean isZipFile = compressionProvider instanceof ZipCompressionProvider;
           boolean createParentDirIfNotExists = meta.isCreateParentFolder();
-          boolean appendToExistingFile = meta.isFileAppended();
+          boolean appendToExistingFile = meta.getFileSettings().isFileAppended();
 
           if (appendToExistingFile && isZipFile && isFileExists(filename)) {
             throw new HopException("Can not append to an existing zip file : " + filename);
@@ -177,13 +185,15 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
 
           OutputStream fileOutputStream =
               getOutputStream(filename, this, !isZipFile && appendToExistingFile);
+          fileOutputStream = new CountingOutputStream(fileOutputStream);
           CompressionOutputStream compressionOutputStream =
               compressionProvider.createOutputStream(fileOutputStream);
 
           // The compression output stream may also archive entries. For this we create the filename
           // (with appropriate extension) and add it as an entry to the output stream. For providers
           // that do not archive entries, they should use the default no-op implementation.
-          compressionOutputStream.addEntry(filename, resolve(meta.getExtension()));
+          compressionOutputStream.addEntry(
+              filename, resolve(meta.getFileSettings().getExtension()));
 
           if (isDetailed()) {
             if (!Utils.isEmpty(meta.getEncoding())) {
@@ -213,10 +223,12 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
           }
 
           OutputStream fileOutputStream = getOutputStream(filename, this, true);
+          fileOutputStream = new CountingOutputStream(fileOutputStream);
           ICompressionProvider compressionProvider = getCompressionProvider();
           CompressionOutputStream compressionOutputStream =
               compressionProvider.createOutputStream(fileOutputStream);
-          compressionOutputStream.addEntry(filename, resolve(meta.getExtension()));
+          compressionOutputStream.addEntry(
+              filename, resolve(meta.getFileSettings().getExtension()));
           BufferedOutputStream bufferedOutputStream =
               new BufferedOutputStream(compressionOutputStream, 5000);
 
@@ -250,7 +262,7 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
       if (data.writer != null) {
         filename = data.getFileStreamsCollection().getLastFileName();
       } else {
-        filename = meta.getFileName();
+        filename = meta.getFileSettings().getFileName();
         if (filename == null) {
           throw new HopFileException(
               BaseMessages.getString(PKG, "TextFileOutput.Exception.FileNameNotSet"));
@@ -278,11 +290,11 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
   }
 
   public int getFlushInterval() {
-    String var = variables.getVariable("HOP_FILE_OUTPUT_MAX_STREAM_LIFE");
+    String maxStreamLife = variables.getVariable("HOP_FILE_OUTPUT_MAX_STREAM_LIFE");
     int flushInterval = 0;
-    if (var != null) {
+    if (maxStreamLife != null) {
       try {
-        flushInterval = Integer.parseInt(var);
+        flushInterval = Integer.parseInt(maxStreamLife);
       } catch (Exception ex) {
         // Do nothing
       }
@@ -291,11 +303,11 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
   }
 
   public int getMaxOpenFiles() {
-    String var = variables.getVariable("HOP_FILE_OUTPUT_MAX_STREAM_COUNT");
+    String maxStreamCountVar = variables.getVariable("HOP_FILE_OUTPUT_MAX_STREAM_COUNT");
     int maxStreamCount = 0;
-    if (var != null) {
+    if (maxStreamCountVar != null) {
       try {
-        maxStreamCount = Integer.parseInt(var);
+        maxStreamCount = Integer.parseInt(maxStreamCountVar);
       } catch (Exception ex) {
         // Do nothing
       }
@@ -323,7 +335,9 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
     }
     isWriteHeader &=
         writingToFileForFirstTime
-            && (!meta.isFileAppended() || (!isFileExists(filename)) || isFileEmpty(filename));
+            && (!meta.getFileSettings().isFileAppended()
+                || (!isFileExists(filename))
+                || isFileEmpty(filename));
     return isWriteHeader;
   }
 
@@ -391,6 +405,25 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
       if (data.writer != null) {
         if (data.outputRowMeta != null && meta.isFooterEnabled()) {
           writeHeader();
+        } else if (first && meta.isHeaderEnabled()) {
+          // The file was created at pipeline start (init() -> initOutput()) but no rows were
+          // received, so the header was never written. Honor the enabled header for the empty
+          // result set.
+          String filename = getOutputFileName(null);
+          if (isWriteHeader(filename)) {
+            if (data.outputRowMeta == null) {
+              data.outputRowMeta =
+                  getPipelineMeta().getPrevTransformFields(variables, getTransformMeta());
+              if (data.outputRowMeta != null) {
+                meta.getFields(
+                    data.outputRowMeta, getTransformName(), null, null, this, metadataProvider);
+              }
+            }
+            // Without column metadata there is nothing to write a header from.
+            if (data.outputRowMeta != null) {
+              writeHeader();
+            }
+          }
         }
       } else if (!Utils.isEmpty(resolve(meta.getEndedLine())) && !meta.isFileNameInField()) {
         String filename = getOutputFileName(null);
@@ -401,7 +434,16 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
         writeEndedLine();
       }
       try {
-        flushOpenFiles(true);
+        TextFileOutputData.IFileStreamsCollection coll = data.getFileStreamsCollection();
+        if (coll != null) {
+          coll.forEachOpenStream(this::collectDataVolumeOut);
+          // Emit FILE_IO WRITE lineage for each output file before it is closed. This is the
+          // normal end-of-stream path; dispose()/close() is a safety-net for abrupt teardowns.
+          if (!data.isBeamContext()) {
+            coll.forEachOpenFile(this::emitWriteLineageForOpenStream);
+          }
+          flushOpenFiles(true);
+        }
       } catch (IOException e) {
         throw new HopException("Unable to flush open files", e);
       }
@@ -411,7 +453,10 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
   }
 
   public void flushOpenFiles(boolean closeAfterFlush) throws IOException {
-    data.getFileStreamsCollection().flushOpenFiles(true);
+    TextFileOutputData.IFileStreamsCollection coll = data.getFileStreamsCollection();
+    if (coll != null) {
+      coll.flushOpenFiles(true);
+    }
   }
 
   @Override
@@ -446,7 +491,7 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
 
   public void writeRow(IRowMeta rowMeta, Object[] r) throws HopTransformException {
     try {
-      if (meta.getOutputFields() == null || meta.getOutputFields().length == 0) {
+      if (meta.getOutputFields() == null || meta.getOutputFields().isEmpty()) {
         /*
          * Write all values in stream to text file.
          */
@@ -467,7 +512,7 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
         /*
          * Only write the fields specified!
          */
-        for (int i = 0; i < meta.getOutputFields().length; i++) {
+        for (int i = 0; i < meta.getOutputFields().size(); i++) {
           if (i > 0 && data.binarySeparator.length > 0) {
             data.writer.write(data.binarySeparator);
           }
@@ -567,8 +612,8 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
         } else {
           int currIndex = text.length;
           for (int i = 0; i < (length - string.length()); i++) {
-            for (int j = 0; j < filler.length; j++) {
-              bytes[currIndex++] = filler[j];
+            for (byte b : filler) {
+              bytes[currIndex++] = b;
             }
           }
         }
@@ -603,7 +648,7 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
       if (nullString != null && v.isNull(valueData)) {
         str = nullString;
       } else {
-        if (meta.isFastDump()) {
+        if (meta.getFileSettings().isFastDump()) {
           if (valueData instanceof byte[] bytesValueData) {
             str = bytesValueData;
           } else {
@@ -619,7 +664,7 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
         boolean writeEnclosures = false;
 
         if (v.isString()) {
-          if (meta.isEnclosureForced() && !meta.isPadded()) {
+          if (meta.isEnclosureForced() && !meta.getFileSettings().isPadded()) {
             writeEnclosures = true;
           } else if (!meta.isEnclosureFixDisabled()
               && containsSeparatorOrEnclosure(str, data.binarySeparator, data.binaryEnclosure)) {
@@ -637,8 +682,7 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
         } else {
           // Skip the enclosures, double them instead...
           int from = 0;
-          for (int i = 0; i < enclosures.size(); i++) {
-            int position = enclosures.get(i);
+          for (int position : enclosures) {
             data.writer.write(str, from, position + data.binaryEnclosure.length - from);
             data.writer.write(data.binaryEnclosure); // write enclosure a second time
             from = position + data.binaryEnclosure.length;
@@ -704,9 +748,9 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
 
     try {
       // If we have fields specified: list them in this order!
-      if (meta.getOutputFields() != null && meta.getOutputFields().length > 0) {
-        for (int i = 0; i < meta.getOutputFields().length; i++) {
-          String fieldName = meta.getOutputFields()[i].getName();
+      if (meta.getOutputFields() != null && !meta.getOutputFields().isEmpty()) {
+        for (int i = 0; i < meta.getOutputFields().size(); i++) {
+          String fieldName = meta.getOutputFields().get(i).getName();
           IValueMeta v = r.searchValueMeta(fieldName);
 
           if (i > 0 && data.binarySeparator.length > 0) {
@@ -772,7 +816,7 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
   public String buildFilename(String filename, boolean ziparchive) {
     return meta.buildFilename(
         filename,
-        meta.getExtension(),
+        meta.getFileSettings().getExtension(),
         this,
         getCopy(),
         getPartitionId(),
@@ -784,9 +828,117 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
         meta);
   }
 
+  /**
+   * Returns the live data volume out by combining bytes from already-closed streams (accumulated in
+   * dataVolumeOut) with live counts from currently-open CountingOutputStreams.
+   */
+  @Override
+  public Long getDataVolumeOut() {
+    long total = dataVolumeOut != null ? dataVolumeOut : 0L;
+    TextFileOutputData.IFileStreamsCollection coll = data.getFileStreamsCollection();
+    if (coll != null) {
+      long[] live = {0};
+      coll.forEachOpenStream(
+          fs -> {
+            if (fs.getFileOutputStream() instanceof CountingOutputStream cos) {
+              live[0] += cos.getCount();
+            }
+          });
+      total += live[0];
+    }
+    return total > 0 ? total : null;
+  }
+
+  /**
+   * Columns actually written to the text file (subset when {@code outputFields} is set), not the
+   * full transform output row.
+   */
+  private FileIoContentSchema writtenFileContentSchema() {
+    List<FileIoTabularColumn> cols = new ArrayList<>();
+    if (meta.getOutputFields() != null && !meta.getOutputFields().isEmpty()) {
+      for (TextFileField f : meta.getOutputFields()) {
+        String typeDesc = f.getTypeDesc();
+        if (data.outputRowMeta != null) {
+          IValueMeta v = data.outputRowMeta.searchValueMeta(f.getName());
+          if (v != null) {
+            typeDesc = v.getTypeDesc();
+          }
+        }
+        cols.add(
+            new FileIoTabularColumn(
+                f.getName(),
+                typeDesc,
+                f.getLength(),
+                f.getPrecision(),
+                null,
+                FileIoPathSyntax.NONE,
+                false));
+      }
+    } else if (data.outputRowMeta != null) {
+      for (int i = 0; i < data.outputRowMeta.size(); i++) {
+        IValueMeta v = data.outputRowMeta.getValueMeta(i);
+        cols.add(
+            new FileIoTabularColumn(
+                v.getName(),
+                v.getTypeDesc(),
+                v.getLength(),
+                v.getPrecision(),
+                null,
+                FileIoPathSyntax.DELIMITED,
+                false));
+      }
+    }
+    if (cols.isEmpty()) {
+      return null;
+    }
+    return new FileIoContentSchema("delimited", cols, List.of());
+  }
+
+  /** Flushes the given stream and adds its written byte count to dataVolumeOut. */
+  private void collectDataVolumeOut(TextFileOutputData.FileStream fs) {
+    if (fs == null || !fs.isOpen()) {
+      return;
+    }
+    try {
+      if (fs.getBufferedOutputStream() != null) {
+        fs.getBufferedOutputStream().flush();
+      }
+    } catch (IOException e) {
+      logDebug("Flush before reading data volume out: " + e.getMessage());
+    }
+    if (fs.getFileOutputStream() instanceof CountingOutputStream cos) {
+      dataVolumeOut = (dataVolumeOut != null ? dataVolumeOut : 0L) + cos.getCount();
+    }
+  }
+
   protected boolean closeFile(String filename) {
     try {
-      data.getFileStreamsCollection().closeFile(filename);
+      TextFileOutputData.IFileStreamsCollection coll = data.getFileStreamsCollection();
+      if (coll != null) {
+        TextFileOutputData.FileStream fs = coll.getStream(filename);
+        long written = 0L;
+        if (fs != null && fs.getFileOutputStream() instanceof CountingOutputStream cos) {
+          written = cos.getCount();
+        }
+        collectDataVolumeOut(fs);
+        if (!data.isBeamContext() && written > 0) {
+          try {
+            FileObject outFile = HopVfs.getFileObject(filename, this);
+            LineageFileIoEmitter.emitTransformFileIo(
+                this,
+                FileIoOperation.WRITE,
+                null,
+                outFile,
+                written,
+                true,
+                null,
+                writtenFileContentSchema());
+          } catch (Exception ignored) {
+            // lineage is best-effort
+          }
+        }
+        coll.closeFile(filename);
+      }
     } catch (Exception e) {
       logError("Exception trying to close file: " + e.toString());
       setErrors(1);
@@ -800,7 +952,17 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
 
     try {
       if (data.writer != null) {
-        data.getFileStreamsCollection().closeStream(data.writer);
+        final OutputStream writer = data.writer;
+        TextFileOutputData.IFileStreamsCollection coll = data.getFileStreamsCollection();
+        if (coll != null) {
+          coll.forEachOpenStream(
+              fs -> {
+                if (fs.getBufferedOutputStream() == writer) {
+                  collectDataVolumeOut(fs);
+                }
+              });
+          coll.closeStream(data.writer);
+        }
       }
       data.writer = null;
       data.out = null;
@@ -812,7 +974,6 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
     } catch (Exception e) {
       logError("Exception trying to close file: " + e.toString());
       setErrors(1);
-      // Clean resources
       data.writer = null;
       data.out = null;
       data.fos = null;
@@ -826,18 +987,47 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
   public boolean init() {
 
     if (super.init()) {
+      if (meta.ignoreFields) {
+        try {
+          SchemaDefinition loadedSchemaDefinition =
+              (new SchemaDefinitionUtil())
+                  .loadSchemaDefinition(metadataProvider, meta.getSchemaDefinition());
+          if (loadedSchemaDefinition != null) {
+            meta.getOutputFields().clear();
+            for (SchemaFieldDefinition fieldDefinition :
+                loadedSchemaDefinition.getFieldDefinitions()) {
+              TextFileField field = new TextFileField();
+              field.setName(fieldDefinition.getName());
+              field.setType(fieldDefinition.getHopType());
+              field.setLength(fieldDefinition.getLength());
+              field.setPrecision(fieldDefinition.getPrecision());
+              field.setCurrencySymbol(fieldDefinition.getCurrencySymbol());
+              field.setDecimalSymbol(fieldDefinition.getDecimalSymbol());
+              field.setGroupingSymbol(fieldDefinition.getGroupingSymbol());
+              field.setTrimType(fieldDefinition.getTrimType());
+              field.setFormat(fieldDefinition.getFormatMask());
+              field.setTrimType(fieldDefinition.getTrimType());
+              field.setRoundingType(fieldDefinition.getRoundingType());
+              meta.getOutputFields().add(field);
+            }
+          }
+        } catch (HopTransformException e) {
+          // ignore any errors here.
+        }
+      }
       data.splitnr = 0;
       // In case user want to create file at first row
       // In that case, DO NOT create file at Init
-      if (!meta.isDoNotOpenNewFileInit() && !meta.isFileNameInField()) {
+      if (!meta.getFileSettings().isDoNotOpenNewFileInit() && !meta.isFileNameInField()) {
         try {
           initOutput();
         } catch (Exception e) {
           logError(
               "Couldn't open file "
-                  + HopVfs.getFriendlyURI(getParentVariables().resolve(meta.getFileName()))
+                  + HopVfs.getFriendlyURI(
+                      getParentVariables().resolve(meta.getFileSettings().getFileName()))
                   + "."
-                  + getParentVariables().resolve(meta.getExtension()),
+                  + getParentVariables().resolve(meta.getFileSettings().getExtension()),
               e);
           setErrors(1L);
           stopAll();
@@ -877,8 +1067,8 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
         if (!Utils.isEmpty(meta.getEnclosure())) {
           data.binaryEnclosure = resolve(meta.getEnclosure()).getBytes(meta.getEncoding());
         }
-        if (!Utils.isEmpty(meta.getNewline())) {
-          data.binaryNewline = meta.getNewline().getBytes(meta.getEncoding());
+        if (!Utils.isEmpty(meta.getNewLine())) {
+          data.binaryNewline = meta.getNewLine().getBytes(meta.getEncoding());
         }
       } else {
         if (!Utils.isEmpty(meta.getSeparator())) {
@@ -887,15 +1077,15 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
         if (!Utils.isEmpty(meta.getEnclosure())) {
           data.binaryEnclosure = resolve(meta.getEnclosure()).getBytes();
         }
-        if (!Utils.isEmpty(meta.getNewline())) {
-          data.binaryNewline = resolve(meta.getNewline()).getBytes();
+        if (!Utils.isEmpty(meta.getNewLine())) {
+          data.binaryNewline = resolve(meta.getNewLine()).getBytes();
         }
       }
 
-      data.binaryNullValue = new byte[meta.getOutputFields().length][];
-      for (int i = 0; i < meta.getOutputFields().length; i++) {
+      data.binaryNullValue = new byte[meta.getOutputFields().size()][];
+      for (int i = 0; i < meta.getOutputFields().size(); i++) {
         data.binaryNullValue[i] = null;
-        String nullString = meta.getOutputFields()[i].getNullString();
+        String nullString = meta.getOutputFields().get(i).getNullString();
         if (!Utils.isEmpty(nullString)) {
           if (data.hasEncoding) {
             data.binaryNullValue[i] = nullString.getBytes(meta.getEncoding());
@@ -911,9 +1101,44 @@ public class TextFileOutput<Meta extends TextFileOutputMeta, Data extends TextFi
   }
 
   protected void close() throws IOException {
-    if (!meta.isServletOutput()) {
-      data.getFileStreamsCollection().flushOpenFiles(true);
-      data.writer = null;
+    TextFileOutputData.IFileStreamsCollection coll = data.getFileStreamsCollection();
+    if (coll != null) {
+      coll.forEachOpenStream(this::collectDataVolumeOut);
+      // Emit FILE_IO WRITE lineage for any still-open output streams before they are closed.
+      // closeFile(String) already handles rolled / split files mid-pipeline; this covers the
+      // common case of a single (or final) output file closed only at dispose time.
+      if (!data.isBeamContext()) {
+        coll.forEachOpenFile(this::emitWriteLineageForOpenStream);
+      }
+      coll.flushOpenFiles(true);
+    }
+    data.writer = null;
+  }
+
+  private void emitWriteLineageForOpenStream(String filename, TextFileOutputData.FileStream fs) {
+    if (fs == null) {
+      return;
+    }
+    long written = 0L;
+    if (fs.getFileOutputStream() instanceof CountingOutputStream cos) {
+      written = cos.getCount();
+    }
+    if (written <= 0) {
+      return;
+    }
+    try {
+      FileObject outFile = HopVfs.getFileObject(filename, this);
+      LineageFileIoEmitter.emitTransformFileIo(
+          this,
+          FileIoOperation.WRITE,
+          null,
+          outFile,
+          written,
+          true,
+          null,
+          writtenFileContentSchema());
+    } catch (Exception ignored) {
+      // lineage is best-effort
     }
   }
 

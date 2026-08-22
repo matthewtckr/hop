@@ -32,7 +32,6 @@ import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
-import org.apache.hop.metadata.api.IIntCodeConverter;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.BaseTransformMeta;
 import org.apache.hop.pipeline.transform.TransformMeta;
@@ -58,16 +57,6 @@ public class GetVariableMeta extends BaseTransformMeta<GetVariable, GetVariableD
   public GetVariableMeta() {
     super();
     this.fieldDefinitions = new ArrayList<>();
-  }
-
-  public GetVariableMeta(GetVariableMeta m) {
-    this();
-    m.fieldDefinitions.forEach(f -> this.fieldDefinitions.add(new FieldDefinition(f)));
-  }
-
-  @Override
-  public GetVariableMeta clone() {
-    return new GetVariableMeta(this);
   }
 
   @Override
@@ -126,22 +115,6 @@ public class GetVariableMeta extends BaseTransformMeta<GetVariable, GetVariableD
     }
   }
 
-  public static final class IntTypeConverter implements IIntCodeConverter {
-    public IntTypeConverter() {
-      // Do nothing
-    }
-
-    @Override
-    public String getCode(int type) {
-      return ValueMetaFactory.getValueMetaName(type);
-    }
-
-    @Override
-    public int getType(String code) {
-      return ValueMetaFactory.getIdForValueMeta(code);
-    }
-  }
-
   public static final class FieldDefinition {
     @HopMetadataProperty(
         key = "name",
@@ -158,8 +131,7 @@ public class GetVariableMeta extends BaseTransformMeta<GetVariable, GetVariableD
     @HopMetadataProperty(
         key = "type",
         injectionKey = "FIELDTYPE",
-        injectionKeyDescription = "GetVariable.Injection.FIELDTYPE",
-        intCodeConverter = IntTypeConverter.class)
+        injectionKeyDescription = "GetVariable.Injection.FIELDTYPE")
     private String fieldType;
 
     @HopMetadataProperty(

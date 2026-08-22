@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Map;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
 import org.apache.hop.core.Result;
@@ -43,6 +43,7 @@ import org.apache.hop.core.util.FileUtil;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.vfs.HopVfs;
+import org.apache.hop.execution.ExecutionWait;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
@@ -196,10 +197,19 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
   @HopMetadataProperty(key = "wait_until_finished")
   private boolean waitingToFinish = true;
 
+  /**
+   * Maximum time to wait for the pipeline to complete, in milliseconds. Empty or 0 means wait
+   * indefinitely. Only used when {@link #waitingToFinish} is true.
+   */
+  @HopMetadataProperty(key = "wait_timeout")
+  private String waitTimeout;
+
   @HopMetadataProperty(key = "parameters")
   private ParameterDefinition parameterDefinition;
 
-  @HopMetadataProperty(key = "run_configuration")
+  @HopMetadataProperty(
+      key = "run_configuration",
+      hopMetadataPropertyType = HopMetadataPropertyType.PIPELINE_RUN_CONFIG)
   private String runConfiguration;
 
   private IPipelineEngine<PipelineMeta> pipeline;
@@ -329,8 +339,11 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
       }
     }
 
-    logDetailed(
-        BaseMessages.getString(PKG, "ActionPipeline.Log.OpeningPipeline", resolve(getFilename())));
+    if (isDetailed()) {
+      logDetailed(
+          BaseMessages.getString(
+              PKG, "ActionPipeline.Log.OpeningPipeline", resolve(getFilename())));
+    }
 
     // Load the pipeline only once for the complete loop!
     // Throws an exception if it was not possible to load the pipeline, for example if the XML file
@@ -460,7 +473,6 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
             }
           }
         } else {
-
           if (paramsFromPrevious) {
             // Copy the input the parameters
             for (Parameter parameter : parameterDefinition.getParameters()) {
@@ -495,7 +507,10 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
         }
 
         runConfiguration = resolve(runConfiguration);
-        logBasic(BaseMessages.getString(PKG, "ActionPipeline.RunConfig.Message", runConfiguration));
+        if (isBasic()) {
+          logBasic(
+              BaseMessages.getString(PKG, "ActionPipeline.RunConfig.Message", runConfiguration));
+        }
 
         // Create the pipeline from meta-data
         //
@@ -515,11 +530,15 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
         pipeline.setMetadataProvider(getMetadataProvider());
 
         // Handle parameters...
+        // Factory already initialized the pipeline from this action's variables (parent workflow
+        // + env). Do not re-initialize from null or environment variables are dropped.
         //
-        pipeline.initializeFrom(null);
         pipeline.copyParametersFromDefinitions(pipelineMeta);
 
         // Pass the parameter values and activate...
+        // Note: getValues() returns unresolved values, which will be resolved once in
+        // activateParams()
+        // We must NOT resolve them here to avoid double resolution
         //
         TransformWithMappingMeta.activateParams(
             pipeline,
@@ -545,13 +564,22 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
           // Wait until we're done with this pipeline
           //
           if (isWaitingToFinish()) {
-            pipeline.waitUntilFinished();
+            long timeoutMs = ExecutionWait.parseTimeoutMs(this, waitTimeout);
+            boolean finishedInTime = ExecutionWait.waitForPipeline(pipeline, timeoutMs);
+            if (!finishedInTime) {
+              logError(
+                  BaseMessages.getString(
+                      PKG, "ActionPipeline.Log.WaitTimeoutReached", Long.toString(timeoutMs)));
+            }
 
             if (parentWorkflow.isStopped() || pipeline.getErrors() != 0) {
               pipeline.stopAll();
               result.setNrErrors(1);
             }
             updateResult(result);
+            if (!finishedInTime) {
+              result.setNrErrors(result.getNrErrors() + 1);
+            }
           }
           if (setLogfile) {
             ResultFile resultFile =
@@ -578,35 +606,29 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
       iteration++;
     }
 
-    if (setLogfile) {
-      if (logChannelFileWriter != null) {
-        logChannelFileWriter.stopLogging();
+    if (setLogfile && logChannelFileWriter != null) {
+      logChannelFileWriter.stopLogging();
 
-        ResultFile resultFile =
-            new ResultFile(
-                ResultFile.FILE_TYPE_LOG,
-                logChannelFileWriter.getLogFile(),
-                parentWorkflow.getWorkflowName(),
-                getName());
-        result.getResultFiles().put(resultFile.getFile().toString(), resultFile);
+      ResultFile resultFile =
+          new ResultFile(
+              ResultFile.FILE_TYPE_LOG,
+              logChannelFileWriter.getLogFile(),
+              parentWorkflow.getWorkflowName(),
+              getName());
+      result.getResultFiles().put(resultFile.getFile().toString(), resultFile);
 
-        // See if anything went wrong during file writing...
-        //
-        if (logChannelFileWriter.getException() != null) {
-          logError("Unable to open log file [" + getLogFilename() + "] : ");
-          logError(Const.getStackTracker(logChannelFileWriter.getException()));
-          result.setNrErrors(1);
-          result.setResult(false);
-          return result;
-        }
+      // See if anything went wrong during file writing...
+      //
+      if (logChannelFileWriter.getException() != null) {
+        logError("Unable to open log file [" + getLogFilename() + "] : ");
+        logError(Const.getStackTracker(logChannelFileWriter.getException()));
+        result.setNrErrors(1);
+        result.setResult(false);
+        return result;
       }
     }
 
-    if (result.getNrErrors() == 0) {
-      result.setResult(true);
-    } else {
-      result.setResult(false);
-    }
+    result.setResult(result.getNrErrors() == 0);
 
     return result;
   }
@@ -793,6 +815,14 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
     this.waitingToFinish = waitingToFinish;
   }
 
+  public String getWaitTimeout() {
+    return waitTimeout;
+  }
+
+  public void setWaitTimeout(String waitTimeout) {
+    this.waitTimeout = waitTimeout;
+  }
+
   public String getRunConfiguration() {
     return runConfiguration;
   }
@@ -856,8 +886,11 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
       // parameter.getValue()
       //
       String thisValue = namedParam.getParameterValue(parameter.getName());
-      // Set value only if is not empty at namedParam and exists in parameter.getField
+      // Only set variables for field-based parameters, not for value-based parameters
+      // Value-based parameters will be passed directly and should not be set as variables
+      // to avoid double resolution issues in activateParams()
       if (!Utils.isEmpty(Const.trim(parameter.getField()))) {
+        // Field-based parameter: set as variable so it can be used in the pipeline
         // If is not empty then we have to ask if it exists too in parameter.getValue(), since
         // the values in parameter.getValue() prevail over parameterFieldNames
         // If is empty at parameter.getValue(), then we can finally add that variable with that
@@ -865,10 +898,9 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
         if (Utils.isEmpty(Const.trim(parameter.getValue()))) {
           actionPipeline.setVariable(parameter.getName(), Const.NVL(thisValue, ""));
         }
-      } else {
-        // Or if not in parameter.getValue() then we can add that variable with that value too
-        actionPipeline.setVariable(parameter.getName(), Const.NVL(thisValue, ""));
       }
+      // For value-based parameters (those with parameter.getValue() set), do NOT set as variable
+      // They will be passed as parameters and resolved in activateParams()
     }
   }
 
@@ -966,5 +998,10 @@ public class ActionPipeline extends ActionBase implements Cloneable, IAction {
 
   public void setClearResultFiles(boolean clearResultFiles) {
     this.clearResultFiles = clearResultFiles;
+  }
+
+  @Override
+  public boolean supportsDrillDown() {
+    return true;
   }
 }

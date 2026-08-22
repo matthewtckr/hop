@@ -21,7 +21,9 @@ import java.util.List;
 import java.util.Properties;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.file.IHasFilename;
+import org.apache.hop.core.search.ISearchable;
 import org.apache.hop.core.variables.IVariables;
+import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.ui.hopgui.HopGui;
 import org.apache.hop.ui.hopgui.context.IGuiContextHandler;
 
@@ -55,6 +57,12 @@ public interface IHopFileType {
   String CAPABILITY_FILE_HISTORY = "FileHistory";
 
   String CAPABILITY_HANDLE_METADATA = "HandleMetadata";
+
+  /**
+   * Opt-in capability: include files of this type when enumerating project (and open-tab)
+   * searchables. Types without this capability are not discovered by project-wide search.
+   */
+  String CAPABILITY_SEARCH = "Search";
 
   /**
    * @return The name of this file type
@@ -96,13 +104,13 @@ public interface IHopFileType {
    *
    * @param hopGui The hop GUI to reference
    * @param filename The filename to load
-   * @param parentVariableSpace The parent variablespace to inherit from
+   * @param variables The parent variables to inherit from
    * @return The hop file handler
    */
-  IHopFileTypeHandler openFile(HopGui hopGui, String filename, IVariables parentVariableSpace)
+  IHopFileTypeHandler openFile(HopGui hopGui, String filename, IVariables variables)
       throws HopException;
 
-  IHopFileTypeHandler newFile(HopGui hopGui, IVariables parentVariableSpace) throws HopException;
+  IHopFileTypeHandler newFile(HopGui hopGui, IVariables variables) throws HopException;
 
   /**
    * Look at the given file and see if it's handled by this type. Usually this is done by simply
@@ -136,4 +144,35 @@ public interface IHopFileType {
    * @return The path to the SVG file, a logo for this file type
    */
   String getFileTypeImage();
+
+  /**
+   * Whether this file type supports opening (shows content in an editor). When false, the Open
+   * action is disabled for files of this type. Folders are not affected.
+   *
+   * @return true if opening a file of this type shows an editor, false if it would do nothing
+   */
+  default boolean supportsOpening() {
+    return true;
+  }
+
+  /**
+   * Build a searchable representation of the given file without opening it in the UI. Called by
+   * project search when this type {@linkplain #hasCapability(String) has} {@link
+   * #CAPABILITY_SEARCH}. The default returns {@code null} (not searchable).
+   *
+   * @param filename the path of the file on disk
+   * @param locationDescription a short label for where the file was found (e.g. "Project file")
+   * @param variables the variables to use when loading the file
+   * @param metadataProvider the metadata provider (pipelines/workflows may need it)
+   * @return an {@link ISearchable}, or {@code null} if this type cannot search the file
+   * @throws HopException if loading the file fails
+   */
+  default ISearchable createSearchable(
+      String filename,
+      String locationDescription,
+      IVariables variables,
+      IHopMetadataProvider metadataProvider)
+      throws HopException {
+    return null;
+  }
 }

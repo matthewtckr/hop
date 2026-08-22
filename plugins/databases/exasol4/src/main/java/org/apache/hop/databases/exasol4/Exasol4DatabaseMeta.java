@@ -22,7 +22,9 @@ import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.Database;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.exception.HopDatabaseException;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
@@ -31,7 +33,8 @@ import org.apache.hop.core.row.IValueMeta;
 @DatabaseMetaPlugin(
     type = "EXASOL4",
     typeDescription = "Exasol",
-    documentationUrl = "/database/databases/exasol.html")
+    documentationUrl = "/database/databases/exasol.html",
+    classLoaderGroup = "exasol4-db")
 @GuiPlugin(id = "GUI-ExasolDatabaseMeta")
 public class Exasol4DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
 
@@ -100,6 +103,19 @@ public class Exasol4DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   }
 
   @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("com.exasol:exasol-jdbc")
+        .defaultVersion("26.2.7")
+        .licenseCategory("X")
+        .licenseName("EXASOL License")
+        .licenseUrl("https://docs.exasol.com/db/latest/connect_exasol/drivers/jdbc.htm")
+        .vendor("Exasol")
+        .vendorUrl("https://www.exasol.com/")
+        .build();
+  }
+
+  @Override
   public String getURL(String hostname, String port, String databaseName)
       throws HopDatabaseException {
     return "jdbc:exa:" + hostname + ":" + port;
@@ -156,7 +172,7 @@ public class Exasol4DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return CONST_ALTER_TABLE
         + tableName
         + " ADD ( "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false)
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN)
         + " ) ";
   }
 
@@ -195,7 +211,8 @@ public class Exasol4DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return CONST_ALTER_TABLE
         + tableName
         + " MODIFY COLUMN "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -226,29 +243,21 @@ public class Exasol4DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
         ) {
           retval.append("BIGINT NOT NULL PRIMARY KEY");
         } else {
-          if (type == IValueMeta.TYPE_INTEGER) {
-            // Integer values...
-            if (length > 0) {
-              retval.append("DECIMAL(" + length + ")");
-            } else {
-              retval.append("INTEGER");
+          switch (type) {
+            case IValueMeta.TYPE_INTEGER -> {
+              if (length > 0) {
+                retval.append("DECIMAL(").append(length).append(")");
+              } else {
+                retval.append("INTEGER");
+              }
             }
-          } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-            // Fixed point value...
-            if (length
-                < 1) { // user configured no value for length. Use 16 digits, which is comparable to
-              // mantissa 2^53 of IEEE 754 binary64 "double".
-              length = 16;
+            case IValueMeta.TYPE_BIGNUMBER -> {
+              int len = (length < 1) ? 16 : length;
+              int p = (precision < 1) ? 16 : precision;
+
+              retval.append("DECIMAL(").append(len).append(",").append(p).append(")");
             }
-            if (precision
-                < 1) { // user configured no value for precision. Use 16 digits, which is comparable
-              // to IEEE 754 binary64 "double".
-              precision = 16;
-            }
-            retval.append("DECIMAL(" + length + "," + precision + ")");
-          } else {
-            // Floating point value with double precision...
-            retval.append("DOUBLE");
+            default -> retval.append("DOUBLE");
           }
         }
 

@@ -22,11 +22,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
-import org.apache.commons.lang.builder.EqualsBuilder;
+import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.plugins.PluginRegistry;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.transform.ITransformMeta;
 import org.apache.hop.pipeline.transforms.loadsave.LoadSaveTester;
 import org.apache.hop.pipeline.transforms.loadsave.initializer.IInitializer;
@@ -34,17 +34,19 @@ import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValid
 import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidatorFactory;
 import org.apache.hop.pipeline.transforms.loadsave.validator.ListLoadSaveValidator;
 import org.apache.hop.pipeline.transforms.loadsave.validator.ObjectValidator;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class ExecSqlMetaTest implements IInitializer<ITransformMeta> {
+class ExecSqlMetaTest implements IInitializer<ITransformMeta> {
   LoadSaveTester loadSaveTester;
   Class<ExecSqlMeta> testMetaClass = ExecSqlMeta.class;
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
 
-  @Before
-  public void setUpLoadSave() throws Exception {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
+
+  @BeforeEach
+  void setUpLoadSave() throws Exception {
     HopEnvironment.init();
     PluginRegistry.init();
     List<String> attributes =
@@ -63,7 +65,7 @@ public class ExecSqlMetaTest implements IInitializer<ITransformMeta> {
             "arguments");
 
     Map<String, String> getterMap =
-        new HashMap<String, String>() {
+        new HashMap<>() {
           {
             put("connection", "getConnection");
             put("sql", "getSql");
@@ -80,7 +82,7 @@ public class ExecSqlMetaTest implements IInitializer<ITransformMeta> {
           }
         };
     Map<String, String> setterMap =
-        new HashMap<String, String>() {
+        new HashMap<>() {
           {
             put("connection", "setConnection");
             put("sql", "setSql");
@@ -119,12 +121,12 @@ public class ExecSqlMetaTest implements IInitializer<ITransformMeta> {
             validatorFactory,
             ExecSqlArgumentItem.class,
             Arrays.asList("name"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "getName");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "setName");
               }
@@ -173,7 +175,7 @@ public class ExecSqlMetaTest implements IInitializer<ITransformMeta> {
   }
 
   @Test
-  public void testSerialization() throws HopException {
+  void testSerialization() throws HopException {
     loadSaveTester.testSerialization();
   }
 }

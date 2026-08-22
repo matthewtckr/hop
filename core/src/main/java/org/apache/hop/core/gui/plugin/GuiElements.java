@@ -23,7 +23,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.util.StringUtil;
 import org.apache.hop.metadata.api.IHopMetadata;
 
@@ -48,6 +48,9 @@ public class GuiElements extends BaseGuiElements implements Comparable<GuiElemen
   private boolean variablesEnabled;
 
   private boolean password;
+
+  /** Height in text lines for MULTI_LINE_TEXT (minimum 1). */
+  private int multiLineTextHeight = 1;
 
   private String fieldName;
 
@@ -76,8 +79,14 @@ public class GuiElements extends BaseGuiElements implements Comparable<GuiElemen
   private Class<? extends IHopMetadata> metadata;
   private Method buttonMethod;
 
+  private String group;
+  private String groupOrder;
+  private String groupImage;
+  private GuiWidgetGroupType groupType;
+
   public GuiElements() {
     children = new ArrayList<>();
+    groupType = GuiWidgetGroupType.NONE;
   }
 
   public GuiElements(GuiWidgetElement guiElement, Field field) {
@@ -104,6 +113,7 @@ public class GuiElements extends BaseGuiElements implements Comparable<GuiElemen
     this.disabledImage = null;
     this.variablesEnabled = guiElement.variables();
     this.password = guiElement.password();
+    this.multiLineTextHeight = Math.max(1, guiElement.multiLineTextHeight());
     this.ignored = guiElement.ignored();
     this.addingSeparator = guiElement.separator();
     this.label = getTranslation(guiElement.label(), fieldPackageName, field.getDeclaringClass());
@@ -112,6 +122,7 @@ public class GuiElements extends BaseGuiElements implements Comparable<GuiElemen
     this.typeFilename = guiElement.typeFilename();
     this.metadata = guiElement.metadata();
     this.buttonMethod = null;
+    copyGroup(guiElement, fieldPackageName, field.getDeclaringClass());
   }
 
   /**
@@ -143,6 +154,7 @@ public class GuiElements extends BaseGuiElements implements Comparable<GuiElemen
     this.disabledImage = null;
     this.variablesEnabled = guiElement.variables();
     this.password = guiElement.password();
+    this.multiLineTextHeight = Math.max(1, guiElement.multiLineTextHeight());
     this.ignored = guiElement.ignored();
     this.addingSeparator = guiElement.separator();
     this.label = getTranslation(guiElement.label(), methodPackageName, method.getDeclaringClass());
@@ -152,6 +164,14 @@ public class GuiElements extends BaseGuiElements implements Comparable<GuiElemen
     this.metadata = guiElement.metadata();
     this.classLoader = classLoader;
     this.buttonMethod = method;
+    copyGroup(guiElement, methodPackageName, method.getDeclaringClass());
+  }
+
+  private void copyGroup(GuiWidgetElement guiElement, String i18nPackage, Class<?> resourceClass) {
+    this.group = getTranslation(guiElement.group(), i18nPackage, resourceClass);
+    this.groupOrder = guiElement.groupOrder();
+    this.groupImage = guiElement.groupImage();
+    this.groupType = guiElement.groupType();
   }
 
   /** Sort the children using the sort order. If no sort field is available we use the ID */
@@ -368,6 +388,22 @@ public class GuiElements extends BaseGuiElements implements Comparable<GuiElemen
    */
   public void setPassword(boolean password) {
     this.password = password;
+  }
+
+  /**
+   * Preferred height for {@link GuiElementType#MULTI_LINE_TEXT}, in text lines (at least 1).
+   *
+   * @return value of multiLineTextHeight
+   */
+  public int getMultiLineTextHeight() {
+    return multiLineTextHeight;
+  }
+
+  /**
+   * @param multiLineTextHeight The multiLineTextHeight to set (clamped to at least 1)
+   */
+  public void setMultiLineTextHeight(int multiLineTextHeight) {
+    this.multiLineTextHeight = Math.max(1, multiLineTextHeight);
   }
 
   /**
@@ -594,5 +630,41 @@ public class GuiElements extends BaseGuiElements implements Comparable<GuiElemen
    */
   public void setButtonMethod(Method buttonMethod) {
     this.buttonMethod = buttonMethod;
+  }
+
+  public String getGroup() {
+    return group;
+  }
+
+  public void setGroup(String group) {
+    this.group = group;
+  }
+
+  public String getGroupOrder() {
+    return groupOrder;
+  }
+
+  public void setGroupOrder(String groupOrder) {
+    this.groupOrder = groupOrder;
+  }
+
+  public String getGroupImage() {
+    return groupImage;
+  }
+
+  public void setGroupImage(String groupImage) {
+    this.groupImage = groupImage;
+  }
+
+  public GuiWidgetGroupType getGroupType() {
+    return groupType == null ? GuiWidgetGroupType.NONE : groupType;
+  }
+
+  public void setGroupType(GuiWidgetGroupType groupType) {
+    this.groupType = groupType;
+  }
+
+  public boolean hasGroup() {
+    return StringUtils.isNotEmpty(group);
   }
 }

@@ -17,6 +17,7 @@
 
 package org.apache.hop.mail.workflow.actions.getpop;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.i18n.BaseMessages;
 
 /** MailConnection handles the process of connecting to, reading from POP3/IMAP. */
@@ -251,6 +252,7 @@ public class MailConnectionMeta {
     return afterGetIMAPDesc[i];
   }
 
+  @SuppressWarnings("javabugs:S6466") // the desc array is a non-empty constant
   public static String getValueImapListDesc(int i) {
     if (i < 0 || i >= valueIMAPListDesc.length) {
       return valueIMAPListDesc[0];
@@ -259,7 +261,7 @@ public class MailConnectionMeta {
   }
 
   public static int getConditionDateByDesc(String tt) {
-    if (tt == null) {
+    if (StringUtils.isBlank(tt)) {
       return 0;
     }
 

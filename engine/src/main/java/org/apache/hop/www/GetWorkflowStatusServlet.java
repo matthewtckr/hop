@@ -20,14 +20,15 @@ package org.apache.hop.www;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintWriter;
+import java.io.Serial;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.annotations.HopServerServlet;
 import org.apache.hop.core.exception.HopException;
@@ -50,8 +51,7 @@ import org.owasp.encoder.Encode;
 @HopServerServlet(id = "workflowStatus", name = "Get the status of a workflow")
 public class GetWorkflowStatusServlet extends BaseHttpServlet implements IHopServerPlugin {
   private static final Class<?> PKG = GetWorkflowStatusServlet.class;
-
-  private static final long serialVersionUID = 3634806745372015720L;
+  @Serial private static final long serialVersionUID = 3634806745372015720L;
   public static final String CONTEXT_PATH = "/hop/workflowStatus";
   private static final String CONST_LINK = "<a target=\"_blank\" href=\"";
   private static final String CONST_NAME = "?name=";
@@ -59,7 +59,7 @@ public class GetWorkflowStatusServlet extends BaseHttpServlet implements IHopSer
   private static final String CONST_TD_CLOSE = "</td>";
 
   private static final byte[] XML_HEADER =
-      XmlHandler.getXmlHeader(Const.XML_ENCODING).getBytes(StandardCharsets.UTF_8);
+      XmlHandler.getXmlHeader(Const.UTF_8).getBytes(StandardCharsets.UTF_8);
 
   public GetWorkflowStatusServlet() {}
 
@@ -80,28 +80,14 @@ public class GetWorkflowStatusServlet extends BaseHttpServlet implements IHopSer
 
     String workflowName = request.getParameter("name");
     String id = request.getParameter("id");
-    String root =
-        request.getRequestURI() == null
-            ? StatusServletUtils.HOP_ROOT
-            : request.getRequestURI().substring(0, request.getRequestURI().indexOf(CONTEXT_PATH));
-    String prefix =
-        isJettyMode() ? StatusServletUtils.STATIC_PATH : root + StatusServletUtils.RESOURCES_PATH;
+    String prefix = getStaticPath(request, CONTEXT_PATH);
     boolean useXml = "Y".equalsIgnoreCase(request.getParameter("xml"));
     boolean useJson = "Y".equalsIgnoreCase(request.getParameter("json"));
     int startLineNr = Const.toInt(request.getParameter("from"), 0);
 
     response.setStatus(HttpServletResponse.SC_OK);
 
-    if (useXml) {
-      response.setContentType("text/xml");
-      response.setCharacterEncoding(Const.XML_ENCODING);
-    }
-    if (useJson) {
-      response.setContentType("application/json");
-      response.setCharacterEncoding(Const.XML_ENCODING);
-    } else {
-      response.setContentType("text/html;charset=UTF-8");
-    }
+    setResponseFormat(response, useXml, useJson);
 
     // ID is optional...
     //
@@ -144,12 +130,14 @@ public class GetWorkflowStatusServlet extends BaseHttpServlet implements IHopSer
           workflowStatus.setFirstLoggingLineNr(startLineNr);
           workflowStatus.setLastLoggingLineNr(lastLineNr);
           workflowStatus.setLogDate(workflow.getExecutionStartDate());
+          workflowStatus.setExecutionStartDate(workflow.getExecutionStartDate());
+          workflowStatus.setExecutionEndDate(workflow.getExecutionEndDate());
 
           // Add status of executed actions
           for (ActionResult actionResult : workflow.getActionResults()) {
             ActionStatus actionState = new ActionStatus();
             actionState.setName(actionResult.getActionName());
-            if (actionResult.getResult().getResult()) {
+            if (actionResult.getResult().isResult()) {
               actionState.setStatus(Status.FINISHED);
             } else {
               actionState.setStatus(Status.STOPPED);
@@ -165,6 +153,12 @@ public class GetWorkflowStatusServlet extends BaseHttpServlet implements IHopSer
             actionState.setStatus(Status.RUNNING);
             workflowStatus.getActionStatusList().add(actionState);
           }
+
+          // Send the tracker along: it holds the start and end of every action, the comments,
+          // reasons and timings, and it nests the trackers of child workflows. A client that is not
+          // running the workflow itself has no other way to show its metrics.
+          //
+          workflowStatus.setWorkflowTracker(workflow.getWorkflowTracker());
 
           // The log can be quite large at times, we are going to putIfAbsent a base64 encoding
           // around a compressed
@@ -201,12 +195,21 @@ public class GetWorkflowStatusServlet extends BaseHttpServlet implements IHopSer
           out.flush();
 
           response.flushBuffer();
-        } catch (HopException e) {
-          throw new ServletException("Unable to get the workflow status in XML or JSON format", e);
+        } catch (HopException | IOException e) {
+          writeXmlOrJsonApiError(
+              response,
+              null,
+              useXml,
+              useJson,
+              "Unable to get the workflow status in XML or JSON format",
+              e);
         }
       } else {
 
-        PrintWriter out = response.getWriter();
+        PrintWriter out = getSafeWriter(response);
+        if (out == null) {
+          return;
+        }
 
         int lastLineNr = HopLogStore.getLastBufferLineNr();
         int tableBorder = 0;
@@ -230,12 +233,14 @@ public class GetWorkflowStatusServlet extends BaseHttpServlet implements IHopSer
                   + "\">");
         }
         out.println("<META http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\">");
-        if (isJettyMode()) {
-          out.println(
-              "<link rel=\"stylesheet\" type=\"text/css\" href=\"/static/css/hop-server.css\" />");
-          out.println(
-              "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/images/favicon.svg\">");
-        }
+        out.println(
+            "<link rel=\"stylesheet\" type=\"text/css\" href=\""
+                + prefix
+                + "/css/hop-server.css\" />");
+        out.println(
+            "<link rel=\"icon\" type=\"image/svg+xml\" href=\""
+                + prefix
+                + "/images/favicon.svg\">");
         out.println("</HEAD>");
         out.println("<BODY style=\"overflow: auto;\">");
         out.println("<div class=\"row\" id=\"pucHeader\">");
@@ -436,7 +441,10 @@ public class GetWorkflowStatusServlet extends BaseHttpServlet implements IHopSer
         out.println("</HTML>");
       }
     } else {
-      PrintWriter out = response.getWriter();
+      PrintWriter out = getSafeWriter(response);
+      if (out == null) {
+        return;
+      }
       if (useXml) {
         out.println(
             new WebResult(

@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -29,17 +30,16 @@ import static org.mockito.Mockito.when;
 import java.util.Map;
 import org.apache.hop.databases.cassandra.datastax.DriverCqlRowHandler;
 import org.apache.hop.databases.cassandra.util.CassandraUtils;
-import org.junit.Before;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-public class CassandraOutputTest {
+class CassandraOutputTest {
 
   CassandraOutput co;
   CassandraOutputMeta meta;
 
-  @Before
-  public void setUp() throws Exception {
+  @BeforeEach
+  void setUp() throws Exception {
     co = mock(CassandraOutput.class);
     meta = mock(CassandraOutputMeta.class);
     co.options = mock(Map.class);
@@ -47,10 +47,12 @@ public class CassandraOutputTest {
   }
 
   @Test
-  public void validateInvalidTtlFieldTest() {
+  void validateInvalidTtlFieldTest() {
     DriverCqlRowHandler handler = mock(DriverCqlRowHandler.class);
     CassandraOutput co = mock(CassandraOutput.class);
 
+    // Set up mocks before calling real method
+    lenient().when(co.isDebug()).thenReturn(true);
     doCallRealMethod().when(co).validateTtlField(any(), any());
     doCallRealMethod().when(handler).setTtlSec(anyInt());
 
@@ -63,7 +65,7 @@ public class CassandraOutputTest {
   }
 
   @Test
-  public void validateEmptyTtlFieldTest() {
+  void validateEmptyTtlFieldTest() {
     DriverCqlRowHandler handler = mock(DriverCqlRowHandler.class);
     CassandraOutput co = mock(CassandraOutput.class);
 
@@ -79,7 +81,7 @@ public class CassandraOutputTest {
   }
 
   @Test
-  public void validateCorrectTtlFieldTest() {
+  void validateCorrectTtlFieldTest() {
     DriverCqlRowHandler handler = mock(DriverCqlRowHandler.class);
 
     doCallRealMethod().when(co).validateTtlField(any(), any());
@@ -93,16 +95,16 @@ public class CassandraOutputTest {
     verify(co, times(0)).logDebug(any());
   }
 
-  @Ignore("This test needs to be reviewed")
   @Test
-  public void validateSetTTLIfSpecifiedTestWithOptionNone() {
+  void validateSetTTLIfSpecifiedTestWithOptionNone() {
     String ttlResolveValue = "1"; // none option, this value is ignored default will be -1
     CassandraOutputMeta.TtlUnits ttlOption = CassandraOutputMeta.TtlUnits.NONE;
     int expectedValue = -1;
 
+    when(co.getMeta().getTtl()).thenReturn("${ttl}");
     when(co.resolve(anyString())).thenReturn(ttlResolveValue);
     when(co.getMeta().getTtlUnit()).thenReturn(ttlOption);
-    when(co.options.put(anyString(), anyString())).thenReturn("dummy");
+    lenient().when(co.options.put(anyString(), anyString())).thenReturn("dummy");
 
     doCallRealMethod().when(co).setTTLIfSpecified();
     co.setTTLIfSpecified();
@@ -110,17 +112,17 @@ public class CassandraOutputTest {
     verify(co.options, times(1)).put(CassandraUtils.BatchOptions.TTL, "" + expectedValue);
   }
 
-  @Ignore("This test needs to be reviewed")
   @Test
-  public void validateSetTTLIfSpecifiedTestWithOptionSeconds() {
+  void validateSetTTLIfSpecifiedTestWithOptionSeconds() {
     String ttlResolveValue = "1"; // 1 second
     CassandraOutputMeta.TtlUnits ttlOption = CassandraOutputMeta.TtlUnits.SECONDS;
 
     int expectedValue = 1;
 
+    when(co.getMeta().getTtl()).thenReturn("${ttl}");
     when(co.resolve(anyString())).thenReturn(ttlResolveValue);
     when(co.getMeta().getTtlUnit()).thenReturn(ttlOption);
-    when(co.options.put(anyString(), anyString())).thenReturn("dummy");
+    lenient().when(co.options.put(anyString(), anyString())).thenReturn("dummy");
 
     doCallRealMethod().when(co).setTTLIfSpecified();
     co.setTTLIfSpecified();
@@ -128,17 +130,17 @@ public class CassandraOutputTest {
     verify(co.options, times(1)).put(CassandraUtils.BatchOptions.TTL, "" + expectedValue);
   }
 
-  @Ignore("This test needs to be reviewed")
   @Test
-  public void validateSetTTLIfSpecifiedTestWithOptionMinutes() {
+  void validateSetTTLIfSpecifiedTestWithOptionMinutes() {
     String ttlResolveValue = "1"; // 1 minute
     CassandraOutputMeta.TtlUnits ttlOption = CassandraOutputMeta.TtlUnits.MINUTES;
 
     int expectedValue = 60;
 
+    when(co.getMeta().getTtl()).thenReturn("${ttl}");
     when(co.resolve(anyString())).thenReturn(ttlResolveValue);
     when(co.getMeta().getTtlUnit()).thenReturn(ttlOption);
-    when(co.options.put(anyString(), anyString())).thenReturn("dummy");
+    lenient().when(co.options.put(anyString(), anyString())).thenReturn("dummy");
 
     doCallRealMethod().when(co).setTTLIfSpecified();
     co.setTTLIfSpecified();
@@ -146,17 +148,17 @@ public class CassandraOutputTest {
     verify(co.options, times(1)).put(CassandraUtils.BatchOptions.TTL, "" + expectedValue);
   }
 
-  @Ignore("This test needs to be reviewed")
   @Test
-  public void validateSetTTLIfSpecifiedTestWithOptionHours() {
+  void validateSetTTLIfSpecifiedTestWithOptionHours() {
     String ttlResolveValue = "1"; // 1 hour
     CassandraOutputMeta.TtlUnits ttlOption = CassandraOutputMeta.TtlUnits.HOURS;
 
     int expectedValue = 3600;
 
+    when(co.getMeta().getTtl()).thenReturn("${ttl}");
     when(co.resolve(anyString())).thenReturn(ttlResolveValue);
     when(co.getMeta().getTtlUnit()).thenReturn(ttlOption);
-    when(co.options.put(anyString(), anyString())).thenReturn("dummy");
+    lenient().when(co.options.put(anyString(), anyString())).thenReturn("dummy");
 
     doCallRealMethod().when(co).setTTLIfSpecified();
     co.setTTLIfSpecified();
@@ -164,17 +166,17 @@ public class CassandraOutputTest {
     verify(co.options, times(1)).put(CassandraUtils.BatchOptions.TTL, "" + expectedValue);
   }
 
-  @Ignore("This test needs to be reviewed")
   @Test
-  public void validateSetTTLIfSpecifiedTestWithOptionDays() {
+  void validateSetTTLIfSpecifiedTestWithOptionDays() {
     String ttlResolveValue = "1"; // 1 day
     CassandraOutputMeta.TtlUnits ttlOption = CassandraOutputMeta.TtlUnits.DAYS;
 
     int expectedValue = 86400;
 
+    when(co.getMeta().getTtl()).thenReturn("${ttl}");
     when(co.resolve(anyString())).thenReturn(ttlResolveValue);
     when(co.getMeta().getTtlUnit()).thenReturn(ttlOption);
-    when(co.options.put(anyString(), anyString())).thenReturn("dummy");
+    lenient().when(co.options.put(anyString(), anyString())).thenReturn("dummy");
 
     doCallRealMethod().when(co).setTTLIfSpecified();
     co.setTTLIfSpecified();

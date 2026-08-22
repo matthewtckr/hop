@@ -93,11 +93,17 @@ public class WorkflowPainter extends BasePainter<WorkflowHopMeta, ActionMeta> {
   public void drawWorkflow() throws HopException {
     // Make sure the canvas is scaled 100%
     gc.setTransform(0.0f, 0.0f, 1.0f);
+
     // First clear the image in the background color
     gc.setBackground(EColor.BACKGROUND);
     gc.fillRectangle(0, 0, area.x, area.y);
 
-    // Draw the pipeline onto the image
+    // Draw the grid if this option is enabled
+    if (gridSize > 1) {
+      drawGrid();
+    }
+
+    // Draw the workflow onto the image
     //
     gc.setAlpha(255);
     gc.setTransform((float) offset.x, (float) offset.y, magnification);
@@ -111,10 +117,52 @@ public class WorkflowPainter extends BasePainter<WorkflowHopMeta, ActionMeta> {
     gc.dispose();
   }
 
-  private void drawActions() throws HopException {
-    if (gridSize > 1) {
-      drawGrid();
+  @Override
+  protected void drawNavigationViewContent(
+      double graphX, double graphY, double scaleX, double scaleY) {
+    if (workflowMeta == null || maximum == null) {
+      return;
     }
+    // Minimum size in viewport pixels so actions remain visible
+    int minSize = 2;
+    // Draw hops as lines first (behind actions)
+    gc.setForeground(EColor.DARKGRAY);
+    gc.setLineWidth(1);
+    for (WorkflowHopMeta hop : workflowMeta.getWorkflowHops()) {
+      if (hop.getFromAction() == null || hop.getToAction() == null) {
+        continue;
+      }
+      Point fromLoc = hop.getFromAction().getLocation();
+      Point toLoc = hop.getToAction().getLocation();
+      if (fromLoc == null || toLoc == null) {
+        continue;
+      }
+      int fromCenterX = (int) (graphX + (fromLoc.x + iconSize / 2) * scaleX);
+      int fromCenterY = (int) (graphY + (fromLoc.y + iconSize / 2) * scaleY);
+      int toCenterX = (int) (graphX + (toLoc.x + iconSize / 2) * scaleX);
+      int toCenterY = (int) (graphY + (toLoc.y + iconSize / 2) * scaleY);
+      gc.drawLine(fromCenterX, fromCenterY, toCenterX, toCenterY);
+    }
+    // Draw actions as small rectangles
+    gc.setForeground(EColor.BLACK);
+    gc.setBackground(EColor.WHITE);
+    for (ActionMeta action : workflowMeta.getActions()) {
+      Point loc = action.getLocation();
+      if (loc == null) {
+        continue;
+      }
+      int w = Math.max(minSize, (int) Math.ceil(iconSize * scaleX));
+      int h = Math.max(minSize, (int) Math.ceil(iconSize * scaleY));
+      int x = (int) (graphX + loc.x * scaleX);
+      int y = (int) (graphY + loc.y * scaleY);
+      gc.fillRectangle(x, y, w, h);
+      gc.drawRectangle(x, y, w, h);
+    }
+  }
+
+  private void drawActions() throws HopException {
+
+    drawOriginBoundary();
 
     try {
       ExtensionPointHandler.callExtensionPoint(
@@ -194,23 +242,24 @@ public class WorkflowPainter extends BasePainter<WorkflowHopMeta, ActionMeta> {
       drawAction(actionMeta);
     }
 
-    // Display an icon on the indicated location signaling to the user that the action in
-    // question does not accept input
+    // Display a red cross on the indicated location signaling to the user that the action in
+    // question does not accept input or is not a good candidate for a hop (duplicate hop or
+    // workflow loop)
     //
     if (noInputAction != null) {
       gc.setLineWidth(2);
       gc.setForeground(EColor.RED);
       Point n = noInputAction.getLocation();
       gc.drawLine(
-          round(offset.x + n.x - 5),
-          round(offset.y + n.y - 5),
-          round(offset.x + n.x + iconSize + 5),
-          round(offset.y + n.y + iconSize + 5));
+          round(offset.x + n.x - 1),
+          round(offset.y + n.y - 1),
+          round(offset.x + n.x + iconSize + 1),
+          round(offset.y + n.y + iconSize + 1));
       gc.drawLine(
-          round(offset.x + n.x - 5),
-          round(offset.y + n.y + iconSize + 5),
-          round(offset.x + n.x + iconSize + 5),
-          round(offset.y + n.y - 5));
+          round(offset.x + n.x - 1),
+          round(offset.y + n.y + iconSize + 1),
+          round(offset.x + n.x + iconSize + 1),
+          round(offset.y + n.y - 1));
     }
 
     try {
@@ -252,7 +301,7 @@ public class WorkflowPainter extends BasePainter<WorkflowHopMeta, ActionMeta> {
     boolean actionError = false;
     ActionResult actionResult = findActionResult(actionMeta);
     if (actionResult != null && !actionResult.isCheckpoint()) {
-      actionError = !actionResult.getResult().getResult();
+      actionError = !actionResult.getResult().isResult();
     }
 
     if (actionError || actionMeta.isMissing()) {
@@ -305,12 +354,16 @@ public class WorkflowPainter extends BasePainter<WorkflowHopMeta, ActionMeta> {
             name));
 
     gc.setForeground(EColor.BLACK);
-    gc.setFont(EFont.GRAPH);
+    boolean nameHovered = name.equals(mouseOverName);
+    if (nameHovered && isWebCanvasRendering()) {
+      gc.setFont(EFont.GRAPH_BOLD);
+    } else {
+      gc.setFont(EFont.GRAPH);
+    }
     gc.drawText(name, xPos, yPos, true);
 
-    // See if we need to draw a line under the name to make the name look like a hyperlink.
-    //
-    if (name.equals(mouseOverName)) {
+    // Desktop: underline on hover. Hop Web: bold (see drawText above).
+    if (nameHovered && !isWebCanvasRendering()) {
       gc.drawLine(xPos, yPos + nameExtent.y, xPos + nameExtent.x, yPos + nameExtent.y);
     }
 
@@ -372,7 +425,7 @@ public class WorkflowPainter extends BasePainter<WorkflowHopMeta, ActionMeta> {
                 actionMeta,
                 actionResult));
       } else {
-        if (result.getResult()) {
+        if (result.isResult()) {
           gc.drawImage(EImage.SUCCESS, iconX, iconY, magnification);
           areaOwners.add(
               new AreaOwner(
@@ -442,6 +495,7 @@ public class WorkflowPainter extends BasePainter<WorkflowHopMeta, ActionMeta> {
   }
 
   /** Calculates line coordinates from center to center. */
+  @SuppressWarnings("javabugs:S2259") // hops are only drawn when both actions are set
   protected void drawLine(WorkflowHopMeta workflowHop, boolean isCandidate) throws HopException {
     int[] line = getLine(workflowHop.getFromAction(), workflowHop.getToAction());
 

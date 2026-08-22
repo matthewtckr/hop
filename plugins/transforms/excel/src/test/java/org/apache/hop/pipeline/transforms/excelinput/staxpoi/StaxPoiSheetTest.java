@@ -17,10 +17,10 @@
 
 package org.apache.hop.pipeline.transforms.excelinput.staxpoi;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -28,6 +28,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Map;
@@ -39,11 +40,11 @@ import org.apache.poi.xssf.eventusermodel.XSSFReader;
 import org.apache.poi.xssf.model.SharedStringsTable;
 import org.apache.poi.xssf.model.StylesTable;
 import org.apache.poi.xssf.usermodel.XSSFRichTextString;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
 import org.openxmlformats.schemas.spreadsheetml.x2006.main.CTXf;
 
-public class StaxPoiSheetTest {
+class StaxPoiSheetTest {
 
   private static final String BP_SHEET =
       "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
@@ -151,7 +152,7 @@ public class StaxPoiSheetTest {
               + "</sheetData>");
 
   @Test
-  public void testNullDateCell() throws Exception {
+  void testNullDateCell() throws Exception {
     // cell had null value instead of being null
     final String sheetId = "1";
     final String sheetName = "Sheet 1";
@@ -168,11 +169,11 @@ public class StaxPoiSheetTest {
     assertNotNull(cell);
     assertEquals(KCellType.DATE, cell.getType());
     cell = spSheet.getRow(2)[0];
-    assertNull("cell must be null", cell);
+    assertNull(cell, "cell must be null");
   }
 
   @Test
-  public void testEmptySheet() throws Exception {
+  void testEmptySheet() throws Exception {
     XSSFReader reader =
         mockXSSFReader(
             "sheet1", SHEET_EMPTY, mock(SharedStringsTable.class), mock(StylesTable.class));
@@ -184,7 +185,7 @@ public class StaxPoiSheetTest {
   }
 
   @Test
-  public void testReadSameRow() throws Exception {
+  void testReadSameRow() throws Exception {
     IKSheet sheet1 = getSampleSheet();
     IKCell[] row = sheet1.getRow(3);
     assertEquals("Two", row[1].getValue());
@@ -193,7 +194,7 @@ public class StaxPoiSheetTest {
   }
 
   @Test
-  public void testReadRowRA() throws Exception {
+  void testReadRowRA() throws Exception {
     IKSheet sheet1 = getSampleSheet();
     IKCell[] row = sheet1.getRow(4);
     assertEquals("Three", row[1].getValue());
@@ -202,14 +203,14 @@ public class StaxPoiSheetTest {
   }
 
   @Test
-  public void testReadEmptyRow() throws Exception {
+  void testReadEmptyRow() throws Exception {
     IKSheet sheet1 = getSampleSheet();
     IKCell[] row = sheet1.getRow(0);
-    assertEquals("empty row expected", 0, row.length);
+    assertEquals(0, row.length, "empty row expected");
   }
 
   @Test
-  public void testReadCells() throws Exception {
+  void testReadCells() throws Exception {
     IKSheet sheet = getSampleSheet();
 
     IKCell cell = sheet.getCell(1, 2);
@@ -226,7 +227,7 @@ public class StaxPoiSheetTest {
   }
 
   @Test
-  public void testReadData() throws Exception {
+  void testReadData() throws Exception {
     IKSheet sheet1 = getSampleSheet();
     assertEquals(5, sheet1.getRows());
 
@@ -305,7 +306,8 @@ public class StaxPoiSheetTest {
     when(reader.getStylesTable()).thenReturn(styles);
     when(reader.getSheet(sheetId))
         .thenAnswer(
-            (Answer<InputStream>) invocation -> IOUtils.toInputStream(sheetContent, "UTF-8"));
+            (Answer<InputStream>)
+                invocation -> IOUtils.toInputStream(sheetContent, StandardCharsets.UTF_8));
     return reader;
   }
 
@@ -341,7 +343,7 @@ public class StaxPoiSheetTest {
   }
 
   @Test
-  public void testInlineString() throws Exception {
+  void testInlineString() throws Exception {
     final String sheetId = "1";
     final String sheetName = "Sheet 1";
     XSSFReader reader =
@@ -365,6 +367,49 @@ public class StaxPoiSheetTest {
     assertEquals(KCellType.STRING_FORMULA, rowCells[1].getType());
   }
 
+  // An inline string cell whose text is empty (e.g. <is><t></t></is>) must be read as an empty
+  // value in its own column, and must NOT swallow the content of the following cell. This is what
+  // the streaming Excel writer produces for empty string fields; a broken reader shifted every
+  // column after the empty one to the left.
+  private static final String SHEET_INLINE_EMPTY_CELL =
+      String.format(
+          BP_SHEET,
+          "<dimension ref=\"A1:D2\"/>"
+              + "<sheetData>"
+              + "<row r=\"1\">"
+              + "<c r=\"A1\" t=\"inlineStr\"><is><t>colA</t></is></c>"
+              + "<c r=\"B1\" t=\"inlineStr\"><is><t>colB</t></is></c>"
+              + "<c r=\"C1\" t=\"inlineStr\"><is><t>colC</t></is></c>"
+              + "<c r=\"D1\" t=\"inlineStr\"><is><t>colD</t></is></c>"
+              + "</row>"
+              + "<row r=\"2\">"
+              + "<c r=\"A2\" t=\"inlineStr\"><is><t>valA</t></is></c>"
+              + "<c r=\"B2\" t=\"inlineStr\"><is><t></t></is></c>"
+              + "<c r=\"C2\" t=\"inlineStr\"><is><t>valC</t></is></c>"
+              + "<c r=\"D2\" t=\"inlineStr\"><is><t>valD</t></is></c>"
+              + "</row>"
+              + "</sheetData>");
+
+  @Test
+  void testInlineStringEmptyCellDoesNotShiftColumns() throws Exception {
+    final String sheetId = "1";
+    final String sheetName = "Sheet 1";
+    XSSFReader reader =
+        mockXSSFReader(
+            sheetId,
+            SHEET_INLINE_EMPTY_CELL,
+            mock(SharedStringsTable.class),
+            mock(StylesTable.class));
+    StaxPoiSheet spSheet = new StaxPoiSheet(reader, sheetName, sheetId);
+
+    IKCell[] row = spSheet.getRow(1);
+    // The empty cell (colB) must keep its column; colC/colD must not shift left.
+    assertEquals("valA", row[0].getValue());
+    assertEquals("", row[1].getValue(), "empty inline string cell must be an empty value in colB");
+    assertEquals("valC", row[2].getValue(), "colC must not be shifted into colB");
+    assertEquals("valD", row[3].getValue());
+  }
+
   // The row and column bounds of all cells in the worksheet are specified in ref attribute of
   // Dimension tag in sheet
   // xml
@@ -372,7 +417,7 @@ public class StaxPoiSheetTest {
   // ref="A1"/>.
   // Below tests to validate correct work for such cases
   @Test
-  public void testNoUsedRangeSpecified() throws Exception {
+  void testNoUsedRangeSpecified() throws Exception {
     final String sheetId = "1";
     final String sheetName = "Sheet 1";
     SharedStringsTable sharedStringsTableMock =

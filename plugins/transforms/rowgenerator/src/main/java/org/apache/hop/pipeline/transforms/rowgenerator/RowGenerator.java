@@ -20,7 +20,7 @@ package org.apache.hop.pipeline.transforms.rowgenerator;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
@@ -198,6 +198,9 @@ public class RowGenerator extends BaseTransform<RowGeneratorMeta, RowGeneratorDa
     return new RowMetaAndData(rowMeta, rowData);
   }
 
+  @SuppressWarnings(
+      "java:S2276") // this is a pacing delay for the never-ending generator, there is nothing to
+  // wait for
   @Override
   public synchronized boolean processRow() throws HopException {
 
@@ -249,12 +252,9 @@ public class RowGenerator extends BaseTransform<RowGeneratorMeta, RowGeneratorDa
               data.outputRowMeta.getString(r)));
     }
 
-    if (checkFeedback(data.rowsWritten)) {
-      if (isBasic()) {
-        logBasic(
-            BaseMessages.getString(
-                PKG, "RowGenerator.Log.LineNr", Long.toString(data.rowsWritten)));
-      }
+    if (checkFeedback(data.rowsWritten) && isBasic()) {
+      logBasic(
+          BaseMessages.getString(PKG, "RowGenerator.Log.LineNr", Long.toString(data.rowsWritten)));
     }
 
     return retval;
@@ -266,9 +266,9 @@ public class RowGenerator extends BaseTransform<RowGeneratorMeta, RowGeneratorDa
 
       if (super.init()) {
         // Determine the number of rows to generate...
-        data.rowLimit = Const.toLong(resolve(meta.getRowLimit()), -1L);
+        data.rowLimit = Const.toLongExpanded(resolve(meta.getRowLimit()), -1L);
         data.rowsWritten = 0L;
-        data.delay = Const.toLong(resolve(meta.getIntervalInMs()), -1L);
+        data.delay = Const.toLongExpanded(resolve(meta.getIntervalInMs()), -1L);
 
         if (!meta.isNeverEnding() && data.rowLimit < 0L) { // Unable to parse
           logError(BaseMessages.getString(PKG, "RowGenerator.Wrong.RowLimit.Number"));
@@ -279,8 +279,8 @@ public class RowGenerator extends BaseTransform<RowGeneratorMeta, RowGeneratorDa
         List<ICheckResult> remarks = new ArrayList<>(); // stores the errors...
         RowMetaAndData outputRow = buildRow(meta, remarks, getTransformName());
         if (!remarks.isEmpty()) {
-          for (int i = 0; i < remarks.size(); i++) {
-            CheckResult cr = (CheckResult) remarks.get(i);
+          for (ICheckResult remark : remarks) {
+            CheckResult cr = (CheckResult) remark;
             logError(cr.getText());
           }
           return false;

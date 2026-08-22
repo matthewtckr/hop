@@ -22,7 +22,7 @@
     <parent>
         <groupId>org.apache.hop</groupId>
         <artifactId>hop-plugins-transforms</artifactId>
-        <version>2.16.0-SNAPSHOT</version>
+        <version>2.20.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>hop-transform-json</artifactId>
@@ -30,8 +30,7 @@
     <name>Hop Plugins Transforms JSON</name>
 
     <properties>
-        <encoder.version>1.2</encoder.version>
-        <json-path.version>2.9.0</json-path.version>
+        <encoder.version>1.4.0</encoder.version>
     </properties>
 
     <dependencyManagement>
@@ -56,7 +55,7 @@
         <dependency>
             <groupId>net.minidev</groupId>
             <artifactId>json-smart</artifactId>
-            <scope>compile</scope>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.hop</groupId>

@@ -18,12 +18,17 @@
 
 package org.apache.hop.databases.clickhouse;
 
-import org.apache.commons.lang.Validate;
+import java.util.List;
+import org.apache.commons.lang3.Validate;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
+import org.apache.hop.core.database.types.DatabaseTypes;
+import org.apache.hop.core.database.types.IDatabaseTypeRule;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.util.Utils;
@@ -37,13 +42,30 @@ import org.apache.hop.core.util.Utils;
     type = "CLICKHOUSE",
     typeDescription = "ClickHouse",
     image = "clikhouse.svg",
-    documentationUrl = "/database/databases/clickhouse.html")
+    documentationUrl = "/database/databases/clickhouse.html",
+    classLoaderGroup = "clickhouse-db")
 @GuiPlugin(id = "GUI-ClickhouseDatabaseMeta")
 public class ClickhouseDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
 
-  public static final String CONST_ALTER_TABLE = "ALTER TABLE ";
+  private static final List<IDatabaseTypeRule> TYPE_RULES =
+      DatabaseTypes.rules()
+          // Both are ClickHouse types. A server too old for the JSON one says so through its
+          // type list and the column becomes text instead.
+          .write(IValueMeta.TYPE_UUID)
+          .as("UUID")
+          .write(IValueMeta.TYPE_JSON)
+          .as("JSON")
+          .build();
 
-  // TODO: Manage all attributes in plugin when HOP-67 is fixed
+  @Override
+  public List<IDatabaseTypeRule> getTypeRules() {
+    return TYPE_RULES;
+  }
+
+  public static final String CONST_ALTER_TABLE = "ALTER TABLE ";
+  private static final String UUID_N_NIL_PRI_KEY = "UUID NOT NULL PRIMARY KEY";
+
+  // Manage all attributes in plugin when HOP-67 is fixed
   @Override
   public int[] getAccessTypeList() {
     return new int[] {DatabaseMeta.TYPE_ACCESS_NATIVE};
@@ -60,6 +82,20 @@ public class ClickhouseDatabaseMeta extends BaseDatabaseMeta implements IDatabas
   @Override
   public String getDriverClass() {
     return "com.clickhouse.jdbc.ClickHouseDriver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("com.clickhouse:clickhouse-jdbc:jar:all")
+        .defaultVersion("0.9.8")
+        .licenseCategory("A")
+        .licenseName("Apache-2.0")
+        .licenseUrl("https://github.com/ClickHouse/clickhouse-java/blob/main/LICENSE")
+        .vendor("ClickHouse")
+        .vendorUrl("https://clickhouse.com/docs/integrations/java")
+        .excludes(List.of("*:*"))
+        .build();
   }
 
   @Override
@@ -118,7 +154,7 @@ public class ClickhouseDatabaseMeta extends BaseDatabaseMeta implements IDatabas
     return CONST_ALTER_TABLE
         + tableName
         + " ADD COLUMN "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   @Override
@@ -133,7 +169,8 @@ public class ClickhouseDatabaseMeta extends BaseDatabaseMeta implements IDatabas
     return CONST_ALTER_TABLE
         + tableName
         + " MODIFY COLUMN "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -178,31 +215,22 @@ public class ClickhouseDatabaseMeta extends BaseDatabaseMeta implements IDatabas
         retval += "UINT8";
         break;
       case IValueMeta.TYPE_NUMBER, IValueMeta.TYPE_INTEGER, IValueMeta.TYPE_BIGNUMBER:
-        if (type == IValueMeta.TYPE_INTEGER) {
-          // Integer values...
-          if (length > 18) {
-            retval += "INT128";
-          } else if (length > 9) {
-            retval += "INT64";
-          } else {
-            retval += "INT32";
+        switch (type) {
+          case IValueMeta.TYPE_INTEGER -> {
+            if (length > 18) {
+              retval += "INT128";
+            } else if (length > 9) {
+              retval += "INT64";
+            } else {
+              retval += "INT32";
+            }
           }
-        } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-          // Fixed point value...
-          if (length < 1) {
-            // user configured no value for length. Use 16 digits, which is comparable to
-            // mantissa 2^53 of IEEE 754 binary64 "double".
-            length = 16;
+          case IValueMeta.TYPE_BIGNUMBER -> {
+            int len = (length < 1) ? 16 : length;
+            int p = (precision < 1) ? 16 : precision;
+            retval += "DECIMAL(" + len + "," + p + ")";
           }
-          if (precision < 1) {
-            // user configured no value for precision. Use 16 digits, which is comparable
-            // to IEEE 754 binary64 "double".
-            precision = 16;
-          }
-          retval += "DECIMAL(" + length + "," + precision + ")";
-        } else {
-          // Floating point value with double precision...
-          retval += "FLOAT64";
+          default -> retval += "FLOAT64";
         }
         break;
       case IValueMeta.TYPE_STRING:
@@ -219,7 +247,7 @@ public class ClickhouseDatabaseMeta extends BaseDatabaseMeta implements IDatabas
   }
 
   private String ddlForPrimaryKey() {
-    return "UUID NOT NULL PRIMARY KEY";
+    return UUID_N_NIL_PRI_KEY;
   }
 
   @Override
@@ -310,11 +338,6 @@ public class ClickhouseDatabaseMeta extends BaseDatabaseMeta implements IDatabas
   @Override
   public boolean isSupportsSynonyms() {
     return true;
-  }
-
-  @Override
-  public boolean isSupportsBooleanDataType() {
-    return false;
   }
 
   @Override
@@ -459,5 +482,10 @@ public class ClickhouseDatabaseMeta extends BaseDatabaseMeta implements IDatabas
   @Override
   public boolean isSupportsTimeStampToDateConversion() {
     return false;
+  }
+
+  @Override
+  public void addDefaultOptions() {
+    setSupportsTimestampDataType(true);
   }
 }

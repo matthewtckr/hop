@@ -34,6 +34,10 @@ public class HopServerStatus {
 
   @Getter @Setter private String statusDescription;
   @Getter @Setter private String errorDescription;
+
+  /** True when the server has started a graceful shutdown and is refusing new work. */
+  @Getter @Setter private boolean shuttingDown;
+
   @Getter @Setter private List<HopServerPipelineStatus> pipelineStatusList;
   @Getter @Setter private List<HopServerWorkflowStatus> workflowStatusList;
   @Getter @Setter private long memoryFree;
@@ -77,6 +81,7 @@ public class HopServerStatus {
 
     xml.append("<" + XML_TAG + ">").append(Const.CR);
     xml.append(XmlHandler.addTagValue("statusdesc", statusDescription));
+    xml.append(XmlHandler.addTagValue("shutting_down", shuttingDown));
 
     xml.append(XmlHandler.addTagValue("memory_free", memoryFree));
     xml.append(XmlHandler.addTagValue("memory_total", memoryTotal));
@@ -113,6 +118,7 @@ public class HopServerStatus {
   public HopServerStatus(Node statusNode) throws HopException {
     this();
     statusDescription = XmlHandler.getTagValue(statusNode, "statusdesc");
+    shuttingDown = "Y".equalsIgnoreCase(XmlHandler.getTagValue(statusNode, "shutting_down"));
 
     memoryFree = Const.toLong(XmlHandler.getTagValue(statusNode, "memory_free"), -1L);
     memoryTotal = Const.toLong(XmlHandler.getTagValue(statusNode, "memory_total"), -1L);
@@ -120,7 +126,7 @@ public class HopServerStatus {
     String cpuCoresStr = XmlHandler.getTagValue(statusNode, "cpu_cores");
     cpuCores = Const.toInt(cpuCoresStr, -1);
     String cpuProcessTimeStr = XmlHandler.getTagValue(statusNode, "cpu_process_time");
-    cpuProcessTime = Utils.isEmpty(cpuProcessTimeStr) ? 0L : Long.valueOf(cpuProcessTimeStr);
+    cpuProcessTime = Utils.isEmpty(cpuProcessTimeStr) ? 0L : Long.parseLong(cpuProcessTimeStr);
 
     uptime = Const.toLong(XmlHandler.getTagValue(statusNode, "uptime"), -1);
     threadCount = Const.toInt(XmlHandler.getTagValue(statusNode, "thread_count"), -1);

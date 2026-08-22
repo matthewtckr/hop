@@ -19,25 +19,30 @@ package org.apache.hop.pipeline.config;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import java.util.Objects;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.variables.DescribedVariable;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.execution.profiling.ExecutionDataProfile;
 import org.apache.hop.metadata.api.HopMetadata;
 import org.apache.hop.metadata.api.HopMetadataBase;
+import org.apache.hop.metadata.api.HopMetadataCategory;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadata;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
+import org.apache.hop.metadata.api.IHopMetadataSerializer;
 
 @HopMetadata(
     key = "pipeline-run-configuration",
     name = "i18n::PipelineRunConfiguration.name",
     description = "i18n::PipelineRunConfiguration.description",
     image = "ui/images/pipeline_run_config.svg",
+    category = HopMetadataCategory.RUN_CONFIG,
     documentationUrl = "/metadata-types/pipeline-run-config.html",
-    hopMetadataPropertyType = HopMetadataPropertyType.PIPELINE_RUN_CONFIG)
+    hopMetadataPropertyType = HopMetadataPropertyType.PIPELINE_RUN_CONFIG,
+    supportsGlobalReplace = true)
 public class PipelineRunConfiguration extends HopMetadataBase implements Cloneable, IHopMetadata {
 
   public static final String GUI_PLUGIN_ELEMENT_PARENT_ID =
@@ -46,14 +51,17 @@ public class PipelineRunConfiguration extends HopMetadataBase implements Cloneab
   @HopMetadataProperty private String description;
 
   /** The name of the location to send execution information to */
-  @HopMetadataProperty private String executionInfoLocationName;
+  @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.EXEC_INFO_LOCATION)
+  private String executionInfoLocationName;
 
   @HopMetadataProperty private List<DescribedVariable> configurationVariables;
 
   @HopMetadataProperty private IPipelineEngineRunConfiguration engineRunConfiguration;
 
   /** The name of an {@link ExecutionDataProfile} */
-  @HopMetadataProperty(key = "dataProfile")
+  @HopMetadataProperty(
+      key = "dataProfile",
+      hopMetadataPropertyType = HopMetadataPropertyType.EXEC_INFO_DATA_PROFILE)
   protected String executionDataProfileName;
 
   @HopMetadataProperty protected boolean defaultSelection;
@@ -90,6 +98,11 @@ public class PipelineRunConfiguration extends HopMetadataBase implements Cloneab
     }
     this.executionDataProfileName = runConfiguration.executionDataProfileName;
     this.defaultSelection = runConfiguration.defaultSelection;
+  }
+
+  @Override
+  protected PipelineRunConfiguration clone() throws CloneNotSupportedException {
+    return new PipelineRunConfiguration(this);
   }
 
   /**
@@ -210,6 +223,7 @@ public class PipelineRunConfiguration extends HopMetadataBase implements Cloneab
    * @return The default run configuration or null if none is specified.
    * @throws HopException
    */
+  @SuppressWarnings("javabugs:S2259") // a metadata provider is always set up before this is called
   public static final PipelineRunConfiguration findDefault(IHopMetadataProvider metadataProvider)
       throws HopException {
     for (PipelineRunConfiguration runConfiguration :
@@ -220,5 +234,27 @@ public class PipelineRunConfiguration extends HopMetadataBase implements Cloneab
     }
 
     return null;
+  }
+
+  /**
+   * Clear the default flag on every pipeline run configuration except the one named {@code
+   * keepName}, and save those updates. Ensures at most one default after the named configuration is
+   * saved as default.
+   *
+   * @param metadataProvider the metadata provider
+   * @param keepName name of the run configuration that should remain (or become) the default
+   * @throws HopException if metadata cannot be loaded or saved
+   */
+  public static void clearDefaultFlagFromOthers(
+      IHopMetadataProvider metadataProvider, String keepName) throws HopException {
+    IHopMetadataSerializer<PipelineRunConfiguration> serializer =
+        metadataProvider.getSerializer(PipelineRunConfiguration.class);
+    for (PipelineRunConfiguration runConfiguration : serializer.loadAll()) {
+      if (runConfiguration.isDefaultSelection()
+          && !Objects.equals(runConfiguration.getName(), keepName)) {
+        runConfiguration.setDefaultSelection(false);
+        serializer.save(runConfiguration);
+      }
+    }
   }
 }

@@ -43,6 +43,7 @@ public enum HopExtensionPoint {
   PipelineAfterOpen("A Pipeline file was opened (PipelineMeta)"),
   PipelineBeforeSave("A Pipeline file is about to be saved (PipelineMeta)"),
   PipelineAfterSave("A Pipeline file was saved (PipelineMeta)"),
+  PipelineAfterSaveAs("A Pipeline file was saved with a new name (PipelineRenamedExtension)"),
   PipelineBeforeClose("A Pipeline file is about to be closed"),
   PipelineAfterClose("A Pipeline file was closed"),
   PipelineChanged("A Pipeline has been changed"),
@@ -105,9 +106,10 @@ public enum HopExtensionPoint {
   BeforeCheckTransform("Right before a transform is about to be verified."),
   AfterCheckTransform("After a transform has been checked for warnings/errors."),
 
-  HopServerInit("Right before the Hop webserver starts"),
-  HopServerStartup("Right after the Hop webserver has started and is fully functional"),
-  HopServerShutdown("Right before the Hop webserver will shut down"),
+  HopServerInit("Right before the Hop server starts"),
+  HopServerStartup("Right after the Hop server has started and is fully functional"),
+  HopServerShutdown("Right before the Hop server will shutdown"),
+  HopServerTerminate("Right after the Hop server shutdown"),
   HopServerCalculateFilename(
       "Right after the server configuration filename is determined, before it is used"),
 
@@ -143,8 +145,33 @@ public enum HopExtensionPoint {
 
   HopGuiProjectAfterEnabled("Called after a project is enabled in Hop GUI"),
 
+  /**
+   * Called after a project (and optional lifecycle environment) is enabled. Payload is {@link
+   * org.apache.hop.core.AttributesContext}: identity fields plus namespaced {@link
+   * org.apache.hop.core.IAttributes} groups for optional plugins (marketplace, resource checks, …).
+   * Thrown {@link org.apache.hop.core.exception.HopException} aborts enablement.
+   */
+  HopProjectEnvironmentAfterEnabled(
+      "Called after a project/lifecycle environment is enabled (AttributesContext)"),
+
+  /**
+   * Called when the lifecycle environment dialog builds its tab folder so optional plugins can
+   * contribute tabs. Payload is a GUI extension object (see ui module) that carries a mutable
+   * {@link org.apache.hop.core.AttributesContext}.
+   */
+  HopGuiLifecycleEnvironmentDialogTabs(
+      "Contribute tabs to the lifecycle environment dialog (AttributesContext)"),
+
   HopGuiGetControlSpaceSortOrderPrefix(
       "Gets a prefix to steer the sort order of variables when using CTRL-SPACE.  Defaults range from 900_ to 400_. Set prefixes in Map<String,String>"),
+
+  /**
+   * Open the marketplace so a missing plugin can be looked up and installed. Payload is the plugin
+   * id to search for (String); blank or null opens the marketplace unfiltered. Only listened to
+   * when the marketplace plugin is installed, so callers should check {@link
+   * ExtensionPointMap#isRegistered(String)} before offering it.
+   */
+  HopGuiSearchMarketplace("Open the marketplace, searching for a plugin id (String)"),
 
   HopImportStart("Executed at the start of the 'hop-import' command line tool"),
   HopImportEnd("Executed at the end of the 'hop-import' command line tool"),

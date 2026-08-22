@@ -49,11 +49,11 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.apache.commons.lang.ArrayUtils;
-import org.apache.commons.lang.StringEscapeUtils;
-import org.apache.commons.lang.StringUtils;
-import org.apache.commons.lang.exception.ExceptionUtils;
-import org.apache.commons.lang.text.StrBuilder;
+import org.apache.commons.lang3.ArrayUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.apache.commons.lang3.text.StrBuilder;
+import org.apache.commons.text.StringEscapeUtils;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.util.EnvUtil;
@@ -176,11 +176,57 @@ public class Const {
       description = "A comma separated list pointing to folders with JDBC drivers to add.")
   public static final String HOP_SHARED_JDBC_FOLDERS = "HOP_SHARED_JDBC_FOLDERS";
 
+  /**
+   * Default login/connection timeout (in seconds) applied when opening a JDBC database connection.
+   * Maps to {@link java.sql.DriverManager#setLoginTimeout(int)} and bounds how long Hop waits while
+   * establishing a connection. Defaults to 30 seconds; set to 0 to impose no timeout (a stalled
+   * connect can then block indefinitely). Note the setting is advisory: individual JDBC drivers may
+   * ignore it. It can still be overridden per connection via driver-specific connection options.
+   */
+  @Variable(
+      value = "30",
+      description =
+          "Default login/connection timeout in seconds when opening a JDBC database connection (DriverManager.setLoginTimeout). Defaults to 30; set to 0 to impose no timeout. Advisory: some JDBC drivers ignore it.")
+  public static final String HOP_DATABASE_CONNECTION_TIMEOUT = "HOP_DATABASE_CONNECTION_TIMEOUT";
+
+  /**
+   * Default network/socket timeout (in seconds) applied to a JDBC database connection after it has
+   * been opened. Maps to {@link
+   * java.sql.Connection#setNetworkTimeout(java.util.concurrent.Executor, int)} and bounds how long
+   * a driver waits for a database request to complete. A value of 0 (default) means no timeout is
+   * imposed. WARNING: when set, this applies to every request on the connection, so any single
+   * query, read or bulk operation that runs longer than the timeout is aborted and the connection
+   * is closed - use a value large enough for your longest-running SQL. Drivers that do not support
+   * the operation are ignored (logged at detailed level). This guards reads on an established
+   * connection; the initial handshake read still relies on the driver's own socket-timeout option.
+   */
+  @Variable(
+      value = "0",
+      description =
+          "Default network/socket timeout in seconds applied to a JDBC connection after it is opened (Connection.setNetworkTimeout). 0 (default) means no timeout is imposed. WARNING: when set, any single query/read running longer than this is aborted - use a value large enough for your longest-running SQL. Unsupported drivers are ignored.")
+  public static final String HOP_DATABASE_SOCKET_TIMEOUT = "HOP_DATABASE_SOCKET_TIMEOUT";
+
+  /**
+   * Per-run override for the engine-compatibility gate in {@code Pipeline.prepareExecution} /
+   * {@code Workflow.startExecution}. Set to 'Y' to run a pipeline or workflow that contains
+   * transforms or actions the selected engine has marked UNSUPPORTED. CLI sets it from {@code
+   * hop-run --allow-unsupported}; HopGui sets it when the user clicks "Run anyway".
+   */
+  @Variable(
+      scope = VariableScope.APPLICATION,
+      value = "N",
+      description =
+          "Set to 'Y' to bypass the engine-compatibility gate and run pipelines/workflows that contain transforms or actions marked UNSUPPORTED on the selected engine. Run-scoped, not persisted.")
+  public static final String HOP_ALLOW_UNSUPPORTED = "HOP_ALLOW_UNSUPPORTED";
+
   /** The operating system the hop platform runs on */
   @Variable(
       scope = VariableScope.SYSTEM,
       description = "The operating system the hop platform runs on.")
   public static final String HOP_PLATFORM_OS = "HOP_PLATFORM_OS";
+
+  /** Variable containing the current hop version in pipelines and workflows */
+  public static final String HOP_VERSION = "HOP_VERSION";
 
   /** The runtime that is being used */
   @Variable(scope = VariableScope.SYSTEM, description = "The runtime that is being used.")
@@ -299,7 +345,10 @@ public class Const {
   public static final String GENERALIZED_DATE_TIME_FORMAT_MILLIS = "yyyyddMM_hhmmssSSS";
 
   /** Default we store our information in Unicode UTF-8 character set. */
-  public static final String XML_ENCODING = "UTF-8";
+  public static final String UTF_8 = "UTF-8";
+
+  /** Placeholder for the project home directory. */
+  public static final String VAR_PROJECT_HOME = "${PROJECT_HOME}";
 
   /** Allow or disallow doctype declarations in XML. " */
   @Variable(value = "N", description = "A variable allow or disallow doctype declarations in XML")
@@ -395,6 +444,30 @@ public class Const {
 
   public static final String INTERNAL_VARIABLE_ACTION_ID = INTERNAL_VARIABLE_PREFIX + ".Action.ID";
 
+  /** The Hop server name as configured in hop-server.xml */
+  public static final String INTERNAL_VARIABLE_HOP_SERVER_NAME =
+      INTERNAL_VARIABLE_PREFIX + ".Server.Name";
+
+  /** The Hop server hostname */
+  public static final String INTERNAL_VARIABLE_HOP_SERVER_HOSTNAME =
+      INTERNAL_VARIABLE_PREFIX + ".Server.Hostname";
+
+  /** The Hop server HTTP port */
+  public static final String INTERNAL_VARIABLE_HOP_SERVER_PORT =
+      INTERNAL_VARIABLE_PREFIX + ".Server.Port";
+
+  /** The Hop server web application name */
+  public static final String INTERNAL_VARIABLE_HOP_SERVER_WEB_APP_NAME =
+      INTERNAL_VARIABLE_PREFIX + ".Server.WebAppName";
+
+  /** The Hop server username */
+  public static final String INTERNAL_VARIABLE_HOP_SERVER_USERNAME =
+      INTERNAL_VARIABLE_PREFIX + ".Server.Username";
+
+  /** Whether the Hop server is running in SSL mode */
+  public static final String INTERNAL_VARIABLE_HOP_SERVER_SSL_MODE =
+      INTERNAL_VARIABLE_PREFIX + ".Server.SslMode";
+
   /** The default maximum for the nr of lines in the GUI logs */
   public static final int MAX_NR_LOG_LINES = 5000;
 
@@ -415,10 +488,6 @@ public class Const {
 
   /** UI-agnostic flag for warnings */
   public static final int INFO = 3;
-
-  public static final int SHOW_MESSAGE_DIALOG_DB_TEST_DEFAULT = 0;
-
-  public static final int SHOW_MESSAGE_DIALOG_DB_TEST_SUCCESS = 1;
 
   /** The margin between the text of a note and its border. */
   public static final int NOTE_MARGIN = 5;
@@ -518,6 +587,18 @@ public class Const {
       description = "Set this variable to 'Y' to redirect stdout to Hop logging.")
   public static final String HOP_REDIRECT_STDOUT = "HOP_REDIRECT_STDOUT";
 
+  /**
+   * System wide flag to enable ANSI color codes in console output. Values: 'true', 'false', or
+   * 'auto' (default). 'auto' detects if output is to a terminal and enables colors only when
+   * appropriate (not when piped to files or log collectors).
+   */
+  @Variable(
+      scope = VariableScope.SYSTEM,
+      value = "auto",
+      description =
+          "Enable ANSI color codes in console output. Values: 'true' (always), 'false' (never), or 'auto' (only when output is to a terminal)")
+  public static final String HOP_CONSOLE_COLORS = "HOP_CONSOLE_COLORS";
+
   /** System wide flag to log stack traces in a simpler, more human readable format */
   @Variable(
       scope = VariableScope.SYSTEM,
@@ -559,11 +640,21 @@ public class Const {
   public static final String HOP_TRANSFORM_PERFORMANCE_SNAPSHOT_LIMIT =
       "HOP_TRANSFORM_PERFORMANCE_SNAPSHOT_LIMIT";
 
+  /**
+   * When set to Y or true, pipeline transforms track estimated data volume (bytes in) on the input
+   * side. The metric is exposed in pipeline metrics and can have a performance impact.
+   */
+  @Variable(
+      value = "N",
+      description =
+          "Enable pipeline metric for data volume (bytes in) per transform. When Y or true, each transform tracks estimated bytes read on input.")
+  public static final String HOP_METRIC_DATA_VOLUME = "HOP_METRIC_DATA_VOLUME";
+
   /** A variable to configure the maximum number of workflow trackers kept in memory. */
   @Variable(
       value = "5000",
       description =
-          "The maximum age (in minutes) of a log line while being kept internally by Hop. Set to 0 to keep all rows indefinitely (default)")
+          "The maximum number of workflow trackers childrens to keep track of. Default value is 5000.")
   public static final String HOP_MAX_WORKFLOW_TRACKER_SIZE = "HOP_MAX_WORKFLOW_TRACKER_SIZE";
 
   /**
@@ -632,6 +723,26 @@ public class Const {
       value = "Hop",
       description = "Specifies the password encoder plugin to use by ID (Hop is the default).")
   public static final String HOP_PASSWORD_ENCODER_PLUGIN = "HOP_PASSWORD_ENCODER_PLUGIN";
+
+  /**
+   * Key string used by the AES / AES2 two-way password encoders. Prefer supplying this via
+   * environment or project variables rather than embedding it in metadata.
+   */
+  @Variable(
+      value = "",
+      description =
+          "Key used by the AES/AES2 password encoder plugins. Can also be set as a system property.")
+  public static final String HOP_AES_ENCODER_KEY = "HOP_AES_ENCODER_KEY";
+
+  /**
+   * Path to a file whose contents are the AES / AES2 encoder key (for example a Kubernetes secret
+   * mount). Used when {@link #HOP_AES_ENCODER_KEY} is empty.
+   */
+  @Variable(
+      value = "",
+      description =
+          "Path to a file containing the AES/AES2 password encoder key. Used when HOP_AES_ENCODER_KEY is empty.")
+  public static final String HOP_AES_ENCODER_KEY_FILE = "HOP_AES_ENCODER_KEY_FILE";
 
   /**
    * The name of the Hop encryption seed environment variable for the HopTwoWayPasswordEncoder class
@@ -890,6 +1001,13 @@ public class Const {
   public static final String HOP_ZIP_MAX_TEXT_SIZE = "HOP_ZIP_MAX_TEXT_SIZE";
 
   /**
+   * A variable to configure if we should calculate the last modification date of a folder object
+   * for Google Cloud Storage.
+   */
+  public static final String HOP_GCP_GET_FOLDER_LASTMODIFICATION_DATE =
+      "HOP_GCP_GET_FOLDER_LASTMODIFICATION_DATE";
+
+  /**
    * The default value for the {@link #HOP_ZIP_MAX_TEXT_SIZE} as a Long.
    *
    * @see #HOP_ZIP_MAX_TEXT_SIZE
@@ -922,13 +1040,6 @@ public class Const {
       description =
           "Name of the variable to set so that Nulls are considered while parsing JSON files. If HOP_JSON_INPUT_INCLUDE_NULLS is \"Y\" then nulls will be included (default behavior) otherwise they will not be included")
   public static final String HOP_JSON_INPUT_INCLUDE_NULLS = "HOP_JSON_INPUT_INCLUDE_NULLS";
-
-  /** This variable is used to disable the strict searching of the context dialog */
-  @Variable(
-      value = "N",
-      description =
-          "This variable influences how the search is done in the context dialog, when set to Y it will do a strict search (Needed for automated UI testing)")
-  public static final String HOP_CONTEXT_DIALOG_STRICT_SEARCH = "HOP_CONTEXT_DIALOG_STRICT_SEARCH";
 
   /** By default, HOP do consider NULLs while parsing input */
   public static final String JSON_INPUT_INCLUDE_NULLS = "Y";
@@ -976,6 +1087,33 @@ public class Const {
               + "you can give it a bit of extra with manually. (in pixels)")
   public static final String HOP_TABLE_VIEW_EXTRA_COLUMN_MARGIN =
       "HOP_TABLE_VIEW_EXTRA_COLUMN_MARGIN";
+
+  /**
+   * Default JDBC {@link java.sql.Statement#setQueryTimeout(int)} in whole seconds for database
+   * <strong>query preview</strong> UIs (for example the initial value in the preview settings
+   * dialog). Normal pipeline execution does not use this variable for Table Input statement
+   * timeouts. Set in Hop configuration, project, environment, or pipeline variables.
+   */
+  @Variable(
+      scope = VariableScope.APPLICATION,
+      value = "20",
+      description =
+          "Default JDBC statement query timeout in seconds for database query preview (0 = unset).")
+  public static final String HOP_QUERY_PREVIEW_TIMEOUT = "HOP_QUERY_PREVIEW_TIMEOUT";
+
+  /**
+   * Apache Hop 2.18 and before (even before Hop) used an optimistic system where each value type is
+   * given a chance to interpret the database field data type. This was done to support special data
+   * types like GIS, and so on. If you set this variable to true the old system is used. If not Hop
+   * tries first to do an explicit mapping of the most comm data types before falling back to the
+   * old system.
+   */
+  @Variable(
+      scope = VariableScope.SYSTEM,
+      value = "false",
+      description =
+          "Make the data type detection in RDBMS connections compatible with 2.18 and before.")
+  public static final String HOP_DB_DDL_COMPATIBLE = "HOP_DB_DDL_COMPATIBLE";
 
   /**
    * rounds double f to any number of places after decimal point Does arithmetic using BigDecimal
@@ -1151,6 +1289,237 @@ public class Const {
       retval = def;
     }
     return retval;
+  }
+
+  /**
+   * Pattern for scientific / power-of-ten integer forms: {@code 1e8}, {@code 1.5E+6}, {@code
+   * 1x10^8}, {@code 1×10^8}, {@code 10^8}.
+   */
+  private static final Pattern EXPANDED_SCIENTIFIC_PATTERN =
+      Pattern.compile(
+          "^([+-]?)(?:([0-9][0-9_ .,]*[0-9]|[0-9])\\s*[x×]\\s*10\\s*\\^\\s*|([0-9][0-9_ .,]*)\\s*[eE]|10\\s*\\^\\s*)([+-]?\\d+)$");
+
+  /** Pattern for optional trailing magnitude suffix: k / m / g / b (case-insensitive). */
+  private static final Pattern EXPANDED_SUFFIX_PATTERN =
+      Pattern.compile("^([+-]?)(.*?)\\s*([kKmMgGbB])$");
+
+  /**
+   * Expand a human-friendly integer string into a plain digit form (optional leading sign).
+   *
+   * <p>Supports:
+   *
+   * <ul>
+   *   <li>Grouping separators: spaces, underscores, commas; dots when used as thousands grouping
+   *       (e.g. {@code 100.000.000})
+   *   <li>Trailing magnitude suffixes: {@code k}/{@code K} (×10³), {@code m}/{@code M} (×10⁶),
+   *       {@code g}/{@code G}/{@code b}/{@code B} (×10⁹). A single decimal separator is allowed in
+   *       the coefficient when a suffix is present (e.g. {@code 1.5m}, {@code 1,5m}).
+   *   <li>Scientific / power forms: {@code 1e8}, {@code 1E+8}, {@code 1x10^8}, {@code 10^8}
+   * </ul>
+   *
+   * @param str the input string
+   * @return expanded digit string (with optional leading {@code -}), or {@code null} if the input
+   *     cannot be expanded to an integer
+   */
+  public static String expandIntegerString(String str) {
+    if (str == null) {
+      return null;
+    }
+    String trimmed = str.trim();
+    if (trimmed.isEmpty()) {
+      return null;
+    }
+
+    try {
+      // Scientific / power-of-ten first (e.g. 1e8, 1x10^8, 10^8)
+      Matcher sci = EXPANDED_SCIENTIFIC_PATTERN.matcher(trimmed);
+      if (sci.matches()) {
+        String sign = sci.group(1);
+        String coeffGroup = sci.group(2) != null ? sci.group(2) : sci.group(3);
+        String expGroup = sci.group(4);
+        BigDecimal coefficient;
+        if (coeffGroup == null || coeffGroup.isEmpty()) {
+          // Form: 10^N
+          coefficient = BigDecimal.ONE;
+        } else {
+          coefficient = parseExpandedCoefficient(coeffGroup, true);
+        }
+        int exp = Integer.parseInt(expGroup);
+        BigDecimal value = coefficient.multiply(BigDecimal.TEN.pow(exp));
+        return formatExpandedLong(sign, value);
+      }
+
+      // Trailing magnitude suffix: k / m / g / b
+      Matcher suffixMatcher = EXPANDED_SUFFIX_PATTERN.matcher(trimmed);
+      if (suffixMatcher.matches()) {
+        String sign = suffixMatcher.group(1);
+        String body = suffixMatcher.group(2).trim();
+        char suffix = Character.toLowerCase(suffixMatcher.group(3).charAt(0));
+        if (body.isEmpty()) {
+          return null;
+        }
+        BigDecimal coefficient = parseExpandedCoefficient(body, true);
+        long multiplier;
+        switch (suffix) {
+          case 'k':
+            multiplier = 1_000L;
+            break;
+          case 'm':
+            multiplier = 1_000_000L;
+            break;
+          case 'g':
+          case 'b':
+            multiplier = 1_000_000_000L;
+            break;
+          default:
+            return null;
+        }
+        BigDecimal value = coefficient.multiply(BigDecimal.valueOf(multiplier));
+        return formatExpandedLong(sign, value);
+      }
+
+      // Plain integer with optional grouping separators
+      String sign = "";
+      String body = trimmed;
+      if (body.startsWith("+") || body.startsWith("-")) {
+        sign = body.startsWith("-") ? "-" : "";
+        body = body.substring(1).trim();
+      }
+      body = stripIntegerGrouping(body);
+      if (body.isEmpty() || !body.chars().allMatch(Character::isDigit)) {
+        return null;
+      }
+      // Normalize leading zeros via Long parse (overflows → BigInteger path not needed for plain)
+      long value = Long.parseLong(body);
+      return sign + Long.toString(value);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  /**
+   * Parse a coefficient that may contain grouping separators and at most one decimal separator.
+   *
+   * @param body coefficient text without sign or magnitude suffix
+   * @param allowDecimal whether a single decimal point/comma is allowed
+   */
+  private static BigDecimal parseExpandedCoefficient(String body, boolean allowDecimal) {
+    String s = body.trim();
+    // Remove spaces and underscores always
+    s = s.replace(" ", "").replace("_", "");
+
+    int lastDot = s.lastIndexOf('.');
+    int lastComma = s.lastIndexOf(',');
+    boolean hasDot = lastDot >= 0;
+    boolean hasComma = lastComma >= 0;
+
+    if (allowDecimal && (hasDot || hasComma)) {
+      // Decide which separator is decimal: the last of '.' or ','
+      int decimalPos = Math.max(lastDot, lastComma);
+      String intPart = s.substring(0, decimalPos).replace(",", "").replace(".", "");
+      String fracPart = s.substring(decimalPos + 1).replace(",", "").replace(".", "");
+      if (intPart.isEmpty()) {
+        intPart = "0";
+      }
+      if (!intPart.chars().allMatch(Character::isDigit)
+          || !fracPart.chars().allMatch(Character::isDigit)) {
+        throw new NumberFormatException("Invalid coefficient: " + body);
+      }
+      return new BigDecimal(intPart + "." + fracPart);
+    }
+
+    s = stripIntegerGrouping(s);
+    if (s.isEmpty() || !s.chars().allMatch(Character::isDigit)) {
+      throw new NumberFormatException("Invalid coefficient: " + body);
+    }
+    return new BigDecimal(s);
+  }
+
+  /**
+   * Strip thousands grouping from a digit string. Removes commas always; removes dots only when
+   * they form thousands groups of three digits (e.g. {@code 100.000.000}).
+   */
+  private static String stripIntegerGrouping(String body) {
+    String s = body.replace(" ", "").replace("_", "");
+    if (s.indexOf(',') >= 0) {
+      s = s.replace(",", "");
+    }
+    if (s.indexOf('.') >= 0) {
+      // Thousands pattern: digits with groups of 3 after each dot, no other characters
+      if (s.matches("\\d{1,3}(\\.\\d{3})+")) {
+        s = s.replace(".", "");
+      } else if (s.chars().filter(c -> c == '.').count() > 1) {
+        // Multiple dots that are not a clean thousands pattern → invalid later
+        return s;
+      } else {
+        // Single dot without suffix path: treat as invalid for pure integers
+        // (leave the dot so digit check fails)
+      }
+    }
+    return s;
+  }
+
+  private static String formatExpandedLong(String sign, BigDecimal value) {
+    // Truncate toward zero for fractional results (e.g. 1.5m is exact; 1e-1 would become 0)
+    BigDecimal truncated = value.setScale(0, RoundingMode.DOWN);
+    if (truncated.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0
+        || truncated.compareTo(BigDecimal.valueOf(Long.MIN_VALUE)) < 0) {
+      throw new NumberFormatException("Expanded value out of long range");
+    }
+    long longValue = truncated.longValueExact();
+    if ("-".equals(sign)) {
+      // Avoid Long.MIN_VALUE negation issues; value should already be positive magnitude
+      if (longValue == Long.MIN_VALUE) {
+        throw new NumberFormatException("Expanded value out of long range");
+      }
+      return Long.toString(-longValue);
+    }
+    return Long.toString(longValue);
+  }
+
+  /**
+   * Convert a human-friendly integer String into a {@code long}. If conversion fails, return the
+   * default. See {@link #expandIntegerString(String)} for accepted forms.
+   *
+   * @param str The String to convert
+   * @param def The default value
+   * @return The converted value or the default
+   */
+  public static long toLongExpanded(String str, long def) {
+    try {
+      String expanded = expandIntegerString(str);
+      if (expanded == null) {
+        return def;
+      }
+      return Long.parseLong(expanded);
+    } catch (Exception e) {
+      return def;
+    }
+  }
+
+  /**
+   * Convert a human-friendly integer String into an {@code int}. If conversion fails or the value
+   * is outside the {@code int} range, return the default. See {@link #expandIntegerString(String)}
+   * for accepted forms.
+   *
+   * @param str The String to convert
+   * @param def The default value
+   * @return The converted value or the default
+   */
+  public static int toIntExpanded(String str, int def) {
+    try {
+      String expanded = expandIntegerString(str);
+      if (expanded == null) {
+        return def;
+      }
+      long value = Long.parseLong(expanded);
+      if (value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) {
+        return def;
+      }
+      return (int) value;
+    } catch (Exception e) {
+      return def;
+    }
   }
 
   /**
@@ -1508,11 +1877,32 @@ public class Const {
   }
 
   /**
-   * @return True if the OS is an OSX derivate.
+   * @return True if the OS is an OSX derivate. When a {@link ClientOsProvider} is set (e.g. by Hop
+   *     Web from the client's User-Agent), returns the client's OS so shortcuts and labels match
+   *     the user's machine.
    */
   public static boolean isOSX() {
+    if (clientOsProvider != null) {
+      try {
+        return clientOsProvider.isClientMac();
+      } catch (Exception e) {
+        // Fall through to server OS (e.g. provider called outside a web request)
+      }
+    }
     return getHopPlatformOs().startsWith("Darwin") || getSystemOs().toUpperCase().contains("OS X");
   }
+
+  /**
+   * Set the provider used by {@link #isOSX()} when running in a web context. The RAP/Hop Web module
+   * sets this so the client's OS (from User-Agent) is used for shortcut matching and display.
+   *
+   * @param provider the provider, or null to use server OS
+   */
+  public static void setClientOsProvider(ClientOsProvider provider) {
+    clientOsProvider = provider;
+  }
+
+  private static volatile ClientOsProvider clientOsProvider;
 
   /**
    * @return True if KDE is in use.
@@ -1631,7 +2021,7 @@ public class Const {
   }
 
   /**
-   * Get the primary IP address tied to a network interface (excluding loop-back etc)
+   * Get the primary IP address tied to a network interface (excluding loop-back etc.)
    *
    * @param networkInterfaceName the name of the network interface to interrogate
    * @return null if the network interface or address wasn't found.
@@ -1840,6 +2230,27 @@ public class Const {
   }
 
   /**
+   * Implements Oracle style NVL function. The first value of the ones provided, that isn't null or
+   * empty is returned.
+   *
+   * @param values The values to test for null/empty.
+   * @return null if no arguments given or null. Otherwise, returns the first value of the ones
+   *     provided, that isn't null or empty is returned.
+   */
+  public static String coalesce(String... values) {
+    if (values == null || values.length == 0) {
+      return null;
+    }
+    for (int i = 0; i < values.length - 1; i++) {
+      String value = values[i];
+      if (value != null && !value.isEmpty()) {
+        return value;
+      }
+    }
+    return values[values.length - 1];
+  }
+
+  /**
    * Return empty string "" in case the given parameter is null, otherwise return the same value.
    *
    * @param source The source value to check for null.
@@ -1901,15 +2312,15 @@ public class Const {
    */
   public static int[] indexesOfFoundStrings(String[] lookup, String[] array) {
     List<Integer> indexesList = new ArrayList<>();
-    for (int i = 0; i < lookup.length; i++) {
-      int idx = indexOfString(lookup[i], array);
+    for (String s : lookup) {
+      int idx = indexOfString(s, array);
       if (idx >= 0) {
-        indexesList.add(Integer.valueOf(idx));
+        indexesList.add(idx);
       }
     }
     int[] indexes = new int[indexesList.size()];
     for (int i = 0; i < indexesList.size(); i++) {
-      indexes[i] = (indexesList.get(i)).intValue();
+      indexes[i] = indexesList.get(i);
     }
     return indexes;
   }
@@ -1924,15 +2335,15 @@ public class Const {
    */
   public static List<Integer> indexesOfFoundStrings(List<String> lookup, List<String> list) {
     List<Integer> indexesList = new ArrayList<>();
-    for (int i = 0; i < lookup.size(); i++) {
-      int idx = indexOfString(lookup.get(i), list);
+    for (String s : lookup) {
+      int idx = indexOfString(s, list);
       if (idx >= 0) {
-        indexesList.add(Integer.valueOf(idx));
+        indexesList.add(idx);
       }
     }
     int[] indexes = new int[indexesList.size()];
     for (int i = 0; i < indexesList.size(); i++) {
-      indexes[i] = (indexesList.get(i)).intValue();
+      indexes[i] = indexesList.get(i);
     }
     return indexesList;
   }
@@ -2392,6 +2803,26 @@ public class Const {
   }
 
   /**
+   * Digs up the message of the deepest cause of an error and puts it on a single line. Use it to
+   * explain a problem in a dialog or in a list of problems: Hop exception messages are nested and
+   * spread over several lines, and only the deepest one says what actually went wrong.
+   *
+   * @param aThrowable the error to explain
+   * @return the message of the root cause, or the name of its class if it doesn't have one
+   */
+  public static String getRootCauseMessage(Throwable aThrowable) {
+    Throwable rootCause = ExceptionUtils.getRootCause(aThrowable);
+    if (rootCause == null) {
+      rootCause = aThrowable;
+    }
+    String message = rootCause.getMessage();
+    if (StringUtils.isEmpty(message)) {
+      return rootCause.getClass().getSimpleName();
+    }
+    return message.replaceAll("\\s+", " ").trim();
+  }
+
+  /**
    * Create a valid filename using a name We remove all special characters, spaces, etc.
    *
    * @param name The name to use as a base for the filename
@@ -2525,17 +2956,12 @@ public class Const {
    * @return Trimmed string.
    */
   public static String trimToType(String string, int trimType) {
-    switch (trimType) {
-      case IValueMeta.TRIM_TYPE_BOTH:
-        return trim(string);
-      case IValueMeta.TRIM_TYPE_LEFT:
-        return ltrim(string);
-      case IValueMeta.TRIM_TYPE_RIGHT:
-        return rtrim(string);
-      case IValueMeta.TRIM_TYPE_NONE:
-      default:
-        return string;
-    }
+    return switch (trimType) {
+      case IValueMeta.TRIM_TYPE_BOTH -> trim(string);
+      case IValueMeta.TRIM_TYPE_LEFT -> ltrim(string);
+      case IValueMeta.TRIM_TYPE_RIGHT -> rtrim(string);
+      default -> string;
+    };
   }
 
   /**
@@ -2667,7 +3093,7 @@ public class Const {
     if (Utils.isEmpty(content)) {
       return content;
     }
-    return StringEscapeUtils.escapeHtml(content);
+    return StringEscapeUtils.escapeHtml4(content);
   }
 
   /**
@@ -2680,7 +3106,7 @@ public class Const {
     if (Utils.isEmpty(content)) {
       return content;
     }
-    return StringEscapeUtils.unescapeHtml(content);
+    return StringEscapeUtils.unescapeHtml4(content);
   }
 
   /**
@@ -2706,7 +3132,7 @@ public class Const {
     if (Utils.isEmpty(content)) {
       return content;
     }
-    return StringEscapeUtils.escapeSql(content);
+    return content.replace("'", "''");
   }
 
   /**
@@ -2903,7 +3329,7 @@ public class Const {
     if (Utils.isEmpty(content)) {
       return content;
     }
-    return StringEscapeUtils.escapeXml(content);
+    return StringEscapeUtils.escapeXml10(content);
   }
 
   /**

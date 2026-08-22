@@ -34,7 +34,7 @@ import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.transforms.Flatten;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionList;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.beam.core.HopRow;
 import org.apache.hop.beam.core.coder.HopRowCoder;
 import org.apache.hop.beam.core.util.HopBeamUtil;
@@ -43,6 +43,7 @@ import org.apache.hop.beam.engines.IBeamPipelineEngineRunConfiguration;
 import org.apache.hop.beam.engines.dataflow.BeamDataFlowPipelineRunConfiguration;
 import org.apache.hop.beam.metadata.RunnerType;
 import org.apache.hop.beam.pipeline.handler.BeamGenericTransformHandler;
+import org.apache.hop.beam.pipeline.handler.BeamMemoryGroupByTransformHandler;
 import org.apache.hop.beam.pipeline.handler.BeamMergeJoinTransformHandler;
 import org.apache.hop.beam.pipeline.handler.BeamRowGeneratorTransformHandler;
 import org.apache.hop.beam.util.BeamConst;
@@ -73,6 +74,31 @@ import org.jboss.jandex.IndexView;
 public class HopPipelineMetaToBeamPipelineConverter {
 
   public static final String CONST_TRANSFORM = "Transform ";
+
+  /**
+   * Transform plugin ids that have a dedicated, hand-written Beam handler installed by {@link
+   * #addDefaultTransformHandlers()}. Used by {@code BeamPipelineEngine.supports} to surface a
+   * SUPPORTED verdict at design time without instantiating a converter. Keep this in lockstep with
+   * {@link #addDefaultTransformHandlers()}.
+   */
+  public static final Set<String> EXPLICIT_HANDLER_PLUGIN_IDS =
+      Set.of(
+          BeamConst.STRING_MERGE_JOIN_PLUGIN_ID,
+          BeamConst.STRING_BEAM_ROW_GENERATOR_PLUGIN_ID,
+          BeamConst.STRING_MEMORY_GROUP_BY_PLUGIN_ID);
+
+  /**
+   * Transform meta classes that Beam refuses to run at all, mapped to the user-facing reason. The
+   * runtime check in {@link #validateTransformBeamUsage} consults this map; {@code
+   * BeamPipelineEngine.supports} surfaces the same reason at design time.
+   */
+  public static final Map<Class<?>, String> HARD_BANNED_META_TYPES =
+      Map.of(
+          GroupByMeta.class,
+          "Group By is not supported.  Use the Memory Group By transform instead.  It comes closest to Beam functionality.",
+          UniqueRowsMeta.class,
+          "The unique rows transform is not yet supported on Beam, for now use a Memory Group By to get distrinct rows");
+
   protected final String runConfigName;
   protected final PipelineRunConfiguration runConfiguration;
 
@@ -211,6 +237,8 @@ public class HopPipelineMetaToBeamPipelineConverter {
         BeamConst.STRING_MERGE_JOIN_PLUGIN_ID, new BeamMergeJoinTransformHandler());
     transformHandlers.put(
         BeamConst.STRING_BEAM_ROW_GENERATOR_PLUGIN_ID, new BeamRowGeneratorTransformHandler());
+    transformHandlers.put(
+        BeamConst.STRING_MEMORY_GROUP_BY_PLUGIN_ID, new BeamMemoryGroupByTransformHandler());
     genericTransformHandler = new BeamGenericTransformHandler();
   }
 
@@ -335,18 +363,13 @@ public class HopPipelineMetaToBeamPipelineConverter {
     if (runnerType == null) {
       throw new HopException("Please specify a valid runner type");
     }
-    switch (runnerType) {
-      case Direct:
-        return DirectRunner.class;
-      case Flink:
-        return FlinkRunner.class;
-      case Spark:
-        return SparkRunner.class;
-      case DataFlow:
-        return DataflowRunner.class;
-      default:
-        throw new HopException("Unsupported runner type: " + runnerType.name());
-    }
+    return switch (runnerType) {
+      case Direct -> DirectRunner.class;
+      case Flink -> FlinkRunner.class;
+      case Spark -> SparkRunner.class;
+      case DataFlow -> DataflowRunner.class;
+      default -> throw new HopException("Unsupported runner type: " + runnerType.name());
+    };
   }
 
   private void handleBeamInputTransforms(
@@ -357,13 +380,12 @@ public class HopPipelineMetaToBeamPipelineConverter {
     for (TransformMeta transformMeta : beamInputTransformMetas) {
       IBeamPipelineTransformHandler transformHandler =
           transformHandlers.get(transformMeta.getTransformPluginId());
-      if (transformHandler == null) {
+      if (transformHandler == null
+          && transformMeta.getTransform()
+              instanceof IBeamPipelineTransformHandler iBeamPipelineTransformHandler) {
         // See if the transform knows how to handle a Beam pipeline...
         //
-        if (transformMeta.getTransform()
-            instanceof IBeamPipelineTransformHandler iBeamPipelineTransformHandler) {
-          transformHandler = iBeamPipelineTransformHandler;
-        }
+        transformHandler = iBeamPipelineTransformHandler;
       }
       if (transformHandler == null) {
         throw new HopException(
@@ -396,13 +418,12 @@ public class HopPipelineMetaToBeamPipelineConverter {
     for (TransformMeta transformMeta : beamOutputTransformMetas) {
       IBeamPipelineTransformHandler transformHandler =
           transformHandlers.get(transformMeta.getTransformPluginId());
-      if (transformHandler == null) {
+      if (transformHandler == null
+          && transformMeta.getTransform()
+              instanceof IBeamPipelineTransformHandler iBeamPipelineTransformHandler) {
         // See if the transform knows how to handle a Beam pipeline...
         //
-        if (transformMeta.getTransform()
-            instanceof IBeamPipelineTransformHandler iBeamPipelineTransformHandler) {
-          transformHandler = iBeamPipelineTransformHandler;
-        }
+        transformHandler = iBeamPipelineTransformHandler;
       }
       if (transformHandler == null) {
         throw new HopException(
@@ -478,13 +499,12 @@ public class HopPipelineMetaToBeamPipelineConverter {
       //
       IBeamPipelineTransformHandler transformHandler =
           transformHandlers.get(transformMeta.getTransformPluginId());
-      if (transformHandler == null) {
-        if (transformMeta.getTransform()
-            instanceof IBeamPipelineTransformHandler iBeamPipelineTransformHandler) {
-          // This metadata knows about Beam...
-          //
-          transformHandler = iBeamPipelineTransformHandler;
-        }
+      if (transformHandler == null
+          && transformMeta.getTransform()
+              instanceof IBeamPipelineTransformHandler iBeamPipelineTransformHandler) {
+        // This metadata knows about Beam...
+        //
+        transformHandler = iBeamPipelineTransformHandler;
       }
 
       if (transformHandler == null
@@ -608,13 +628,12 @@ public class HopPipelineMetaToBeamPipelineConverter {
   }
 
   private void validateTransformBeamUsage(ITransformMeta meta) throws HopException {
-    if (meta instanceof GroupByMeta) {
-      throw new HopException(
-          "Group By is not supported.  Use the Memory Group By transform instead.  It comes closest to Beam functionality.");
+    if (meta == null) {
+      return;
     }
-    if (meta instanceof UniqueRowsMeta) {
-      throw new HopException(
-          "The unique rows transform is not yet supported on Beam, for now use a Memory Group By to get distrinct rows");
+    String banReason = HARD_BANNED_META_TYPES.get(meta.getClass());
+    if (banReason != null) {
+      throw new HopException(banReason);
     }
   }
 
@@ -629,10 +648,9 @@ public class HopPipelineMetaToBeamPipelineConverter {
         transforms.add(transformMeta);
       } else {
         if (transformMeta.getTransform()
-            instanceof IBeamPipelineTransformHandler iBeamPipelineTransformHandler) {
-          if (iBeamPipelineTransformHandler.isInput()) {
-            transforms.add(transformMeta);
-          }
+                instanceof IBeamPipelineTransformHandler iBeamPipelineTransformHandler
+            && iBeamPipelineTransformHandler.isInput()) {
+          transforms.add(transformMeta);
         }
       }
     }
@@ -648,10 +666,9 @@ public class HopPipelineMetaToBeamPipelineConverter {
         transforms.add(transformMeta);
       } else {
         if (transformMeta.getTransform()
-            instanceof IBeamPipelineTransformHandler iBeamPipelineTransformHandler) {
-          if (iBeamPipelineTransformHandler.isOutput()) {
-            transforms.add(transformMeta);
-          }
+                instanceof IBeamPipelineTransformHandler iBeamPipelineTransformHandler
+            && iBeamPipelineTransformHandler.isOutput()) {
+          transforms.add(transformMeta);
         }
       }
     }

@@ -16,14 +16,13 @@
  */
 package org.apache.hop.www;
 
+import java.io.Serial;
 import java.util.Map;
 import java.util.UUID;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.logging.LogChannelFileWriter;
-import org.apache.hop.core.logging.LogLevel;
-import org.apache.hop.core.logging.LoggingObjectType;
 import org.apache.hop.core.logging.SimpleLoggingObject;
 import org.apache.hop.core.parameters.INamedParameters;
 import org.apache.hop.core.parameters.UnknownParamException;
@@ -45,11 +44,15 @@ import org.apache.hop.workflow.engine.IWorkflowEngine;
 import org.apache.hop.workflow.engine.WorkflowEngineFactory;
 
 public abstract class BaseWorkflowServlet extends BodyHttpServlet {
-
-  private static final long serialVersionUID = 8523062215275251356L;
+  @Serial private static final long serialVersionUID = 8523062215275251356L;
 
   protected IWorkflowEngine<WorkflowMeta> createWorkflow(
       WorkflowConfiguration workflowConfiguration) throws HopException {
+    return createWorkflow(workflowConfiguration, 0);
+  }
+
+  protected IWorkflowEngine<WorkflowMeta> createWorkflow(
+      WorkflowConfiguration workflowConfiguration, int maxConcurrent) throws HopException {
     WorkflowExecutionConfiguration workflowExecutionConfiguration =
         workflowConfiguration.getWorkflowExecutionConfiguration();
 
@@ -64,7 +67,8 @@ public abstract class BaseWorkflowServlet extends BodyHttpServlet {
     String serverObjectId = UUID.randomUUID().toString();
 
     SimpleLoggingObject servletLoggingObject =
-        getServletLogging(serverObjectId, workflowExecutionConfiguration.getLogLevel());
+        getServletLogging(
+            getContextPath(), serverObjectId, workflowExecutionConfiguration.getLogLevel());
 
     // Create the workflow and store in the list...
     //
@@ -90,8 +94,14 @@ public abstract class BaseWorkflowServlet extends BodyHttpServlet {
       workflow.setStartActionMeta(startActionMeta);
     }
 
-    getWorkflowMap()
-        .addWorkflow(workflow.getWorkflowName(), serverObjectId, workflow, workflowConfiguration);
+    HopServerAdmission.admitAndAdd(
+        getPipelineMap(),
+        getWorkflowMap(),
+        maxConcurrent,
+        () ->
+            getWorkflowMap()
+                .addWorkflow(
+                    workflow.getWorkflowName(), serverObjectId, workflow, workflowConfiguration));
 
     // Remember the generated container ID
     //
@@ -102,6 +112,11 @@ public abstract class BaseWorkflowServlet extends BodyHttpServlet {
 
   protected IPipelineEngine<PipelineMeta> createPipeline(
       PipelineConfiguration pipelineConfiguration) throws HopException {
+    return createPipeline(pipelineConfiguration, 0);
+  }
+
+  protected IPipelineEngine<PipelineMeta> createPipeline(
+      PipelineConfiguration pipelineConfiguration, int maxConcurrent) throws HopException {
     PipelineMeta pipelineMeta = pipelineConfiguration.getPipelineMeta();
     PipelineExecutionConfiguration pipelineExecutionConfiguration =
         pipelineConfiguration.getPipelineExecutionConfiguration();
@@ -114,7 +129,8 @@ public abstract class BaseWorkflowServlet extends BodyHttpServlet {
 
     String serverObjectId = UUID.randomUUID().toString();
     SimpleLoggingObject servletLoggingObject =
-        getServletLogging(serverObjectId, pipelineExecutionConfiguration.getLogLevel());
+        getServletLogging(
+            getContextPath(), serverObjectId, pipelineExecutionConfiguration.getLogLevel());
 
     // Create the pipeline and store in the list...
     //
@@ -125,6 +141,7 @@ public abstract class BaseWorkflowServlet extends BodyHttpServlet {
             variables, variables.resolve(runConfigurationName), metadataProvider, pipelineMeta);
     pipeline.setParent(servletLoggingObject);
     pipeline.setMetadataProvider(metadataProvider);
+    pipeline.setLogLevel(pipelineExecutionConfiguration.getLogLevel());
 
     // Also copy the parameters over...
     copyParameters(pipeline, pipelineExecutionConfiguration.getParametersMap());
@@ -156,8 +173,14 @@ public abstract class BaseWorkflowServlet extends BodyHttpServlet {
     }
 
     pipeline.setContainerId(serverObjectId);
-    getPipelineMap()
-        .addPipeline(pipelineMeta.getName(), serverObjectId, pipeline, pipelineConfiguration);
+    HopServerAdmission.admitAndAdd(
+        getPipelineMap(),
+        getWorkflowMap(),
+        maxConcurrent,
+        () ->
+            getPipelineMap()
+                .addPipeline(
+                    pipelineMeta.getName(), serverObjectId, pipeline, pipelineConfiguration));
 
     return pipeline;
   }
@@ -190,13 +213,5 @@ public abstract class BaseWorkflowServlet extends BodyHttpServlet {
       }
     }
     workflow.activateParameters(workflow);
-  }
-
-  private SimpleLoggingObject getServletLogging(final String serverObjectId, final LogLevel level) {
-    SimpleLoggingObject servletLoggingObject =
-        new SimpleLoggingObject(getContextPath(), LoggingObjectType.HOP_SERVER, null);
-    servletLoggingObject.setContainerObjectId(serverObjectId);
-    servletLoggingObject.setLogLevel(level);
-    return servletLoggingObject;
   }
 }

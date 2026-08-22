@@ -16,7 +16,7 @@ under the License.
 ////
 :documentationPath: /pipeline/transforms/
 :language: en_US
-:description: The Splunk Input transform runs a Splunk search query and returns the result as a set of Hop fields
+:description: The Splunk input transform runs a Splunk search query and returns the result as a set of Hop fields
 
 = image:transforms/icons/splunk.svg[Splunk input transform Icon, role="image-doc-icon"] Splunk input
 
@@ -25,7 +25,7 @@ under the License.
 |
 == Description
 
-The Splunk Input transform runs a Splunk search query and returns the result as a set of Hop fields
+The Splunk input transform runs a Splunk search query and returns the result as a set of Hop fields
 
 Check the xref:metadata-types/splunk-connection.adoc[Splunk Connection docs] for more information about creating a Splunk connection.
 
@@ -34,9 +34,11 @@ Check the xref:metadata-types/splunk-connection.adoc[Splunk Connection docs] for
 [%noheader,cols="2,1a",frame=none, role="table-supported-engines"]
 !===
 !Hop Engine! image:check_mark.svg[Supported, 24]
-!Spark! image:question_mark.svg[Maybe Supported, 24]
-!Flink! image:question_mark.svg[Maybe Supported, 24]
-!Dataflow! image:question_mark.svg[Maybe Supported, 24]
+!Single Threaded! image:check_mark.svg[Supported, 24]
+!Native Spark! image:check_mark.svg[Supported, 24]
+!Beam Spark! image:question_mark.svg[Maybe Supported, 24]
+!Beam Flink! image:question_mark.svg[Maybe Supported, 24]
+!Beam Dataflow! image:question_mark.svg[Maybe Supported, 24]
 !===
 |===
 

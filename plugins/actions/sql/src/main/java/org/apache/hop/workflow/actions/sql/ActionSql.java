@@ -22,6 +22,8 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.List;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
@@ -31,6 +33,8 @@ import org.apache.hop.core.annotations.ActionTransformType;
 import org.apache.hop.core.database.Database;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.exception.HopDatabaseException;
+import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.file.IHasFilename;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.vfs.HopVfs;
@@ -57,6 +61,8 @@ import org.apache.hop.workflow.action.validator.AndValidator;
     keywords = "i18n::ActionSql.keyword",
     documentationUrl = "/workflow/actions/sql.html",
     actionTransformTypes = {ActionTransformType.RDBMS})
+@Getter
+@Setter
 public class ActionSql extends ActionBase implements Cloneable, IAction {
   private static final Class<?> PKG = ActionSql.class;
 
@@ -79,6 +85,9 @@ public class ActionSql extends ActionBase implements Cloneable, IAction {
   @HopMetadataProperty(key = "sqlfilename")
   private String sqlFilename;
 
+  @HopMetadataProperty(key = "sqlfilename_encoding")
+  private String sqlFilenameEncoding;
+
   @HopMetadataProperty(key = "sendOneStatement")
   private boolean sendOneStatement = false;
 
@@ -90,60 +99,6 @@ public class ActionSql extends ActionBase implements Cloneable, IAction {
 
   public ActionSql() {
     this("");
-  }
-
-  @Override
-  public Object clone() {
-    ActionSql je = (ActionSql) super.clone();
-    return je;
-  }
-
-  public void setSql(String sql) {
-    this.sql = sql;
-  }
-
-  public String getSql() {
-    return sql;
-  }
-
-  public String getSqlFilename() {
-    return sqlFilename;
-  }
-
-  public void setSqlFilename(String sqlfilename) {
-    this.sqlFilename = sqlfilename;
-  }
-
-  public boolean isUseVariableSubstitution() {
-    return useVariableSubstitution;
-  }
-
-  public void setUseVariableSubstitution(boolean subs) {
-    useVariableSubstitution = subs;
-  }
-
-  public void setSqlFromFile(boolean sqlfromfilein) {
-    sqlFromFile = sqlfromfilein;
-  }
-
-  public boolean isSqlFromFile() {
-    return sqlFromFile;
-  }
-
-  public boolean isSendOneStatement() {
-    return sendOneStatement;
-  }
-
-  public void setSendOneStatement(boolean sendOneStatementin) {
-    sendOneStatement = sendOneStatementin;
-  }
-
-  public void setConnection(String connection) {
-    this.connection = connection;
-  }
-
-  public String getConnection() {
-    return connection;
   }
 
   @Override
@@ -177,8 +132,15 @@ public class ActionSql extends ActionBase implements Cloneable, IAction {
 
             InputStream inputStream = HopVfs.getInputStream(sqlFile);
             try {
-              InputStreamReader inputStreamReader =
-                  new InputStreamReader(new BufferedInputStream(inputStream, 500));
+              String encoding = resolve(getSqlFilenameEncoding());
+              InputStreamReader inputStreamReader;
+              if (Utils.isEmpty(encoding)) {
+                inputStreamReader =
+                    new InputStreamReader(new BufferedInputStream(inputStream, 500));
+              } else {
+                inputStreamReader =
+                    new InputStreamReader(new BufferedInputStream(inputStream, 500), encoding);
+              }
               StringBuilder lineSB = new StringBuilder(256);
               lineSB.setLength(0);
 
@@ -236,11 +198,7 @@ public class ActionSql extends ActionBase implements Cloneable, IAction {
       logError(BaseMessages.getString(PKG, "ActionSQL.NoDatabaseConnection"));
     }
 
-    if (result.getNrErrors() == 0) {
-      result.setResult(true);
-    } else {
-      result.setResult(false);
-    }
+    result.setResult(result.getNrErrors() == 0);
 
     return result;
   }
@@ -285,5 +243,32 @@ public class ActionSql extends ActionBase implements Cloneable, IAction {
             "SQL",
             remarks,
             AndValidator.putValidators(ActionValidatorUtils.notBlankValidator()));
+  }
+
+  @Override
+  public String[] getReferencedObjectDescriptions() {
+    if (!sqlFromFile) {
+      return null;
+    }
+    return new String[] {
+      BaseMessages.getString(PKG, "ActionSQL.ReferencedObject.Description"),
+    };
+  }
+
+  @Override
+  public boolean[] isReferencedObjectEnabled() {
+    if (!sqlFromFile) {
+      return null;
+    }
+    return new boolean[] {!Utils.isEmpty(sqlFilename)};
+  }
+
+  @Override
+  public IHasFilename loadReferencedObject(
+      int index, IHopMetadataProvider metadataProvider, IVariables variables) throws HopException {
+    if (index != 0 || !sqlFromFile || Utils.isEmpty(sqlFilename)) {
+      throw new HopException(BaseMessages.getString(PKG, "ActionSQL.NoSQLFileSpecified"));
+    }
+    return () -> sqlFilename;
   }
 }

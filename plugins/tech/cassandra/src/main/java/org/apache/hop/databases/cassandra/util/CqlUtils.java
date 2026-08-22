@@ -79,6 +79,7 @@ public class CqlUtils {
     }
   };
 
+  @SuppressWarnings("javabugs:S2259") // clean() only returns null for a null expression
   private static ArrayList<Selector> getSelectors(String selectExpression, boolean isCql3) {
     ArrayList<Selector> sList = new ArrayList<>();
     selectExpression = clean(selectExpression);
@@ -232,8 +233,8 @@ public class CqlUtils {
   }
 
   /**
-   * Clean input from all unnecessary whitespaces: double and etc., before comma, inside functions
-   * and etc. Add whitespace after comma if it is absent.
+   * Clean input from all unnecessary whitespaces: double etc., before comma, inside functions etc.
+   * Add whitespace after comma if it is absent.
    *
    * @param input the input string
    * @return cleaned string

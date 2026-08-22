@@ -19,7 +19,6 @@ package org.apache.hop.ui.hopgui;
 
 import static org.apache.hop.core.Const.getDocUrl;
 
-import java.io.File;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -27,22 +26,25 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.commons.io.output.TeeOutputStream;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.DbCache;
 import org.apache.hop.core.HopEnvironment;
+import org.apache.hop.core.HopVersionProvider;
 import org.apache.hop.core.Props;
 import org.apache.hop.core.config.DescribedVariablesConfigFile;
 import org.apache.hop.core.config.HopConfig;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.exception.HopException;
-import org.apache.hop.core.exception.HopXmlException;
 import org.apache.hop.core.extension.ExtensionPointHandler;
 import org.apache.hop.core.extension.HopExtensionPoint;
 import org.apache.hop.core.gui.IUndo;
@@ -53,10 +55,13 @@ import org.apache.hop.core.gui.plugin.key.GuiOsxKeyboardShortcut;
 import org.apache.hop.core.gui.plugin.key.KeyboardShortcut;
 import org.apache.hop.core.gui.plugin.menu.GuiMenuElement;
 import org.apache.hop.core.gui.plugin.toolbar.GuiToolbarElement;
+import org.apache.hop.core.gui.plugin.toolbar.GuiToolbarElementType;
+import org.apache.hop.core.logging.DefaultLogLevel;
 import org.apache.hop.core.logging.HopLogStore;
 import org.apache.hop.core.logging.ILogChannel;
 import org.apache.hop.core.logging.ILoggingObject;
 import org.apache.hop.core.logging.LogChannel;
+import org.apache.hop.core.logging.LogLevel;
 import org.apache.hop.core.logging.LoggingObject;
 import org.apache.hop.core.parameters.INamedParameterDefinitions;
 import org.apache.hop.core.plugins.JarCache;
@@ -64,12 +69,15 @@ import org.apache.hop.core.plugins.Plugin;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.search.ISearchableProvider;
 import org.apache.hop.core.search.ISearchablesLocation;
+import org.apache.hop.core.security.HopSecurity;
+import org.apache.hop.core.security.HopSecurityContext;
+import org.apache.hop.core.security.HopSecurityPrivilegeMode;
+import org.apache.hop.core.security.Permission;
 import org.apache.hop.core.undo.ChangeAction;
 import org.apache.hop.core.util.TranslateUtil;
 import org.apache.hop.core.variables.DescribedVariable;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
-import org.apache.hop.core.xml.XmlHandler;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.i18n.LanguageChoice;
 import org.apache.hop.metadata.api.IHasHopMetadataProvider;
@@ -87,8 +95,10 @@ import org.apache.hop.ui.core.gui.GuiMenuWidgets;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.gui.GuiToolbarWidgets;
 import org.apache.hop.ui.core.gui.HopNamespace;
+import org.apache.hop.ui.core.gui.IToolbarContainer;
 import org.apache.hop.ui.core.gui.WindowProperty;
 import org.apache.hop.ui.core.metadata.MetadataManager;
+import org.apache.hop.ui.core.security.HopSecurityUi;
 import org.apache.hop.ui.core.widget.OsHelper;
 import org.apache.hop.ui.core.widget.svg.SvgLabelFacade;
 import org.apache.hop.ui.core.widget.svg.SvgLabelListener;
@@ -109,6 +119,7 @@ import org.apache.hop.ui.hopgui.file.IHopFileType;
 import org.apache.hop.ui.hopgui.file.IHopFileTypeHandler;
 import org.apache.hop.ui.hopgui.file.empty.EmptyFileType;
 import org.apache.hop.ui.hopgui.file.pipeline.HopGuiPipelineGraph;
+import org.apache.hop.ui.hopgui.file.shared.ISnapshotUndoSupport;
 import org.apache.hop.ui.hopgui.file.workflow.HopGuiWorkflowGraph;
 import org.apache.hop.ui.hopgui.perspective.EmptyHopPerspective;
 import org.apache.hop.ui.hopgui.perspective.HopPerspectiveManager;
@@ -116,12 +127,11 @@ import org.apache.hop.ui.hopgui.perspective.HopPerspectivePlugin;
 import org.apache.hop.ui.hopgui.perspective.HopPerspectivePluginType;
 import org.apache.hop.ui.hopgui.perspective.IHopPerspective;
 import org.apache.hop.ui.hopgui.perspective.configuration.ConfigurationPerspective;
-import org.apache.hop.ui.hopgui.perspective.dataorch.HopDataOrchestrationPerspective;
 import org.apache.hop.ui.hopgui.perspective.execution.ExecutionPerspective;
 import org.apache.hop.ui.hopgui.perspective.explorer.ExplorerPerspective;
 import org.apache.hop.ui.hopgui.perspective.metadata.MetadataPerspective;
-import org.apache.hop.ui.hopgui.perspective.search.HopSearchPerspective;
 import org.apache.hop.ui.hopgui.search.HopGuiSearchLocation;
+import org.apache.hop.ui.hopgui.search.SearchEverywhereDialog;
 import org.apache.hop.ui.hopgui.welcome.WelcomeDialog;
 import org.apache.hop.ui.pipeline.transform.BaseTransformDialog;
 import org.apache.hop.ui.util.EnvironmentUtils;
@@ -129,10 +139,18 @@ import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.StackLayout;
 import org.eclipse.swt.events.ShellAdapter;
 import org.eclipse.swt.events.ShellEvent;
+import org.eclipse.swt.graphics.Color;
+import org.eclipse.swt.graphics.GC;
 import org.eclipse.swt.graphics.Image;
+import org.eclipse.swt.graphics.Point;
+import org.eclipse.swt.graphics.Rectangle;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
 import org.eclipse.swt.layout.FormLayout;
+import org.eclipse.swt.layout.GridData;
+import org.eclipse.swt.layout.GridLayout;
+import org.eclipse.swt.widgets.Canvas;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
@@ -144,14 +162,16 @@ import org.eclipse.swt.widgets.MenuItem;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.ToolBar;
 import org.eclipse.swt.widgets.ToolItem;
-import org.w3c.dom.Document;
-import org.w3c.dom.Node;
 
-@GuiPlugin(description = "The main hop graphical user interface")
+@GuiPlugin(name = "Hop Gui", description = "The main hop graphical user interface")
 @SuppressWarnings("java:S1104")
+@Getter
+@Setter
 public class HopGui
     implements IActionContextHandlersProvider, ISearchableProvider, IHasHopMetadataProvider {
   private static final Class<?> PKG = HopGui.class;
+
+  public static final String TEXT_EDITOR_FOCUS_DATA = HopGui.class.getName() + ".textEditorFocus";
 
   // The main Menu IDs
   public static final String ID_MAIN_MENU = "HopGui-Menu";
@@ -164,6 +184,7 @@ public class HopGui
   public static final String ID_MAIN_MENU_FILE_EXPORT_TO_SVG = "10050-menu-file-export-to-svg";
   public static final String ID_MAIN_MENU_FILE_CLOSE = "10090-menu-file-close";
   public static final String ID_MAIN_MENU_FILE_CLOSE_ALL = "10100-menu-file-close-all";
+  public static final String ID_MAIN_MENU_FILE_LOG_OFF = "10850-menu-file-log-off";
   public static final String ID_MAIN_MENU_FILE_EXIT = "10900-menu-file-exit";
 
   public static final String ID_MAIN_MENU_EDIT_PARENT_ID = "20000-menu-edit";
@@ -190,13 +211,17 @@ public class HopGui
   public static final String ID_MAIN_MENU_EDIT_NAV_PREV = "20400-menu-edit-nav-previous";
   public static final String ID_MAIN_MENU_EDIT_NAV_NEXT = "20410-menu-edit-nav-next";
 
+  public static final String ID_MAIN_MENU_VIEW_PARENT_ID = "25000-menu-view";
+  public static final String ID_MAIN_MENU_VIEW_FULL_SCREEN = "25010-menu-view-full-screen";
+  public static final String ID_MAIN_MENU_VIEW_TERMINAL = "25010-menu-view-terminal";
+  public static final String ID_MAIN_MENU_VIEW_NEW_TERMINAL = "25020-menu-view-new-terminal";
+
   public static final String ID_MAIN_MENU_RUN_PARENT_ID = "30000-menu-run";
   public static final String ID_MAIN_MENU_RUN_START = "30010-menu-run-execute";
   public static final String ID_MAIN_MENU_RUN_PAUSE = "30030-menu-run-pause";
   public static final String ID_MAIN_MENU_RUN_RESUME = "30035-menu-run-resume";
   public static final String ID_MAIN_MENU_RUN_STOP = "30040-menu-run-stop";
   public static final String ID_MAIN_MENU_RUN_PREVIEW = "30050-menu-run-preview";
-  public static final String ID_MAIN_MENU_RUN_DEBUG = "30060-menu-run-debug";
 
   public static final String ID_MAIN_MENU_TOOLS_PARENT_ID = "40000-menu-tools";
   public static final String ID_MAIN_MENU_TOOLS_DATABASE_CLEAR_CACHE =
@@ -213,7 +238,38 @@ public class HopGui
   public static final String ID_MAIN_TOOLBAR_SAVE = "toolbar-10040-save";
   public static final String ID_MAIN_TOOLBAR_SAVE_AS = "toolbar-10050-save-as";
 
+  /**
+   * Temporary privilege mode combo (left of username). Id sorts before {@link
+   * #ID_MAIN_TOOLBAR_USER}.
+   */
+  public static final String ID_MAIN_TOOLBAR_PRIVILEGE = "toolbar-10880-privilege";
+
+  /**
+   * hop-config.json option to show the session controls ({@link #ID_MAIN_TOOLBAR_PRIVILEGE} and log
+   * off) in the desktop Hop GUI. There is no session to speak of there: the privilege combo only
+   * simulates roles and logging off does nothing, so both are hidden unless someone explicitly
+   * wants them to debug the different privilege modes.
+   */
+  public static final String HOP_CONFIG_SHOW_SESSION_CONTROLS = "showSessionControls";
+
+  /** Username label immediately left of {@link #ID_MAIN_TOOLBAR_LOG_OFF}. */
+  public static final String ID_MAIN_TOOLBAR_USER = "toolbar-10890-user";
+
+  public static final String ID_MAIN_TOOLBAR_LOG_OFF = "toolbar-10900-log-off";
+
+  public static final String ID_STATUS_TOOLBAR = "HopGui-Status-Toolbar";
+
   public static final String GUI_PLUGIN_PERSPECTIVES_PARENT_ID = "HopGui-Perspectives";
+
+  /** Perspective id for the file explorer / data orchestration perspective. */
+  public static final String PERSPECTIVE_ID_EXPLORER = "explorer-perspective";
+
+  /** Id for the execution results toggle button in the sidebar bottom toolbar. */
+  public static final String SIDEBAR_TOOLBAR_ITEM_EXECUTION_RESULTS =
+      "HopGui-SidebarToolbar-ExecutionResults";
+
+  /** Id for the terminal toggle button in the sidebar bottom toolbar. */
+  public static final String SIDEBAR_TOOLBAR_ITEM_TERMINAL = "HopGui-SidebarToolbar-Terminal";
 
   public static final String DEFAULT_HOP_GUI_NAMESPACE = "hop-gui";
 
@@ -245,13 +301,25 @@ public class HopGui
   private GuiMenuWidgets mainMenuWidgets;
   private Composite mainHopGuiComposite;
 
-  private ToolBar mainToolbar;
+  private Control mainToolbar;
   private GuiToolbarWidgets mainToolbarWidgets;
 
-  private ToolBar perspectivesToolbar;
+  private Control statusToolbar;
+  private GuiToolbarWidgets statusToolbarWidgets;
+
+  private Composite perspectivesSidebar;
+  private Composite bottomToolbar;
+  private final java.util.List<SidebarToolbarItemDescriptor> sidebarToolbarDescriptors =
+      new java.util.ArrayList<>();
+  private java.util.List<SidebarButton> sidebarButtons = new java.util.ArrayList<>();
   private Composite mainPerspectivesComposite;
   private HopPerspectiveManager perspectiveManager;
   private IHopPerspective activePerspective;
+  private org.apache.hop.ui.hopgui.terminal.HopGuiBottomDock terminalPanel;
+
+  public org.apache.hop.ui.hopgui.terminal.HopGuiBottomDock getTerminalPanel() {
+    return terminalPanel;
+  }
 
   private static final PrintStream originalSystemOut = System.out;
   private static final PrintStream originalSystemErr = System.err;
@@ -269,11 +337,24 @@ public class HopGui
   private boolean openingLastFiles;
   private boolean reOpeningFiles;
 
+  /**
+   * When set by Hop Web, called when the user changes the theme preference so the client can
+   * redirect to /ui or /ui-dark. Not used in desktop.
+   */
+  private Consumer<Boolean> webThemeRedirectCallback;
+
+  /**
+   * Session security context (Hop Web). Unrestricted / null on desktop or when authentication is
+   * not configured. Used for window title and available to UI code that needs the current user.
+   */
+  @Setter private HopSecurityContext securityContext;
+
   protected HopGui() {
     this(Display.getCurrent());
   }
 
   private HopGui(Display display) {
+    System.setProperty(Const.HOP_PLATFORM_RUNTIME, "GUI");
     this.display = display;
     this.id = UUID.randomUUID().toString();
 
@@ -319,15 +400,54 @@ public class HopGui
     PROVIDER = (ISingletonProvider) ImplementationLoader.newInstance(HopGui.class);
   }
 
-  public static final HopGui getInstance() {
+  public static HopGui getInstance() {
     return (HopGui) PROVIDER.getInstanceInternal();
+  }
+
+  public void setWebThemeRedirectCallback(Consumer<Boolean> callback) {
+    this.webThemeRedirectCallback = callback;
+  }
+
+  /**
+   * Called when the user changes the theme (dark mode) preference in Hop Web. If a redirect
+   * callback is set, triggers a full-page redirect so the new theme takes effect.
+   *
+   * @param darkMode true = dark, false = light, null = follow system (Hop Web only)
+   */
+  public void notifyWebThemePreferenceChanged(Boolean darkMode) {
+    if (webThemeRedirectCallback != null) {
+      webThemeRedirectCallback.accept(darkMode);
+    }
+  }
+
+  /** Overload for primitive boolean (delegates to Boolean version). */
+  public void notifyWebThemePreferenceChanged(boolean darkMode) {
+    notifyWebThemePreferenceChanged(Boolean.valueOf(darkMode));
+  }
+
+  /**
+   * Apply a startup log level from the {@code HOP_LOG_LEVEL} system property (e.g. set by {@code
+   * hop-gui.sh debug}). Sets the default level so newly created channels inherit it, and updates
+   * the already-created static UI/GENERAL channels so GUI-side debug logging becomes visible.
+   */
+  private static void applyStartupLogLevel() {
+    String levelCode = System.getProperty("HOP_LOG_LEVEL");
+    if (StringUtils.isEmpty(levelCode)) {
+      return;
+    }
+    LogLevel level = LogLevel.lookupCode(levelCode);
+    DefaultLogLevel.setLogLevel(level);
+    LogChannel.UI.setLogLevel(level);
+    LogChannel.GENERAL.setLogLevel(level);
   }
 
   public static void main(String[] arguments) {
     try {
-
+      applyStartupLogLevel();
       setupConsoleLogging();
-      HopEnvironment.init();
+      if (!HopEnvironment.isInitialized()) {
+        HopEnvironment.init();
+      }
       OsHelper.setAppName();
       Display display = setupDisplay();
 
@@ -336,12 +456,16 @@ public class HopGui
 
       // Initialize the logging backend
       //
-      HopLogStore.init();
+      if (!HopLogStore.isInitialized()) {
+        HopLogStore.init();
+      }
       Locale.setDefault(LanguageChoice.getInstance().getDefaultLocale());
 
       HopGui hopGui = HopGui.getInstance();
       hopGui.getCommandLineArguments().addAll(Arrays.asList(arguments));
-      hopGui.setProps(PropsUi.getInstance());
+      PropsUi props = PropsUi.getInstance();
+      hopGui.setProps(props);
+      props.clearPersistedDialogPositionsOnStartupIfConfigured();
 
       // Add and load the Hop GUI Plugins...
       // - Load perspectives
@@ -379,11 +503,37 @@ public class HopGui
     }
   }
 
+  /**
+   * Returns the main window title, including the Apache Hop version when it is available from the
+   * runtime manifest ({@link HopVersionProvider}). If no implementation version is present (for
+   * example when running from the IDE classpath), only the localized application name is returned.
+   *
+   * @return window title such as {@code Hop - 2.19.0}, or {@code Hop} when the version is unknown
+   */
+  protected String getApplicationWindowTitle() {
+    String appName = BaseMessages.getString(PKG, "HopGui.Application.Name");
+    String version = new HopVersionProvider().getVersion()[0];
+    StringBuilder title = new StringBuilder(appName);
+    if (StringUtils.isNotEmpty(version)) {
+      title.append(" - ").append(version);
+    }
+    // Show authenticated username when Hop Web is fronted by container auth (EXTERNAL)
+    HopSecurityContext ctx = securityContext;
+    if (ctx != null && ctx.isAuthenticated()) {
+      title.append(" [").append(ctx.getUsername()).append(']');
+    }
+    return title.toString();
+  }
+
   /** Build the shell */
   protected void open() {
-    shell.setImage(GuiResource.getInstance().getImageHopUiTaskbar());
+    // Hand Windows a multi-resolution icon set so it can pick the right size for each slot
+    // (title bar, taskbar, alt-tab, jump-list). Passing only one 16x16 image left Windows
+    // scaling up to 64x64 for the taskbar, which sometimes worked and sometimes fell back
+    // to a generic icon depending on DPI and the icon cache state.
+    shell.setImages(GuiResource.getInstance().getImagesHopUiTaskbar());
 
-    /**
+    /*
      * On macOs the image gets loaded too soon, add a listener to set the image when the shell is
      * loaded
      */
@@ -404,9 +554,10 @@ public class HopGui
 
     PropsUi.setLook(shell);
 
-    shell.setText(BaseMessages.getString(PKG, "HopGui.Application.Name"));
+    shell.setText(getApplicationWindowTitle());
     addMainMenu();
     addMainToolbar();
+    addStatusToolbar();
     addPerspectivesToolbar();
     addMainPerspectivesComposite();
 
@@ -452,15 +603,37 @@ public class HopGui
           }
 
           // Open the previously used files. Extension points can disable this
+          // (e.g. projects plugin sets openingLastFiles=false when loading a project).
+          // When the URL has ?file=..., we still restore last files first, then open/switch to
+          // that file so the user gets their previous tabs plus the requested file.
           //
-          if (openingLastFiles) {
+          if (openingLastFiles || hasFileInCommandLineArgs()) {
             auditDelegate.openLastFiles();
           }
+
+          // Terminal restoration is handled by the Projects plugin
+
+          // Restore explorer perspective state (file explorer panel visibility) for current
+          // namespace (default or project set by extension point).
+          //
+          ExplorerPerspective.getInstance().applyRestoredState();
+          ExecutionPerspective.getInstance().restoreState();
 
           // We need to start tracking file history again.
           //
           reOpeningFiles = false;
+
+          // Open file from URL/command line if -file= was provided (e.g. Hop Web ?file=...)
+          //
+          openFileFromCommandLineArgs();
         });
+
+    // Activate the default perspective
+    //
+    IHopPerspective defaultPerspective = getDefaultPerspective();
+    if (defaultPerspective != null) {
+      defaultPerspective.activate();
+    }
 
     // See if we need to show the Welcome dialog
     //
@@ -500,38 +673,73 @@ public class HopGui
   }
 
   private void closeEvent(Event event) {
-    event.doit = fileDelegate.fileExit();
+    boolean shouldExit = fileDelegate.fileExit();
+    event.doit = shouldExit;
+
+    if (shouldExit) {
+      // Save the shell size and position before closing
+      props.setScreen(new WindowProperty(shell));
+    }
+  }
+
+  /**
+   * If -file= was passed in command line args (e.g. from Hop Web URL ?file=...), open that file
+   * once and remove the arg so the URL can later reflect the current tab.
+   */
+  private void openFileFromCommandLineArgs() {
+    List<String> args = getCommandLineArguments();
+    if (args == null) {
+      return;
+    }
+    String filePath = null;
+    for (int i = 0; i < args.size(); i++) {
+      String arg = args.get(i);
+      if (arg != null && arg.startsWith("-file=")) {
+        filePath = arg.substring("-file=".length()).trim();
+        args.remove(i);
+        break;
+      }
+    }
+    if (StringUtils.isEmpty(filePath)) {
+      return;
+    }
+    try {
+      String resolved = variables.resolve(filePath);
+      if (StringUtils.isNotEmpty(resolved)) {
+        fileDelegate.fileOpen(resolved, true);
+      }
+    } catch (Exception e) {
+      log.logError("Error opening file from URL '" + filePath + "'", e);
+    }
+  }
+
+  /** True if command line args contain -file=... (e.g. from Hop Web URL). */
+  private boolean hasFileInCommandLineArgs() {
+    List<String> args = getCommandLineArguments();
+    if (args == null) {
+      return false;
+    }
+    for (String arg : args) {
+      if (arg != null && arg.startsWith("-file=")) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private void loadPerspectives() {
-    List<String> excludedGuiElements = new ArrayList<>();
-
-    // Try loading code exclusions
-    try {
-      String path = Const.HOP_CONFIG_FOLDER + File.separator + "disabledGuiElements.xml";
-
-      Document document = XmlHandler.loadXmlFile(path);
-      Node exclusionsNode = XmlHandler.getSubNode(document, "exclusions");
-      List<Node> exclusionNodes = XmlHandler.getNodes(exclusionsNode, "exclusion");
-
-      for (Node exclusionNode : exclusionNodes) {
-        excludedGuiElements.add(exclusionNode.getTextContent());
-      }
-    } catch (HopXmlException e) {
-      // ignore
-    }
+    List<String> excludedGuiElements = GuiRegistry.getDisabledGuiElements();
 
     try {
       // Preload the perspectives and store them in the manager as well as the GuiRegistry
       //
       perspectiveManager = new HopPerspectiveManager(this);
       PluginRegistry pluginRegistry = PluginRegistry.getInstance();
-      boolean first = true;
       List<Plugin> perspectivePlugins = pluginRegistry.getPlugins(HopPerspectivePluginType.class);
 
       // Sort by id
       //
-      Collections.sort(perspectivePlugins, Comparator.comparing(p -> p.getIds()[0]));
+      perspectivePlugins.sort(Comparator.comparing(p -> p.getIds()[0]));
 
       for (Plugin perspectivePlugin : perspectivePlugins) {
 
@@ -542,7 +750,7 @@ public class HopGui
         Class<IHopPerspective> perspectiveClass =
             pluginRegistry.getClass(perspectivePlugin, IHopPerspective.class);
 
-        // Create a new instance & initialize.
+        // Create a new instance and initialize.
         //
         final IHopPerspective perspective = perspectiveClass.getConstructor().newInstance();
         perspective.initialize(this, mainPerspectivesComposite);
@@ -554,49 +762,40 @@ public class HopGui
             Const.NVL(
                 TranslateUtil.translate(perspectivePlugin.getName(), perspectiveClass),
                 perspective.getId());
-        Listener listener = event -> setActivePerspective(perspective);
         ClassLoader classLoader = pluginRegistry.getClassLoader(perspectivePlugin);
 
-        ToolItem item;
-        if (EnvironmentUtils.getInstance().isWeb()) {
-          item =
-              addWebToolbarButton(
-                  perspectivePlugin.getIds()[0],
-                  this.perspectivesToolbar,
-                  perspectivePlugin.getImageFile(),
-                  tooltip,
-                  listener);
-        } else {
-          item = new ToolItem(this.perspectivesToolbar, SWT.RADIO);
-          item.setToolTipText(tooltip);
-          item.addListener(SWT.Selection, listener);
-          Image image =
-              GuiResource.getInstance()
-                  .getImage(
-                      perspectivePlugin.getImageFile(),
-                      classLoader,
-                      ConstUi.SMALL_ICON_SIZE,
-                      ConstUi.SMALL_ICON_SIZE);
-          if (image != null) {
-            item.setImage(image);
-          }
-        }
-        item.setData(perspective);
-
+        int sidebarIconSize = 21;
+        Image image =
+            GuiResource.getInstance()
+                .getImage(
+                    perspectivePlugin.getImageFile(),
+                    classLoader,
+                    sidebarIconSize,
+                    sidebarIconSize);
         // See if there's a shortcut for the perspective, add it to tooltip...
         KeyboardShortcut shortcut =
             GuiRegistry.getInstance()
                 .findKeyboardShortcut(perspectiveClass.getName(), "activate", Const.isOSX());
+
         if (shortcut != null) {
-          item.setToolTipText(item.getToolTipText() + " (" + shortcut + ')');
+          tooltip += " (" + shortcut + ")";
         }
 
-        if (first) {
-          first = false;
-          item.setSelection(true);
-        }
+        // Create styled sidebar button with hover, selection, and rounded corners
+        // This works for both desktop SWT and web/RAP modes
+        // Get the perspectives container from the sidebar
+        Composite perspectivesContainer =
+            (Composite) perspectivesSidebar.getData("perspectivesContainer");
+        createStyledSidebarButton(
+            perspectivesContainer,
+            image,
+            perspectivePlugin.getImageFile(),
+            sidebarIconSize,
+            tooltip,
+            perspective);
       }
-      perspectivesToolbar.pack();
+
+      perspectivesSidebar.layout(true, true);
     } catch (Exception e) {
       new ErrorDialog(shell, "Error", "Error loading perspectives", e);
     }
@@ -630,6 +829,240 @@ public class HopGui
     return item;
   }
 
+  /**
+   * Create a styled sidebar button with modern appearance. Features rounded corners, hover effects,
+   * and selection colors.
+   */
+  private void createStyledSidebarButton(
+      Composite parent,
+      Image image,
+      String imagePath,
+      int imageSize,
+      String tooltip,
+      IHopPerspective perspective) {
+
+    SidebarButton button =
+        new SidebarButton(parent, image, imagePath, imageSize, tooltip, perspective);
+    sidebarButtons.add(button);
+
+    GridData gd = new GridData();
+    gd.widthHint = (int) (34 * PropsUi.getNativeZoomFactor());
+    gd.heightHint = (int) (34 * PropsUi.getNativeZoomFactor());
+    button.composite.setLayoutData(gd);
+  }
+
+  /** Custom sidebar button class with hover, selection, and rounded corners */
+  private class SidebarButton {
+    Control composite; // Use Control to allow both Composite (RAP) and Canvas (desktop)
+    Image image;
+    IHopPerspective perspective;
+    boolean isHovered = false;
+    boolean isSelected = false;
+
+    Color selectionBg = GuiResource.getInstance().getColorLightBlue();
+    Color hoverBg = GuiResource.getInstance().getColorGray();
+    Color normalBg = GuiResource.getInstance().getWidgetBackGroundColor();
+
+    public SidebarButton(
+        Composite parent,
+        Image image,
+        String imagePath,
+        int imageSize,
+        String tooltip,
+        IHopPerspective perspective) {
+      this.image = image;
+      this.perspective = perspective;
+
+      // Create a label inside the composite to display the image (only for RAP)
+      final Label imageLabel;
+      if (EnvironmentUtils.getInstance().isWeb()) {
+        // For RAP/web: use Composite with Label child
+        Composite comp = new Composite(parent, SWT.NONE);
+        composite = comp;
+        comp.setToolTipText(tooltip);
+        comp.setBackground(normalBg);
+
+        // Set custom variant for CSS styling in RAP
+        comp.setData("org.eclipse.rap.rwt.customVariant", "sidebarButton");
+
+        // Use GridLayout to center the image without stretching
+        GridLayout layout = new GridLayout(1, false);
+        layout.marginWidth = 0;
+        layout.marginHeight = 0;
+        layout.horizontalSpacing = 0;
+        layout.verticalSpacing = 0;
+        comp.setLayout(layout);
+
+        imageLabel = new Label(comp, SWT.NONE);
+        imageLabel.setBackground(normalBg);
+        imageLabel.setToolTipText(tooltip);
+        imageLabel.setData("org.eclipse.rap.rwt.customVariant", "sidebarButton");
+        SvgLabelFacade.setData(perspective.getId() + "-sidebar", imageLabel, imagePath, imageSize);
+
+        // Center the label in the composite
+        GridData gd = new GridData(SWT.CENTER, SWT.CENTER, true, true);
+        imageLabel.setLayoutData(gd);
+      } else {
+        Canvas canvas = new Canvas(parent, SWT.NONE);
+        composite = canvas;
+        canvas.setToolTipText(tooltip);
+        canvas.setBackground(normalBg);
+        imageLabel = null;
+      }
+
+      // Update background colors method for both RAP and desktop
+      final Runnable updateColors =
+          () -> {
+            if (EnvironmentUtils.getInstance().isWeb()) {
+              // For RAP, update composite background color (rounded corners applied via CSS)
+              Color bgColor;
+              if (isSelected) {
+                bgColor = selectionBg;
+              } else if (isHovered) {
+                bgColor = hoverBg;
+              } else {
+                bgColor = normalBg;
+              }
+              composite.setBackground(bgColor);
+              // Keep label background transparent/matching to show composite background
+              if (imageLabel != null) {
+                imageLabel.setBackground(bgColor);
+              }
+              // Force redraw in RAP
+              composite.redraw();
+              if (composite instanceof Composite) {
+                ((Composite) composite).layout();
+              }
+            } else {
+              // For desktop Canvas, trigger repaint
+              composite.redraw();
+            }
+          };
+
+      // Only add paint listener for desktop SWT (RAP doesn't support it)
+      if (!EnvironmentUtils.getInstance().isWeb()) {
+        composite.addPaintListener(
+            e -> {
+              GC gc = e.gc;
+              Point size = composite.getSize();
+
+              gc.setAntialias(SWT.ON);
+
+              // Choose background color
+              if (isSelected) {
+                gc.setBackground(selectionBg);
+              } else if (isHovered) {
+                gc.setBackground(hoverBg);
+              } else {
+                gc.setBackground(normalBg);
+              }
+
+              // Fill rounded rectangle
+              gc.fillRoundRectangle(4, 4, size.x - 8, size.y - 8, 8, 8);
+
+              // Draw image centered
+              if (image != null && !image.isDisposed()) {
+                Rectangle imgBounds = image.getBounds();
+                int x = (size.x - imgBounds.width) / 2;
+                int y = (size.y - imgBounds.height) / 2;
+                gc.drawImage(image, x, y);
+              }
+            });
+      }
+
+      // Mouse listeners
+      composite.addListener(
+          SWT.MouseEnter,
+          e -> {
+            isHovered = true;
+            updateColors.run();
+          });
+
+      composite.addListener(
+          SWT.MouseExit,
+          e -> {
+            isHovered = false;
+            updateColors.run();
+          });
+
+      composite.addListener(
+          SWT.MouseDown,
+          e -> {
+            // Deselect all other buttons
+            for (SidebarButton btn : sidebarButtons) {
+              btn.setSelected(false);
+            }
+
+            // Select this button
+            setSelected(true);
+
+            // Handle perspective activation
+            if (perspective instanceof ExplorerPerspective explorerPerspective
+                && mainPerspectivesComposite != null
+                && !mainPerspectivesComposite.isDisposed()) {
+              StackLayout layout = (StackLayout) mainPerspectivesComposite.getLayout();
+              if (layout.topControl == explorerPerspective.getControl()) {
+                explorerPerspective.toggleFileExplorerPanel();
+                return;
+              }
+            }
+            setActivePerspective(perspective);
+          });
+
+      // Also attach listeners to the image label for better hit detection (RAP only)
+      if (imageLabel != null) {
+        imageLabel.addListener(
+            SWT.MouseEnter,
+            e -> {
+              isHovered = true;
+              updateColors.run();
+            });
+        imageLabel.addListener(
+            SWT.MouseExit,
+            e -> {
+              isHovered = false;
+              updateColors.run();
+            });
+        imageLabel.addListener(
+            SWT.MouseDown,
+            e -> {
+              // Deselect all other buttons
+              for (SidebarButton btn : sidebarButtons) {
+                btn.setSelected(false);
+              }
+
+              // Select this button
+              setSelected(true);
+
+              // Handle perspective activation
+              if (perspective instanceof ExplorerPerspective explorerPerspective
+                  && mainPerspectivesComposite != null
+                  && !mainPerspectivesComposite.isDisposed()) {
+                StackLayout layout = (StackLayout) mainPerspectivesComposite.getLayout();
+                if (layout.topControl == explorerPerspective.getControl()) {
+                  explorerPerspective.toggleFileExplorerPanel();
+                  return;
+                }
+              }
+              setActivePerspective(perspective);
+            });
+      }
+
+      // Store the update method for later use
+      composite.setData("updateColors", updateColors);
+    }
+
+    public void setSelected(boolean selected) {
+      this.isSelected = selected;
+      if (!composite.isDisposed()) {
+        Runnable updateColors = (Runnable) composite.getData("updateColors");
+        if (updateColors != null) {
+          updateColors.run();
+        }
+      }
+    }
+  }
+
   private static Display setupDisplay() {
     // Bootstrap Hop
     //
@@ -642,6 +1075,7 @@ public class HopGui
     return display;
   }
 
+  @SuppressWarnings("java:S2095") // the stream backs System.out/err for the lifetime of the process
   private static void setupConsoleLogging() {
     boolean doConsoleRedirect = !Boolean.getBoolean("HopUi.Console.Redirect.Disabled");
     if (doConsoleRedirect) {
@@ -669,9 +1103,15 @@ public class HopGui
 
     mainMenu = new Menu(shell, SWT.BAR);
     mainMenuWidgets.createMenuWidgets(ID_MAIN_MENU, shell, mainMenu);
+    mainMenuWidgets.ensureShortcutPluginInstancesRegistered();
 
     if (EnvironmentUtils.getInstance().isWeb()) {
       mainMenuWidgets.enableMenuItem(HopGui.ID_MAIN_MENU_FILE_EXIT, false);
+    } else if (areSessionControlsVisible()) {
+      // Log off is Hop Web only
+      mainMenuWidgets.enableMenuItem(HopGui.ID_MAIN_MENU_FILE_LOG_OFF, false);
+    } else {
+      mainMenuWidgets.removeMenuItem(HopGui.ID_MAIN_MENU_FILE_LOG_OFF);
     }
 
     // We build the menu items but don't attach them to the shell.
@@ -720,6 +1160,12 @@ public class HopGui
   @GuiKeyboardShortcut(control = true, key = 'n')
   @GuiOsxKeyboardShortcut(command = true, key = 'n')
   public void menuFileNew() {
+    if (!HopSecurityUi.check(Permission.FILE_CREATE)
+        && !HopSecurity.allows(Permission.METADATA_WRITE)) {
+      // Neither new files nor new metadata allowed
+      HopSecurityUi.deny(Permission.FILE_CREATE);
+      return;
+    }
     contextDelegate.fileNew();
   }
 
@@ -823,6 +1269,104 @@ public class HopGui
     }
   }
 
+  /**
+   * The privilege mode combo and the log off action belong with the security configuration, which
+   * is only available in Hop Web. In the desktop Hop GUI they are hidden unless option {@link
+   * #HOP_CONFIG_SHOW_SESSION_CONTROLS} is enabled in hop-config.json.
+   */
+  public static boolean areSessionControlsVisible() {
+    return EnvironmentUtils.getInstance().isWeb()
+        || HopConfig.readOptionBoolean(HOP_CONFIG_SHOW_SESSION_CONTROLS, false);
+  }
+
+  /**
+   * Temporary session privilege mode (Full / Operator / Read-only). Values from {@link
+   * #getPrivilegeModeList()}.
+   */
+  @GuiToolbarElement(
+      root = ID_MAIN_TOOLBAR,
+      id = ID_MAIN_TOOLBAR_PRIVILEGE,
+      type = GuiToolbarElementType.COMBO,
+      comboValuesMethod = "getPrivilegeModeList",
+      extraWidth = 140,
+      toolTip = "i18n::HopGui.Toolbar.Privilege.Tooltip",
+      separator = true)
+  public void toolbarPrivilegeMode() {
+    if (!HopWebPrivilegeFacade.isAvailable() || mainToolbarWidgets == null) {
+      return;
+    }
+    Control control = mainToolbarWidgets.getWidgetsMap().get(ID_MAIN_TOOLBAR_PRIVILEGE);
+    if (!(control instanceof Combo combo) || combo.isDisposed()) {
+      return;
+    }
+    String label = combo.getText();
+    String modeId = HopWebPrivilegeFacade.labelToModeId(label);
+    if (HopWebPrivilegeFacade.setMode(modeId)) {
+      setSecurityContext(HopSecurity.getContext());
+      shell.setText(getApplicationWindowTitle());
+      updateLoggedInUserToolbar();
+      updatePrivilegeModeToolbar();
+      IHopFileTypeHandler handler = getActiveFileTypeHandler();
+      if (handler != null && handler.getFileType() != null) {
+        handleFileCapabilities(handler.getFileType(), handler, handler.hasChanged(), false, false);
+      } else {
+        handleFileCapabilities(new EmptyFileType(), false, false, false);
+      }
+      log.logBasic(
+          "Session privilege mode set to ''{0}'' (effective roles={1})",
+          modeId, HopSecurity.getContext().getRoleIds());
+    } else {
+      updatePrivilegeModeToolbar();
+    }
+  }
+
+  /**
+   * Combo values for {@link #toolbarPrivilegeMode()}. Return type must be {@code List<String>}
+   * because {@code BaseGuiWidgets.getComboItems} casts the reflected result to List.
+   */
+  public List<String> getPrivilegeModeList() {
+    if (!HopWebPrivilegeFacade.isAvailable()) {
+      return List.of(BaseMessages.getString(PKG, "HopGui.Toolbar.Privilege.Full"));
+    }
+    return Arrays.asList(HopWebPrivilegeFacade.getModeComboLabels());
+  }
+
+  /**
+   * Toolbar label showing the authenticated username (Hop Web). Text is set in {@link
+   * #updateLoggedInUserToolbar()}. Click is a no-op.
+   */
+  @GuiToolbarElement(
+      root = ID_MAIN_TOOLBAR,
+      id = ID_MAIN_TOOLBAR_USER,
+      type = GuiToolbarElementType.LABEL,
+      label = "",
+      toolTip = "i18n::HopGui.Toolbar.User.Tooltip")
+  public void toolbarLoggedInUser() {
+    // Display-only label; no action
+  }
+
+  @GuiMenuElement(
+      root = ID_MAIN_MENU,
+      id = ID_MAIN_MENU_FILE_LOG_OFF,
+      label = "i18n::HopGui.Menu.File.LogOff",
+      parentId = ID_MAIN_MENU_FILE,
+      image = "ui/images/shutdown.svg",
+      separator = true)
+  @GuiToolbarElement(
+      root = ID_MAIN_TOOLBAR,
+      id = ID_MAIN_TOOLBAR_LOG_OFF,
+      image = "ui/images/shutdown.svg",
+      toolTip = "i18n::HopGui.Menu.File.LogOff")
+  public void menuFileLogOff() {
+    // Confirm when there may be unsaved work (same guard as exit on desktop)
+    if (EnvironmentUtils.getInstance().isWeb()) {
+      if (!fileDelegate.saveGuardAllFiles()) {
+        return;
+      }
+    }
+    HopWebLogoutFacade.logOff();
+  }
+
   @GuiMenuElement(
       root = ID_MAIN_MENU,
       id = ID_MAIN_MENU_FILE_EXIT,
@@ -910,10 +1454,7 @@ public class HopGui
   @GuiKeyboardShortcut(key = 'f', control = true)
   @GuiOsxKeyboardShortcut(key = 'f', command = true)
   public void menuEditFind() {
-    IHopPerspective perspective = perspectiveManager.findPerspective(HopSearchPerspective.class);
-    if (perspective != null) {
-      perspective.activate();
-    }
+    new SearchEverywhereDialog(getActiveShell(), this).open();
   }
 
   @GuiMenuElement(
@@ -926,6 +1467,12 @@ public class HopGui
   @GuiKeyboardShortcut(control = true, key = 'c')
   @GuiOsxKeyboardShortcut(command = true, key = 'c')
   public void menuEditCopySelected() {
+    if (TextEditingControlUtil.isTextEditingControl(display.getFocusControl())
+        || isWebTextEditorFocused()) {
+      return;
+    }
+
+    // Otherwise, delegate to the active file type handler (pipeline/workflow)
     getActiveFileTypeHandler().copySelectedToClipboard();
   }
 
@@ -938,6 +1485,12 @@ public class HopGui
   @GuiKeyboardShortcut(control = true, key = 'v')
   @GuiOsxKeyboardShortcut(command = true, key = 'v')
   public void menuEditPaste() {
+    if (TextEditingControlUtil.isTextEditingControl(display.getFocusControl())
+        || isWebTextEditorFocused()) {
+      return;
+    }
+
+    // Otherwise, delegate to the active file type handler (pipeline/workflow)
     getActiveFileTypeHandler().pasteFromClipboard();
   }
 
@@ -950,7 +1503,16 @@ public class HopGui
   @GuiKeyboardShortcut(control = true, key = 'x')
   @GuiOsxKeyboardShortcut(command = true, key = 'x')
   public void menuEditCutSelected() {
+    if (TextEditingControlUtil.isTextEditingControl(display.getFocusControl())
+        || isWebTextEditorFocused()) {
+      return;
+    }
+
     getActiveFileTypeHandler().cutSelectedToClipboard();
+  }
+
+  private boolean isWebTextEditorFocused() {
+    return display.getData(TEXT_EDITOR_FOCUS_DATA) != null;
   }
 
   @GuiMenuElement(
@@ -1084,7 +1646,8 @@ public class HopGui
       parentId = ID_MAIN_MENU_EDIT_PARENT_ID,
       image = "ui/images/arrow-left.svg",
       separator = true)
-  @GuiKeyboardShortcut(alt = true, key = SWT.ARROW_LEFT)
+  @GuiKeyboardShortcut(control = true, alt = true, key = SWT.ARROW_LEFT)
+  @GuiOsxKeyboardShortcut(command = true, alt = true, key = SWT.ARROW_LEFT)
   public void menuEditNavigatePreviousFile() {
     getActivePerspective().navigateToPreviousFile();
   }
@@ -1095,10 +1658,37 @@ public class HopGui
       label = "i18n::HopGui.Menu.Edit.Navigate.Next",
       parentId = ID_MAIN_MENU_EDIT_PARENT_ID,
       image = "ui/images/arrow-right.svg")
-  @GuiKeyboardShortcut(alt = true, key = SWT.ARROW_RIGHT)
+  @GuiKeyboardShortcut(control = true, alt = true, key = SWT.ARROW_RIGHT)
+  @GuiOsxKeyboardShortcut(command = true, alt = true, key = SWT.ARROW_RIGHT)
   public void menuEditNavigateNextFile() {
     getActivePerspective().navigateToNextFile();
   }
+
+  // ======================== View Menu ========================
+
+  @GuiMenuElement(
+      root = ID_MAIN_MENU,
+      id = ID_MAIN_MENU_VIEW_PARENT_ID,
+      label = "i18n::HopGui.Menu.View",
+      parentId = ID_MAIN_MENU)
+  public void menuView() {
+    // Nothing is done here.
+  }
+
+  @GuiMenuElement(
+      root = ID_MAIN_MENU,
+      id = ID_MAIN_MENU_VIEW_FULL_SCREEN,
+      label = "i18n::HopGui.Menu.View.FullScreen",
+      parentId = ID_MAIN_MENU_VIEW_PARENT_ID)
+  @GuiKeyboardShortcut(alt = true, key = SWT.F11)
+  @GuiOsxKeyboardShortcut(command = true, control = true, key = 'F')
+  public void menuViewFullScreen() {
+    if (!shell.isDisposed()) {
+      shell.setFullScreen(!shell.getFullScreen());
+    }
+  }
+
+  // ======================== Run Menu ========================
 
   @GuiMenuElement(
       root = ID_MAIN_MENU,
@@ -1116,7 +1706,11 @@ public class HopGui
       image = "ui/images/run.svg",
       parentId = ID_MAIN_MENU_RUN_PARENT_ID)
   @GuiKeyboardShortcut(key = SWT.F8)
+  @GuiOsxKeyboardShortcut(key = SWT.F8)
   public void menuRunStart() {
+    if (!HopSecurityUi.check(Permission.RUN_EXECUTE)) {
+      return;
+    }
     getActiveFileTypeHandler().start();
   }
 
@@ -1127,6 +1721,9 @@ public class HopGui
       image = "ui/images/stop.svg",
       parentId = ID_MAIN_MENU_RUN_PARENT_ID)
   public void menuRunStop() {
+    if (!HopSecurityUi.check(Permission.RUN_STOP)) {
+      return;
+    }
     getActiveFileTypeHandler().stop();
   }
 
@@ -1138,6 +1735,9 @@ public class HopGui
       parentId = ID_MAIN_MENU_RUN_PARENT_ID,
       separator = true)
   public void menuRunPause() {
+    if (!HopSecurityUi.check(Permission.RUN_STOP)) {
+      return;
+    }
     getActiveFileTypeHandler().pause();
   }
 
@@ -1160,16 +1760,6 @@ public class HopGui
       separator = true)
   public void menuRunPreview() {
     getActiveFileTypeHandler().preview();
-  }
-
-  @GuiMenuElement(
-      root = ID_MAIN_MENU,
-      id = ID_MAIN_MENU_RUN_DEBUG,
-      label = "i18n::HopGui.Menu.Run.Debug",
-      image = "ui/images/debug.svg",
-      parentId = ID_MAIN_MENU_RUN_PARENT_ID)
-  public void menuRunDebug() {
-    getActiveFileTypeHandler().debug();
   }
 
   @GuiMenuElement(
@@ -1213,7 +1803,9 @@ public class HopGui
   }
 
   protected void addMainToolbar() {
-    mainToolbar = new ToolBar(shell, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    IToolbarContainer mainToolbarContainer =
+        ToolbarFacade.createToolbarContainer(shell, SWT.WRAP | SWT.RIGHT | SWT.HORIZONTAL);
+    mainToolbar = mainToolbarContainer.getControl();
     FormData fdToolBar = new FormData();
     fdToolBar.left = new FormAttachment(0, 0);
     fdToolBar.top = new FormAttachment(0, 0);
@@ -1223,13 +1815,100 @@ public class HopGui
 
     mainToolbarWidgets = new GuiToolbarWidgets();
     mainToolbarWidgets.registerGuiPluginObject(this);
-    mainToolbarWidgets.createToolbarWidgets(mainToolbar, ID_MAIN_TOOLBAR);
+    List<String> hiddenToolbarItems = new ArrayList<>();
+    if (!areSessionControlsVisible()) {
+      hiddenToolbarItems.add(ID_MAIN_TOOLBAR_PRIVILEGE);
+      hiddenToolbarItems.add(ID_MAIN_TOOLBAR_LOG_OFF);
+    }
+    mainToolbarWidgets.createToolbarWidgets(
+        mainToolbarContainer, ID_MAIN_TOOLBAR, hiddenToolbarItems);
+    updateLoggedInUserToolbar();
+    updatePrivilegeModeToolbar();
+    if (!EnvironmentUtils.getInstance().isWeb()) {
+      mainToolbarWidgets.enableToolbarItem(ID_MAIN_TOOLBAR_LOG_OFF, false);
+    }
     mainToolbar.pack();
   }
 
+  /**
+   * Show the authenticated username on the main toolbar (left of Log off). Hidden when the session
+   * is unrestricted (desktop / no auth).
+   */
+  protected void updateLoggedInUserToolbar() {
+    if (mainToolbarWidgets == null) {
+      return;
+    }
+    HopSecurityContext ctx = HopSecurity.getContext();
+    if (ctx == null || !ctx.isAuthenticated()) {
+      mainToolbarWidgets.setToolbarLabelText(ID_MAIN_TOOLBAR_USER, "", null);
+      return;
+    }
+    String username = Const.NVL(ctx.getUsername(), "");
+    String roles =
+        ctx.getRoleIds() == null || ctx.getRoleIds().isEmpty()
+            ? ""
+            : String.join(", ", ctx.getRoleIds());
+    HopSecurityContext base = HopWebPrivilegeFacade.getBaseContext();
+    boolean downgraded = HopSecurityPrivilegeMode.isDowngraded(base, ctx);
+    String toolTip;
+    if (downgraded) {
+      toolTip =
+          BaseMessages.getString(
+              PKG,
+              "HopGui.Toolbar.User.TooltipDowngraded",
+              username,
+              roles,
+              String.join(", ", base.getRoleIds()));
+    } else if (StringUtils.isEmpty(roles)) {
+      toolTip = BaseMessages.getString(PKG, "HopGui.Toolbar.User.Tooltip", username);
+    } else {
+      toolTip =
+          BaseMessages.getString(PKG, "HopGui.Toolbar.User.TooltipWithRoles", username, roles);
+    }
+    mainToolbarWidgets.setToolbarLabelText(ID_MAIN_TOOLBAR_USER, username, toolTip);
+  }
+
+  /** Refresh privilege-mode combo items and selection from the session. */
+  protected void updatePrivilegeModeToolbar() {
+    if (mainToolbarWidgets == null) {
+      return;
+    }
+    Control control = mainToolbarWidgets.getWidgetsMap().get(ID_MAIN_TOOLBAR_PRIVILEGE);
+    if (!(control instanceof Combo combo) || combo.isDisposed()) {
+      return;
+    }
+    boolean available = HopWebPrivilegeFacade.isAvailable();
+    combo.setEnabled(available);
+    if (!available) {
+      combo.setItems(new String[] {BaseMessages.getString(PKG, "HopGui.Toolbar.Privilege.Full")});
+      combo.setText(BaseMessages.getString(PKG, "HopGui.Toolbar.Privilege.Full"));
+      return;
+    }
+    String[] items = HopWebPrivilegeFacade.getModeComboLabels();
+    combo.setItems(items);
+    String current = HopWebPrivilegeFacade.modeIdToLabel(HopWebPrivilegeFacade.getModeId());
+    combo.setText(current);
+  }
+
+  protected void addStatusToolbar() {
+    IToolbarContainer statusToolbarContainer =
+        ToolbarFacade.createToolbarContainer(shell, SWT.WRAP | SWT.RIGHT | SWT.HORIZONTAL);
+    statusToolbar = statusToolbarContainer.getControl();
+    FormData fdToolBar = new FormData();
+    int sidebarWidth = (int) (40 * PropsUi.getNativeZoomFactor());
+    fdToolBar.left = new FormAttachment(0, sidebarWidth);
+    fdToolBar.right = new FormAttachment(100, 0);
+    fdToolBar.bottom = new FormAttachment(100, 0);
+    statusToolbar.setLayoutData(fdToolBar);
+    PropsUi.setLook(statusToolbar, Props.WIDGET_STYLE_TOOLBAR);
+
+    statusToolbarWidgets = new GuiToolbarWidgets();
+    statusToolbarWidgets.registerGuiPluginObject(this);
+    statusToolbarWidgets.createToolbarWidgets(statusToolbarContainer, ID_STATUS_TOOLBAR);
+    statusToolbar.pack();
+  }
+
   protected void addPerspectivesToolbar() {
-    // We can't mix horizontal and vertical toolbars so we need to add a composite.
-    //
     shell.setLayout(new FormLayout());
     mainHopGuiComposite = new Composite(shell, SWT.NO_BACKGROUND);
     mainHopGuiComposite.setLayout(new FormLayout());
@@ -1237,68 +1916,198 @@ public class HopGui
     formData.left = new FormAttachment(0, 0);
     formData.right = new FormAttachment(100, 0);
     formData.top = new FormAttachment(mainToolbar, 0);
-    formData.bottom = new FormAttachment(100, 0);
+    formData.bottom = new FormAttachment(statusToolbar, 0);
     mainHopGuiComposite.setLayoutData(formData);
 
-    perspectivesToolbar = new ToolBar(mainHopGuiComposite, SWT.WRAP | SWT.RIGHT | SWT.VERTICAL);
-    PropsUi.setLook(perspectivesToolbar, Props.WIDGET_STYLE_TOOLBAR);
-    FormData fdToolBar = new FormData();
-    fdToolBar.left = new FormAttachment(0, 0);
-    fdToolBar.top = new FormAttachment(0, 0);
-    fdToolBar.bottom = new FormAttachment(100, 0);
-    perspectivesToolbar.setLayoutData(fdToolBar);
+    // Create custom sidebar composite instead of ToolBar for better control
+    perspectivesSidebar = new Composite(mainHopGuiComposite, SWT.NONE);
+    PropsUi.setLook(perspectivesSidebar);
+    perspectivesSidebar.setLayout(new FormLayout());
+
+    // Container for perspective buttons (uses GridLayout for stacking)
+    Composite perspectivesContainer = new Composite(perspectivesSidebar, SWT.NONE);
+    org.eclipse.swt.layout.GridLayout perspectivesLayout =
+        new org.eclipse.swt.layout.GridLayout(1, false);
+    perspectivesLayout.marginWidth = 1;
+    perspectivesLayout.marginHeight = 2;
+    perspectivesLayout.verticalSpacing = 1; // Minimal spacing between buttons
+    perspectivesContainer.setLayout(perspectivesLayout);
+    FormData fdPerspectivesContainer = new FormData();
+    fdPerspectivesContainer.left = new FormAttachment(0, 0);
+    fdPerspectivesContainer.top = new FormAttachment(0, 0);
+    fdPerspectivesContainer.right = new FormAttachment(100, 0);
+    perspectivesContainer.setLayoutData(fdPerspectivesContainer);
+
+    bottomToolbar = new Composite(perspectivesSidebar, SWT.NONE);
+    GridLayout bottomLayout = new GridLayout(1, true);
+    bottomLayout.marginWidth = 0;
+    bottomLayout.marginHeight = 0;
+    bottomLayout.verticalSpacing = 1;
+    bottomToolbar.setLayout(bottomLayout);
+    bottomToolbar.setBackground(GuiResource.getInstance().getWidgetBackGroundColor());
+    FormData fdBottomToolbar = new FormData();
+    fdBottomToolbar.left = new FormAttachment(0, 0);
+    fdBottomToolbar.right = new FormAttachment(100, 0);
+    fdBottomToolbar.bottom = new FormAttachment(100, -4);
+    bottomToolbar.setLayoutData(fdBottomToolbar);
+
+    // Register built-in sidebar toolbar items (visibility depends on active perspective).
+    // File explorer: both terminal and execution. Other perspectives: terminal only.
+    // List order: terminal then execution; refresh draws in reverse so execution appears above.
+    int sidebarIconSize = 24;
+    sidebarToolbarDescriptors.add(
+        SidebarToolbarItemDescriptor.builder()
+            .id(SIDEBAR_TOOLBAR_ITEM_TERMINAL)
+            .imagePath("ui/images/terminal.svg")
+            .imageSize(sidebarIconSize)
+            .tooltip("Toggle Terminal Panel")
+            .onSelect(
+                () -> {
+                  if (terminalPanel != null) {
+                    terminalPanel.toggleTerminal();
+                  }
+                })
+            .selectedSupplier(() -> terminalPanel != null && terminalPanel.isTerminalVisible())
+            .available(!EnvironmentUtils.getInstance().isWeb())
+            .build());
+    sidebarToolbarDescriptors.add(
+        SidebarToolbarItemDescriptor.builder()
+            .id(SIDEBAR_TOOLBAR_ITEM_EXECUTION_RESULTS)
+            .visibleForPerspectiveIds(Set.of(PERSPECTIVE_ID_EXPLORER))
+            .imagePath("ui/images/show-results.svg")
+            .activeImagePath("ui/images/hide-results.svg")
+            .imageSize(sidebarIconSize)
+            .tooltip("Toggle Execution Results (Logging/Metrics/Problems)")
+            .onSelect(this::toggleExecutionResults)
+            .selectedSupplier(
+                () -> {
+                  HopGuiPipelineGraph pg = getActivePipelineGraph();
+                  if (pg != null) return pg.isExecutionResultsPaneVisible();
+                  HopGuiWorkflowGraph wg = getActiveWorkflowGraph();
+                  if (wg != null) return wg.isExecutionResultsPaneVisible();
+                  return false;
+                })
+            .available(true)
+            .build());
+
+    refreshBottomToolbarItems();
+
+    // Anchor perspectives container above bottom toolbar
+    fdPerspectivesContainer.bottom = new FormAttachment(bottomToolbar, 0);
+
+    // Store perspectivesContainer for use in loadPerspectives
+    perspectivesSidebar.setData("perspectivesContainer", perspectivesContainer);
+
+    FormData fdSidebar = new FormData();
+    fdSidebar.left = new FormAttachment(0, 0);
+    fdSidebar.top = new FormAttachment(0, 0);
+    fdSidebar.bottom = new FormAttachment(100, 0);
+    fdSidebar.width = (int) (34 * PropsUi.getNativeZoomFactor());
+    perspectivesSidebar.setLayoutData(fdSidebar);
   }
 
   /**
    * Add a main composite where the various perspectives can parent on to show stuff... Its area is
-   * to just below the main toolbar and to the right of the perspectives toolbar
+   * to just below the main toolbar and to the right of the perspectives toolbar.
+   *
+   * <p>Wraps everything in a {@link org.apache.hop.ui.hopgui.terminal.HopGuiBottomDock} which hosts
+   * the perspectives in its top section and a tabbed dock (terminals and other tools such as the
+   * search results) in its bottom section. The integrated terminal is a gated capability: it is
+   * turned off on the web (no AWT/PTY there) and can be disabled in {@code
+   * disabledGuiElements.xml}.
    */
   private void addMainPerspectivesComposite() {
-    mainPerspectivesComposite = new Composite(mainHopGuiComposite, SWT.NO_BACKGROUND);
+    boolean terminalsEnabled =
+        !EnvironmentUtils.getInstance().isWeb()
+            && !org.apache.hop.core.gui.plugin.GuiRegistry.getDisabledGuiElements()
+                .contains(
+                    org.apache.hop.ui.hopgui.terminal.HopGuiBottomDock.ID_MAIN_MENU_TOOLS_TERMINAL);
+
+    terminalPanel =
+        new org.apache.hop.ui.hopgui.terminal.HopGuiBottomDock(
+            mainHopGuiComposite, this, terminalsEnabled);
+    FormData fdTerminalPanel = new FormData();
+    fdTerminalPanel.top = new FormAttachment(0, 0);
+    fdTerminalPanel.left = new FormAttachment(perspectivesSidebar, 0);
+    fdTerminalPanel.bottom = new FormAttachment(100, 0);
+    fdTerminalPanel.right = new FormAttachment(100, 0);
+    terminalPanel.setLayoutData(fdTerminalPanel);
+
+    // Register so Tools > Terminal menu items can invoke dock methods
+    String menuInstanceId = mainMenuWidgets.getInstanceId();
+    org.apache.hop.core.gui.plugin.GuiRegistry.getInstance()
+        .registerGuiPluginObject(
+            getId(),
+            org.apache.hop.ui.hopgui.terminal.HopGuiBottomDock.class.getName(),
+            menuInstanceId,
+            terminalPanel);
+    terminalPanel.addDisposeListener(
+        e ->
+            org.apache.hop.core.gui.plugin.GuiRegistry.getInstance()
+                .removeGuiPluginObject(
+                    getId(),
+                    org.apache.hop.ui.hopgui.terminal.HopGuiBottomDock.class.getName(),
+                    menuInstanceId));
+
+    mainPerspectivesComposite = terminalPanel.getPerspectiveComposite();
     mainPerspectivesComposite.setLayout(new StackLayout());
-    FormData fdMain = new FormData();
-    fdMain.top = new FormAttachment(0, 0);
-    fdMain.left = new FormAttachment(perspectivesToolbar, 0);
-    fdMain.bottom = new FormAttachment(100, 0);
-    fdMain.right = new FormAttachment(100, 0);
-    mainPerspectivesComposite.setLayoutData(fdMain);
   }
 
   public void setUndoMenu(IUndo undoInterface) {
-    // Grab the undo and redo menu items...
-    //
-    MenuItem undoItem = mainMenuWidgets.findMenuItem(ID_MAIN_MENU_EDIT_UNDO);
-    MenuItem redoItem = mainMenuWidgets.findMenuItem(ID_MAIN_MENU_EDIT_REDO);
+    try {
+      IHopFileTypeHandler handler = getActiveFileTypeHandler();
+      if (handler instanceof ISnapshotUndoSupport support
+          && (undoInterface == null || support.isUndoMeta(undoInterface))) {
+        setUndoMenu(support.canUndo(), support.canRedo());
+        return;
+      }
+    } catch (Exception e) {
+      // Menu is built before a file handler exists.
+    }
+
+    ChangeAction prev = undoInterface != null ? undoInterface.viewThisUndo() : null;
+    ChangeAction next = undoInterface != null ? undoInterface.viewNextUndo() : null;
+    setUndoMenuItems(prev != null, next != null, prev, next);
+  }
+
+  public void setUndoMenu(boolean canUndo, boolean canRedo) {
+    setUndoMenuItems(canUndo, canRedo, null, null);
+  }
+
+  private void setUndoMenuItems(
+      boolean canUndo, boolean canRedo, ChangeAction prev, ChangeAction next) {
+    GuiMenuWidgets widgets = getMainMenuWidgets();
+    if (widgets == null) {
+      return;
+    }
+    MenuItem undoItem = widgets.findMenuItem(ID_MAIN_MENU_EDIT_UNDO);
+    MenuItem redoItem = widgets.findMenuItem(ID_MAIN_MENU_EDIT_REDO);
     if (undoItem == null || redoItem == null || undoItem.isDisposed() || redoItem.isDisposed()) {
       return;
     }
 
-    ChangeAction prev = null;
-    ChangeAction next = null;
-
-    if (undoInterface != null) {
-      prev = undoInterface.viewThisUndo();
-      next = undoInterface.viewNextUndo();
-    }
-
-    undoItem.setEnabled(prev != null);
-    if (prev == null) {
+    undoItem.setEnabled(canUndo);
+    if (!canUndo) {
       undoItem.setText(UNDO_UNAVAILABLE);
-    } else {
+    } else if (prev != null) {
       undoItem.setText(BaseMessages.getString(PKG, "HopGui.Menu.Undo.Available", prev.toString()));
+    } else {
+      undoItem.setText(BaseMessages.getString(PKG, "HopGui.Menu.Edit.Undo"));
     }
-    KeyboardShortcut undoShortcut = mainMenuWidgets.findKeyboardShortcut(ID_MAIN_MENU_EDIT_UNDO);
+    KeyboardShortcut undoShortcut = widgets.findKeyboardShortcut(ID_MAIN_MENU_EDIT_UNDO);
     if (undoShortcut != null) {
       GuiMenuWidgets.appendShortCut(undoItem, undoShortcut);
     }
 
-    redoItem.setEnabled(next != null);
-    if (next == null) {
+    redoItem.setEnabled(canRedo);
+    if (!canRedo) {
       redoItem.setText(REDO_UNAVAILABLE);
-    } else {
+    } else if (next != null) {
       redoItem.setText(BaseMessages.getString(PKG, "HopGui.Menu.Redo.Available", next.toString()));
+    } else {
+      redoItem.setText(BaseMessages.getString(PKG, "HopGui.Menu.Edit.Redo"));
     }
-    KeyboardShortcut redoShortcut = mainMenuWidgets.findKeyboardShortcut(ID_MAIN_MENU_EDIT_REDO);
+    KeyboardShortcut redoShortcut = widgets.findKeyboardShortcut(ID_MAIN_MENU_EDIT_REDO);
     if (redoShortcut != null) {
       GuiMenuWidgets.appendShortCut(redoItem, redoShortcut);
     }
@@ -1316,68 +2125,91 @@ public class HopGui
    */
   public void handleFileCapabilities(
       IHopFileType fileType, boolean changed, boolean running, boolean paused) {
+    handleFileCapabilities(fileType, null, changed, running, paused);
+  }
+
+  /**
+   * Same as {@link #handleFileCapabilities(IHopFileType, boolean, boolean, boolean)} but when
+   * handler is non-null, Save/SaveAs use the handler's capability (e.g. disabled for binary raw
+   * view).
+   */
+  public void handleFileCapabilities(
+      IHopFileType fileType,
+      IHopFileTypeHandler handler,
+      boolean changed,
+      boolean running,
+      boolean paused) {
 
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_FILE_SAVE, IHopFileType.CAPABILITY_SAVE, changed);
+        fileType, handler, ID_MAIN_MENU_FILE_SAVE, IHopFileType.CAPABILITY_SAVE, changed);
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_FILE_SAVE_AS, IHopFileType.CAPABILITY_SAVE_AS);
+        fileType, handler, ID_MAIN_MENU_FILE_SAVE_AS, IHopFileType.CAPABILITY_SAVE_AS);
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_FILE_EXPORT_TO_SVG, IHopFileType.CAPABILITY_EXPORT_TO_SVG);
+        fileType, handler, ID_MAIN_MENU_FILE_EXPORT_TO_SVG, IHopFileType.CAPABILITY_EXPORT_TO_SVG);
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_FILE_CLOSE, IHopFileType.CAPABILITY_CLOSE);
+        fileType, handler, ID_MAIN_MENU_FILE_CLOSE, IHopFileType.CAPABILITY_CLOSE);
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_FILE_CLOSE_ALL, IHopFileType.CAPABILITY_CLOSE);
+        fileType, handler, ID_MAIN_MENU_FILE_CLOSE_ALL, IHopFileType.CAPABILITY_CLOSE);
 
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_EDIT_SELECT_ALL, IHopFileType.CAPABILITY_SELECT);
+        fileType, handler, ID_MAIN_MENU_EDIT_SELECT_ALL, IHopFileType.CAPABILITY_SELECT);
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_EDIT_UNSELECT_ALL, IHopFileType.CAPABILITY_SELECT);
-
-    mainMenuWidgets.enableMenuItem(fileType, ID_MAIN_MENU_EDIT_COPY, IHopFileType.CAPABILITY_COPY);
-    mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_EDIT_PASTE, IHopFileType.CAPABILITY_PASTE);
-    mainMenuWidgets.enableMenuItem(fileType, ID_MAIN_MENU_EDIT_CUT, IHopFileType.CAPABILITY_CUT);
-    mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_EDIT_DELETE, IHopFileType.CAPABILITY_DELETE);
+        fileType, handler, ID_MAIN_MENU_EDIT_UNSELECT_ALL, IHopFileType.CAPABILITY_SELECT);
 
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_RUN_START, IHopFileType.CAPABILITY_START, !running);
+        fileType, handler, ID_MAIN_MENU_EDIT_COPY, IHopFileType.CAPABILITY_COPY);
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_RUN_STOP, IHopFileType.CAPABILITY_STOP, running);
+        fileType, handler, ID_MAIN_MENU_EDIT_PASTE, IHopFileType.CAPABILITY_PASTE);
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_RUN_PAUSE, IHopFileType.CAPABILITY_PAUSE, running && !paused);
+        fileType, handler, ID_MAIN_MENU_EDIT_CUT, IHopFileType.CAPABILITY_CUT);
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_RUN_RESUME, IHopFileType.CAPABILITY_PAUSE, paused);
+        fileType, handler, ID_MAIN_MENU_EDIT_DELETE, IHopFileType.CAPABILITY_DELETE);
+
     mainMenuWidgets.enableMenuItem(
-        fileType, ID_MAIN_MENU_RUN_PREVIEW, IHopFileType.CAPABILITY_PREVIEW);
-    mainMenuWidgets.enableMenuItem(fileType, ID_MAIN_MENU_RUN_DEBUG, IHopFileType.CAPABILITY_DEBUG);
+        fileType, handler, ID_MAIN_MENU_RUN_START, IHopFileType.CAPABILITY_START, !running);
+    mainMenuWidgets.enableMenuItem(
+        fileType, handler, ID_MAIN_MENU_RUN_STOP, IHopFileType.CAPABILITY_STOP, running);
+    mainMenuWidgets.enableMenuItem(
+        fileType,
+        handler,
+        ID_MAIN_MENU_RUN_PAUSE,
+        IHopFileType.CAPABILITY_PAUSE,
+        running && !paused);
+    mainMenuWidgets.enableMenuItem(
+        fileType, handler, ID_MAIN_MENU_RUN_RESUME, IHopFileType.CAPABILITY_PAUSE, paused);
+    mainMenuWidgets.enableMenuItem(
+        fileType, handler, ID_MAIN_MENU_RUN_PREVIEW, IHopFileType.CAPABILITY_PREVIEW);
 
     mainMenuWidgets.enableMenuItem(
         fileType,
+        handler,
         ID_MAIN_MENU_EDIT_NAV_PREV,
         IHopFileType.CAPABILITY_FILE_HISTORY,
         getActivePerspective().hasNavigationPreviousFile());
     mainMenuWidgets.enableMenuItem(
         fileType,
+        handler,
         ID_MAIN_MENU_EDIT_NAV_NEXT,
         IHopFileType.CAPABILITY_FILE_HISTORY,
         getActivePerspective().hasNavigationNextFile());
 
     mainToolbarWidgets.enableToolbarItem(
-        fileType, ID_MAIN_TOOLBAR_SAVE, IHopFileType.CAPABILITY_SAVE, changed);
+        fileType, handler, ID_MAIN_TOOLBAR_SAVE, IHopFileType.CAPABILITY_SAVE, changed);
     mainToolbarWidgets.enableToolbarItem(
-        fileType, ID_MAIN_TOOLBAR_SAVE_AS, IHopFileType.CAPABILITY_SAVE_AS);
+        fileType, handler, ID_MAIN_TOOLBAR_SAVE_AS, IHopFileType.CAPABILITY_SAVE_AS);
+
+    // New file / metadata: not capability-driven per active file — gate by RBAC only
+    boolean canCreate =
+        HopSecurity.allows(Permission.FILE_CREATE) || HopSecurity.allows(Permission.METADATA_WRITE);
+    mainMenuWidgets.enableMenuItem(ID_MAIN_MENU_FILE_NEW, canCreate);
+    mainToolbarWidgets.enableToolbarItem(ID_MAIN_TOOLBAR_NEW, canCreate);
   }
 
   public IHopFileTypeHandler getActiveFileTypeHandler() {
     return getActivePerspective().getActiveFileTypeHandler();
   }
 
-  /**
-   * Replace the listeners based on the @{@link GuiKeyboardShortcut} annotations
-   *
-   * @param parentObject The parent object containing the annotations and methods
-   */
+  /** Register parent and attach key handler to shell + children. */
   public void replaceKeyboardShortcutListeners(Object parentObject) {
     HopGuiKeyHandler keyHandler = HopGuiKeyHandler.getInstance();
     keyHandler.addParentObjectToHandle(parentObject);
@@ -1390,6 +2222,24 @@ public class HopGui
     if (control == null || control.isDisposed()) {
       return;
     }
+
+    // Widgets that this shell creates later on (a metadata editor rebuilding a section, ...) are
+    // covered when they get the focus.
+    //
+    keyHandler.addHandledShell(display, control.getShell());
+
+    addKeyboardShortcutListeners(control, keyHandler);
+  }
+
+  private void addKeyboardShortcutListeners(Control control, HopGuiKeyHandler keyHandler) {
+    if (control == null || control.isDisposed()) {
+      return;
+    }
+
+    if (control.getData(HopGuiKeyHandler.HOP_TERMINAL_WIDGET) == Boolean.TRUE) {
+      return;
+    }
+
     control.removeKeyListener(keyHandler);
     control.addKeyListener(keyHandler);
 
@@ -1397,7 +2247,7 @@ public class HopGui
     //
     if (control instanceof Composite compositeControl) {
       for (Control child : compositeControl.getChildren()) {
-        replaceKeyboardShortcutListeners(child, keyHandler);
+        addKeyboardShortcutListeners(child, keyHandler);
       }
     }
   }
@@ -1409,6 +2259,16 @@ public class HopGui
     } else {
       return shell;
     }
+  }
+
+  /**
+   * Gets the widgets of the main menu bar. Used by the global search popup to look up and fire menu
+   * commands.
+   *
+   * @return the main menu widgets
+   */
+  public GuiMenuWidgets getMainMenuWidgets() {
+    return mainMenuWidgets;
   }
 
   /**
@@ -1431,181 +2291,6 @@ public class HopGui
   }
 
   /**
-   * Gets shell
-   *
-   * @return value of shell
-   */
-  public Shell getShell() {
-    return shell;
-  }
-
-  public void setShell(Shell shell) {
-    this.shell = shell;
-  }
-
-  /**
-   * Gets display
-   *
-   * @return value of display
-   */
-  public Display getDisplay() {
-    return display;
-  }
-
-  /**
-   * Gets commandLineArguments
-   *
-   * @return value of commandLineArguments
-   */
-  public List<String> getCommandLineArguments() {
-    return commandLineArguments;
-  }
-
-  /**
-   * @param commandLineArguments The commandLineArguments to set
-   */
-  public void setCommandLineArguments(List<String> commandLineArguments) {
-    this.commandLineArguments = commandLineArguments;
-  }
-
-  /**
-   * Gets mainPerspectivesComposite
-   *
-   * @return value of mainPerspectivesComposite
-   */
-  public Composite getMainPerspectivesComposite() {
-    return mainPerspectivesComposite;
-  }
-
-  /**
-   * @param mainPerspectivesComposite The mainPerspectivesComposite to set
-   */
-  public void setMainPerspectivesComposite(Composite mainPerspectivesComposite) {
-    this.mainPerspectivesComposite = mainPerspectivesComposite;
-  }
-
-  /**
-   * Gets perspectiveManager
-   *
-   * @return value of perspectiveManager
-   */
-  public HopPerspectiveManager getPerspectiveManager() {
-    return perspectiveManager;
-  }
-
-  /**
-   * @param perspectiveManager The perspectiveManager to set
-   */
-  public void setPerspectiveManager(HopPerspectiveManager perspectiveManager) {
-    this.perspectiveManager = perspectiveManager;
-  }
-
-  /**
-   * Gets the variables
-   *
-   * @return value of variables
-   */
-  public IVariables getVariables() {
-    return variables;
-  }
-
-  /**
-   * @param variables The variables to set
-   */
-  public void setVariables(IVariables variables) {
-    this.variables = variables;
-  }
-
-  /**
-   * Gets props
-   *
-   * @return value of props
-   */
-  public PropsUi getProps() {
-    return props;
-  }
-
-  /**
-   * @param props The props to set
-   */
-  public void setProps(PropsUi props) {
-    this.props = props;
-  }
-
-  /**
-   * Gets log
-   *
-   * @return value of log
-   */
-  public ILogChannel getLog() {
-    return log;
-  }
-
-  /**
-   * Gets mainMenu
-   *
-   * @return value of mainMenu
-   */
-  public Menu getMainMenu() {
-    return mainMenu;
-  }
-
-  /**
-   * @param mainMenu The mainMenu to set
-   */
-  public void setMainMenu(Menu mainMenu) {
-    this.mainMenu = mainMenu;
-  }
-
-  /**
-   * Gets mainToolbar
-   *
-   * @return value of mainToolbar
-   */
-  public ToolBar getMainToolbar() {
-    return mainToolbar;
-  }
-
-  /**
-   * @param mainToolbar The mainToolbar to set
-   */
-  public void setMainToolbar(ToolBar mainToolbar) {
-    this.mainToolbar = mainToolbar;
-  }
-
-  /**
-   * Gets perspectivesToolbar
-   *
-   * @return value of perspectivesToolbar
-   */
-  public ToolBar getPerspectivesToolbar() {
-    return perspectivesToolbar;
-  }
-
-  /**
-   * @param perspectivesToolbar The perspectivesToolbar to set
-   */
-  public void setPerspectivesToolbar(ToolBar perspectivesToolbar) {
-    this.perspectivesToolbar = perspectivesToolbar;
-  }
-
-  /**
-   * Gets mainHopGuiComposite
-   *
-   * @return value of mainHopGuiComposite
-   */
-  public Composite getMainHopGuiComposite() {
-    return mainHopGuiComposite;
-  }
-
-  /**
-   * @param mainHopGuiComposite The mainHopGuiComposite to set
-   */
-  public void setMainHopGuiComposite(Composite mainHopGuiComposite) {
-    this.mainHopGuiComposite = mainHopGuiComposite;
-  }
-
-  /**
    * Activates the given perspective.
    *
    * @param perspective The perspective to active
@@ -1613,7 +2298,12 @@ public class HopGui
   public void setActivePerspective(IHopPerspective perspective) {
 
     if (perspective == null) {
-      perspective = getDataOrchestrationPerspective();
+      perspective = getDefaultPerspective();
+    }
+    if (perspective == null) {
+      // Every single perspective is disabled: there is nothing to put on top.
+      //
+      return;
     }
 
     activePerspective = perspective;
@@ -1624,35 +2314,260 @@ public class HopGui
     layout.topControl = perspective.getControl();
     mainPerspectivesComposite.layout();
 
-    // Select toolbar item
-    //
-    if (perspectivesToolbar != null && !perspectivesToolbar.isDisposed()) {
-      for (ToolItem item : perspectivesToolbar.getItems()) {
-        boolean shaded = perspective.equals(item.getData());
-        if (EnvironmentUtils.getInstance().isWeb()) {
-          SvgLabelFacade.shadeSvg((Label) item.getControl(), (String) item.getData("id"), shaded);
-        } else {
-          item.setSelection(shaded);
-        }
-      }
-    }
-
     // Notify the perspective that it has been activated.
     //
     perspective.perspectiveActivated();
 
-    perspectiveManager.notifyPerspectiveActiviated(perspective);
+    perspectiveManager.notifyPerspectiveActivated(perspective);
+
+    updateSidebarButtonSelection(perspective);
+    refreshBottomToolbarItems();
   }
 
-  public boolean isActivePerspective(IHopPerspective perspective) {
-    if (perspective != null) {
-      for (ToolItem item : perspectivesToolbar.getItems()) {
-        if (perspective.equals(item.getData())) {
-          return item.getSelection();
+  /**
+   * Register an item for the bottom-left sidebar toolbar. Visibility is determined by the active
+   * perspective (see {@link SidebarToolbarItemDescriptor}). If the toolbar already exists, it is
+   * refreshed immediately.
+   */
+  public void addSidebarToolbarItem(SidebarToolbarItemDescriptor descriptor) {
+    if (descriptor != null && !sidebarToolbarDescriptors.contains(descriptor)) {
+      sidebarToolbarDescriptors.add(descriptor);
+      if (bottomToolbar != null && !bottomToolbar.isDisposed()) {
+        refreshBottomToolbarItems();
+      }
+    }
+  }
+
+  /**
+   * Refresh the bottom sidebar toolbar so only items visible for the current perspective are shown.
+   * Items are added in reverse descriptor order so that the second, third, etc. buttons appear
+   * above the first (GridLayout lays out first-added at top). This avoids overlapping and keeps
+   * perspective-specific buttons (e.g. execution) above the always-visible ones (e.g. terminal).
+   */
+  public void refreshBottomToolbarItems() {
+    if (bottomToolbar == null || bottomToolbar.isDisposed()) {
+      return;
+    }
+    String activePerspectiveId = activePerspective != null ? activePerspective.getId() : "";
+    List<String> disabledGuiElements = GuiRegistry.getDisabledGuiElements();
+
+    // Collect visible descriptors, then add in reverse order so extra buttons go on top
+    List<SidebarToolbarItemDescriptor> visible = new ArrayList<>();
+    for (SidebarToolbarItemDescriptor d : sidebarToolbarDescriptors) {
+      if (!d.isAvailable() || disabledGuiElements.contains(d.getId())) {
+        continue;
+      }
+      boolean show;
+      if (!d.getVisibleForPerspectiveIds().isEmpty()) {
+        show = d.getVisibleForPerspectiveIds().contains(activePerspectiveId);
+      } else if (d.getHiddenForPerspectiveIds().isEmpty()) {
+        show = true;
+      } else {
+        show = !d.getHiddenForPerspectiveIds().contains(activePerspectiveId);
+      }
+      if (show) {
+        visible.add(d);
+      }
+    }
+
+    // Dispose existing children
+    for (Control child : bottomToolbar.getChildren()) {
+      child.dispose();
+    }
+
+    Color normalBg = GuiResource.getInstance().getWidgetBackGroundColor();
+    Color selectionBg = GuiResource.getInstance().getColorLightBlue();
+    Color hoverBg = GuiResource.getInstance().getColorGray();
+    int buttonSize = (int) (34 * PropsUi.getNativeZoomFactor());
+
+    // Add in reverse order: last in list becomes first (top) in toolbar
+    for (int i = visible.size() - 1; i >= 0; i--) {
+      SidebarToolbarItemDescriptor d = visible.get(i);
+
+      if (EnvironmentUtils.getInstance().isWeb()) {
+        // RAP: use Composite + Label (same pattern as SidebarButton)
+        Composite comp = new Composite(bottomToolbar, SWT.NONE);
+        comp.setToolTipText(d.getTooltip());
+        comp.setBackground(normalBg);
+        comp.setData("descriptor", d);
+        comp.setData("org.eclipse.rap.rwt.customVariant", "sidebarButton");
+
+        GridLayout gl = new GridLayout(1, false);
+        gl.marginWidth = 0;
+        gl.marginHeight = 0;
+        comp.setLayout(gl);
+
+        Label imgLabel = new Label(comp, SWT.NONE);
+        imgLabel.setBackground(normalBg);
+        imgLabel.setToolTipText(d.getTooltip());
+        imgLabel.setData("org.eclipse.rap.rwt.customVariant", "sidebarButton");
+        imgLabel.setLayoutData(new GridData(SWT.CENTER, SWT.CENTER, true, true));
+        String svgId = "sidebar-bottom-" + d.getId();
+        SvgLabelFacade.setData(svgId, imgLabel, d.getImagePath(), d.getImageSize());
+
+        GridData compGd = new GridData();
+        compGd.widthHint = buttonSize;
+        compGd.heightHint = buttonSize;
+        comp.setLayoutData(compGd);
+
+        Runnable updateVisual =
+            () -> {
+              boolean sel = d.getSelectedSupplier().getAsBoolean();
+              boolean hov = Boolean.TRUE.equals(comp.getData("hovered"));
+              Color bg = sel ? selectionBg : hov ? hoverBg : normalBg;
+              comp.setBackground(bg);
+              imgLabel.setBackground(bg);
+              String newPath =
+                  sel && !d.getActiveImagePath().isEmpty()
+                      ? d.getActiveImagePath()
+                      : d.getImagePath();
+              SvgLabelFacade.updateImageSource(svgId, imgLabel, newPath);
+              comp.redraw();
+            };
+        comp.setData("updateVisual", updateVisual);
+
+        comp.addListener(
+            SWT.MouseEnter,
+            e -> {
+              comp.setData("hovered", true);
+              updateVisual.run();
+            });
+        comp.addListener(
+            SWT.MouseExit,
+            e -> {
+              comp.setData("hovered", false);
+              updateVisual.run();
+            });
+        comp.addListener(
+            SWT.MouseDown,
+            e -> {
+              if (d.getOnSelect() != null) d.getOnSelect().run();
+              updateVisual.run();
+            });
+        imgLabel.addListener(
+            SWT.MouseEnter,
+            e -> {
+              comp.setData("hovered", true);
+              updateVisual.run();
+            });
+        imgLabel.addListener(
+            SWT.MouseExit,
+            e -> {
+              comp.setData("hovered", false);
+              updateVisual.run();
+            });
+        imgLabel.addListener(
+            SWT.MouseDown,
+            e -> {
+              if (d.getOnSelect() != null) d.getOnSelect().run();
+              updateVisual.run();
+            });
+
+        updateVisual.run();
+      } else {
+        // Desktop SWT: Canvas with custom painting (matches SidebarButton style)
+        Canvas canvas = new Canvas(bottomToolbar, SWT.NONE);
+        canvas.setToolTipText(d.getTooltip());
+        canvas.setBackground(normalBg);
+        canvas.setData("descriptor", d);
+        canvas.setData("selected", d.getSelectedSupplier().getAsBoolean());
+        canvas.setData("hovered", false);
+
+        GridData gd = new GridData();
+        gd.widthHint = buttonSize;
+        gd.heightHint = buttonSize;
+        canvas.setLayoutData(gd);
+
+        canvas.addPaintListener(
+            e -> {
+              GC gc = e.gc;
+              Point size = canvas.getSize();
+              gc.setAntialias(SWT.ON);
+
+              boolean sel = Boolean.TRUE.equals(canvas.getData("selected"));
+              boolean hov = Boolean.TRUE.equals(canvas.getData("hovered"));
+              gc.setBackground(sel ? selectionBg : hov ? hoverBg : normalBg);
+              gc.fillRoundRectangle(4, 4, size.x - 8, size.y - 8, 8, 8);
+
+              Image currentImg = resolveButtonImage(d);
+              if (currentImg != null && !currentImg.isDisposed()) {
+                Rectangle imgBounds = currentImg.getBounds();
+                int x = (size.x - imgBounds.width) / 2;
+                int y = (size.y - imgBounds.height) / 2;
+                gc.drawImage(currentImg, x, y);
+              }
+            });
+
+        canvas.addListener(
+            SWT.MouseEnter,
+            e -> {
+              canvas.setData("hovered", true);
+              canvas.redraw();
+            });
+        canvas.addListener(
+            SWT.MouseExit,
+            e -> {
+              canvas.setData("hovered", false);
+              canvas.redraw();
+            });
+        canvas.addListener(
+            SWT.MouseDown,
+            e -> {
+              if (d.getOnSelect() != null) {
+                d.getOnSelect().run();
+              }
+              canvas.setData("selected", d.getSelectedSupplier().getAsBoolean());
+              canvas.redraw();
+            });
+      }
+    }
+    bottomToolbar.layout(true, true);
+    bottomToolbar.getParent().layout(true, true);
+  }
+
+  /**
+   * Update the visual selected/active state of all bottom sidebar toolbar buttons. Call this after
+   * an action that changes the state externally (e.g. terminal toggled via keyboard shortcut).
+   */
+  public void refreshSidebarToolbarButtonStates() {
+    if (bottomToolbar == null || bottomToolbar.isDisposed()) {
+      return;
+    }
+    for (Control child : bottomToolbar.getChildren()) {
+      SidebarToolbarItemDescriptor desc =
+          (SidebarToolbarItemDescriptor) child.getData("descriptor");
+      if (desc != null) {
+        boolean selected = desc.getSelectedSupplier().getAsBoolean();
+        if (EnvironmentUtils.getInstance().isWeb()) {
+          Runnable updateVisual = (Runnable) child.getData("updateVisual");
+          if (updateVisual != null) {
+            updateVisual.run();
+          }
+        } else {
+          child.setData("selected", selected);
+          child.redraw();
         }
       }
     }
-    return false;
+  }
+
+  /** Resolve the correct image for a sidebar toolbar button based on its current selected state. */
+  private Image resolveButtonImage(SidebarToolbarItemDescriptor d) {
+    boolean active = d.getSelectedSupplier().getAsBoolean();
+    String path =
+        active && !d.getActiveImagePath().isEmpty() ? d.getActiveImagePath() : d.getImagePath();
+    return GuiResource.getInstance().getImage(path, d.getImageSize(), d.getImageSize());
+  }
+
+  public boolean isActivePerspective(IHopPerspective perspective) {
+    return activePerspective != null && activePerspective.equals(perspective);
+  }
+
+  /** Update the visual selection state of sidebar buttons when perspective changes. */
+  private void updateSidebarButtonSelection(IHopPerspective activePerspective) {
+    for (SidebarButton button : sidebarButtons) {
+      button.setSelected(button.perspective.equals(activePerspective));
+    }
   }
 
   @GuiKeyboardShortcut(key = SWT.F1)
@@ -1715,62 +2630,83 @@ public class HopGui
    */
   public static HopGuiPipelineGraph getActivePipelineGraph() {
     IHopPerspective activePerspective = HopGui.getInstance().getActivePerspective();
-    if (!(activePerspective instanceof HopDataOrchestrationPerspective perspective)) {
-      return null;
+    if (activePerspective instanceof ExplorerPerspective perspective) {
+      IHopFileTypeHandler typeHandler = perspective.getActiveFileTypeHandler();
+      if (typeHandler instanceof HopGuiPipelineGraph pipelineGraph) {
+        return pipelineGraph;
+      }
     }
-    IHopFileTypeHandler typeHandler = perspective.getActiveFileTypeHandler();
-    if (!(typeHandler instanceof HopGuiPipelineGraph)) {
-      return null;
-    }
-    return (HopGuiPipelineGraph) typeHandler;
-  }
-
-  public static HopGuiWorkflowGraph getActiveWorkflowGraph() {
-    IHopPerspective activePerspective = HopGui.getInstance().getActivePerspective();
-    if (!(activePerspective instanceof HopDataOrchestrationPerspective perspective)) {
-      return null;
-    }
-    IHopFileTypeHandler typeHandler = perspective.getActiveFileTypeHandler();
-    if (!(typeHandler instanceof HopGuiWorkflowGraph)) {
-      return null;
-    }
-    return (HopGuiWorkflowGraph) typeHandler;
-  }
-
-  public static HopDataOrchestrationPerspective getDataOrchestrationPerspective() {
-    return (HopDataOrchestrationPerspective)
-        HopGui.getInstance()
-            .getPerspectiveManager()
-            .findPerspective(HopDataOrchestrationPerspective.class);
-  }
-
-  public static MetadataPerspective getMetadataPerspective() {
-    return (MetadataPerspective)
-        HopGui.getInstance().getPerspectiveManager().findPerspective(MetadataPerspective.class);
-  }
-
-  public static ExecutionPerspective getExecutionPerspective() {
-    return (ExecutionPerspective)
-        HopGui.getInstance().getPerspectiveManager().findPerspective(ExecutionPerspective.class);
-  }
-
-  public static ExplorerPerspective getExplorerPerspective() {
-    return (ExplorerPerspective)
-        HopGui.getInstance().getPerspectiveManager().findPerspective(ExplorerPerspective.class);
-  }
-
-  public static ConfigurationPerspective getConfigurationPerspective() {
-    return (ConfigurationPerspective)
-        HopGui.getInstance()
-            .getPerspectiveManager()
-            .findPerspective(ConfigurationPerspective.class);
+    return null;
   }
 
   /**
-   * Create a list of all the searcheables locations. By default this means HopGui, the the current
-   * metadata
+   * Convenience method to pick up the active workflow graph
    *
-   * @return
+   * @return The active workflow graph or null if none is active
+   */
+  public static HopGuiWorkflowGraph getActiveWorkflowGraph() {
+    IHopPerspective activePerspective = HopGui.getInstance().getActivePerspective();
+    if (activePerspective instanceof ExplorerPerspective perspective) {
+      IHopFileTypeHandler typeHandler = perspective.getActiveFileTypeHandler();
+      if (typeHandler instanceof HopGuiWorkflowGraph workflowGraph) {
+        return workflowGraph;
+      }
+    }
+    return null;
+  }
+
+  /** Toggle execution results panel for the currently active pipeline or workflow */
+  public void toggleExecutionResults() {
+    HopGuiPipelineGraph pipelineGraph = getActivePipelineGraph();
+    if (pipelineGraph != null) {
+      pipelineGraph.showExecutionResults();
+      refreshSidebarToolbarButtonStates();
+      return;
+    }
+
+    HopGuiWorkflowGraph workflowGraph = getActiveWorkflowGraph();
+    if (workflowGraph != null) {
+      workflowGraph.showExecutionResults();
+      refreshSidebarToolbarButtonStates();
+    }
+  }
+
+  public static MetadataPerspective getMetadataPerspective() {
+    return HopGui.getInstance().getPerspectiveManager().findPerspective(MetadataPerspective.class);
+  }
+
+  public static ExecutionPerspective getExecutionPerspective() {
+    return HopGui.getInstance().getPerspectiveManager().findPerspective(ExecutionPerspective.class);
+  }
+
+  public static ExplorerPerspective getExplorerPerspective() {
+    return HopGui.getInstance().getPerspectiveManager().findPerspective(ExplorerPerspective.class);
+  }
+
+  /**
+   * The perspective to show when no other one is selected. That is normally the explorer
+   * perspective, but it can be switched off with an exclusion in disabledGuiElements.xml, in which
+   * case we settle for the first perspective that did get loaded.
+   *
+   * @return The default perspective, or null if every perspective is disabled.
+   */
+  public IHopPerspective getDefaultPerspective() {
+    ExplorerPerspective explorerPerspective = getExplorerPerspective();
+    if (explorerPerspective != null) {
+      return explorerPerspective;
+    }
+    return perspectiveManager.getPerspectives().stream().findFirst().orElse(null);
+  }
+
+  public static ConfigurationPerspective getConfigurationPerspective() {
+    return HopGui.getInstance()
+        .getPerspectiveManager()
+        .findPerspective(ConfigurationPerspective.class);
+  }
+
+  /**
+   * Create a list of all the searcheables locations. By default this means HopGui, the current
+   * metadata
    */
   @Override
   public List<ISearchablesLocation> getSearchablesLocations() {
@@ -1820,178 +2756,5 @@ public class HopGui
   public void nextPerspective() {
     IHopPerspective perspective = getActivePerspective();
     getPerspectiveManager().showNextPerspective(perspective);
-  }
-
-  /**
-   * Gets databaseMetaManager
-   *
-   * @return value of databaseMetaManager
-   */
-  public MetadataManager<DatabaseMeta> getDatabaseMetaManager() {
-    return databaseMetaManager;
-  }
-
-  /**
-   * @param databaseMetaManager The databaseMetaManager to set
-   */
-  public void setDatabaseMetaManager(MetadataManager<DatabaseMeta> databaseMetaManager) {
-    this.databaseMetaManager = databaseMetaManager;
-  }
-
-  /**
-   * Gets partitionManager
-   *
-   * @return value of partitionManager
-   */
-  public MetadataManager<PartitionSchema> getPartitionManager() {
-    return partitionManager;
-  }
-
-  /**
-   * @param partitionManager The partitionManager to set
-   */
-  public void setPartitionManager(MetadataManager<PartitionSchema> partitionManager) {
-    this.partitionManager = partitionManager;
-  }
-
-  /**
-   * Gets fileDelegate
-   *
-   * @return value of fileDelegate
-   */
-  public HopGuiFileDelegate getFileDelegate() {
-    return fileDelegate;
-  }
-
-  /**
-   * @param fileDelegate The fileDelegate to set
-   */
-  public void setFileDelegate(HopGuiFileDelegate fileDelegate) {
-    this.fileDelegate = fileDelegate;
-  }
-
-  /**
-   * Gets undoDelegate
-   *
-   * @return value of undoDelegate
-   */
-  public HopGuiUndoDelegate getUndoDelegate() {
-    return undoDelegate;
-  }
-
-  /**
-   * @param undoDelegate The undoDelegate to set
-   */
-  public void setUndoDelegate(HopGuiUndoDelegate undoDelegate) {
-    this.undoDelegate = undoDelegate;
-  }
-
-  /**
-   * Gets activePerspective
-   *
-   * @return value of activePerspective
-   */
-  public IHopPerspective getActivePerspective() {
-    return activePerspective;
-  }
-
-  /**
-   * Gets loggingObject
-   *
-   * @return value of loggingObject
-   */
-  public ILoggingObject getLoggingObject() {
-    return loggingObject;
-  }
-
-  /**
-   * Gets mainMenuWidgets
-   *
-   * @return value of mainMenuWidgets
-   */
-  public GuiMenuWidgets getMainMenuWidgets() {
-    return mainMenuWidgets;
-  }
-
-  /**
-   * @param mainMenuWidgets The mainMenuWidgets to set
-   */
-  public void setMainMenuWidgets(GuiMenuWidgets mainMenuWidgets) {
-    this.mainMenuWidgets = mainMenuWidgets;
-  }
-
-  /**
-   * Gets mainToolbarWidgets
-   *
-   * @return value of mainToolbarWidgets
-   */
-  public GuiToolbarWidgets getMainToolbarWidgets() {
-    return mainToolbarWidgets;
-  }
-
-  /**
-   * @param mainToolbarWidgets The mainToolbarWidgets to set
-   */
-  public void setMainToolbarWidgets(GuiToolbarWidgets mainToolbarWidgets) {
-    this.mainToolbarWidgets = mainToolbarWidgets;
-  }
-
-  /**
-   * Gets openingLastFiles
-   *
-   * @return value of openingLastFiles
-   */
-  public boolean isOpeningLastFiles() {
-    return openingLastFiles;
-  }
-
-  /**
-   * @param openingLastFiles The openingLastFiles to set
-   */
-  public void setOpeningLastFiles(boolean openingLastFiles) {
-    this.openingLastFiles = openingLastFiles;
-  }
-
-  /**
-   * Gets the unique id of this HopGui instance
-   *
-   * @return value of id
-   */
-  public String getId() {
-    return id;
-  }
-
-  /**
-   * Gets eventsHandler
-   *
-   * @return value of eventsHandler
-   */
-  public HopGuiEventsHandler getEventsHandler() {
-    return eventsHandler;
-  }
-
-  /**
-   * @param eventsHandler The eventsHandler to set
-   */
-  public void setEventsHandler(HopGuiEventsHandler eventsHandler) {
-    this.eventsHandler = eventsHandler;
-  }
-
-  /**
-   * Gets reOpeningFiles
-   *
-   * @return value of reOpeningFiles
-   */
-  public boolean isReOpeningFiles() {
-    return reOpeningFiles;
-  }
-
-  /**
-   * Sets reOpeningFiles
-   *
-   * @param reOpeningFiles value of reOpeningFiles
-   */
-  public void setReOpeningFiles(boolean reOpeningFiles) {
-    this.reOpeningFiles = reOpeningFiles;
   }
 }

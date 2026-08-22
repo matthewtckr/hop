@@ -18,30 +18,27 @@
 package org.apache.hop.projects.project;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.config.HopConfig;
 import org.apache.hop.core.config.plugin.ConfigPlugin;
 import org.apache.hop.core.config.plugin.IConfigOptions;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.logging.ILogChannel;
-import org.apache.hop.core.metadata.SerializableMetadataProvider;
 import org.apache.hop.core.util.StringUtil;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.DescribedVariable;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
-import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.metadata.api.IHasHopMetadataProvider;
 import org.apache.hop.projects.config.ProjectsConfig;
 import org.apache.hop.projects.config.ProjectsConfigSingleton;
+import org.apache.hop.projects.util.ProjectsMetadataExporter;
 import org.apache.hop.projects.util.ProjectsUtil;
 import picocli.CommandLine;
 
@@ -79,6 +76,11 @@ public class ManageProjectsOptionPlugin implements IConfigOptions {
       description =
           "The configuration file relative to the home folder. The default value is project-config.json")
   private String projectConfigFile;
+
+  @CommandLine.Option(
+      names = {"-pkf", "--project-keep-config-file"},
+      description = "Keep the existing project configuration file if it already exists")
+  private boolean projectKeepConfigFile;
 
   @CommandLine.Option(
       names = {"-ps", "--project-description"},
@@ -291,7 +293,7 @@ public class ManageProjectsOptionPlugin implements IConfigOptions {
       //
       project.verifyProjectsChain(projectName, variables);
 
-      project.saveToFile();
+      project.saveToFile(projectKeepConfigFile);
 
       log.logBasic(
           "Project settings for '"
@@ -381,7 +383,13 @@ public class ManageProjectsOptionPlugin implements IConfigOptions {
     log.logBasic(CONST_PROJECT + projectName + "' was created for home folder : " + projectHome);
 
     Project project = projectConfig.loadProject(variables);
-    project.setParentProjectName(config.getStandardParentProject());
+    // Keep an existing parent from a pre-existing project-config.json (Docker
+    // --project-keep-config-file). Only fall back to the standard parent when none is set.
+    // --project-parent still wins via modifyProjectSettings below.
+    //
+    if (StringUtils.isEmpty(project.getParentProjectName())) {
+      project.setParentProjectName(config.getStandardParentProject());
+    }
     modifyProjectSettings(project);
 
     // Check to see if there's not a loop in the project parent hierarchy
@@ -390,7 +398,7 @@ public class ManageProjectsOptionPlugin implements IConfigOptions {
 
     // Always save, even if it's an empty file
     //
-    project.saveToFile();
+    project.saveToFile(projectKeepConfigFile);
 
     log.logBasic(
         "Configuration file for project '"
@@ -436,20 +444,9 @@ public class ManageProjectsOptionPlugin implements IConfigOptions {
     String realFilename = variables.resolve(metadataJsonFilename);
     log.logBasic("Exporting project metadata to a single file: " + realFilename);
 
-    // This is the metadata to export
-    //
-    SerializableMetadataProvider metadataProvider =
-        new SerializableMetadataProvider(hasHopMetadataProvider.getMetadataProvider());
-    String jsonString = metadataProvider.toJson();
-
-    try {
-      try (OutputStream outputStream = HopVfs.getOutputStream(realFilename, false)) {
-        outputStream.write(jsonString.getBytes(StandardCharsets.UTF_8));
-      }
-      log.logBasic("Metadata was exported successfully.");
-    } catch (Exception e) {
-      throw new HopException("There was an error exporting metadata to file: " + realFilename, e);
-    }
+    ProjectsMetadataExporter.exportToFile(
+        hasHopMetadataProvider.getMetadataProvider(), realFilename);
+    log.logBasic("Metadata was exported successfully.");
   }
 
   public void listActionTypes(
@@ -459,6 +456,9 @@ public class ManageProjectsOptionPlugin implements IConfigOptions {
       IHasHopMetadataProvider hasHopMetadataProvider)
       throws HopException {
     ProjectConfig projectConfig = config.findProjectConfig(projectName);
+    if (projectConfig == null) {
+      throw new HopException("Unable to find project '" + projectName + "'");
+    }
     Project project = projectConfig.loadProject(variables);
     ProjectsUtil.enableProject(
         log, projectName, project, variables, new ArrayList<>(), null, hasHopMetadataProvider);
@@ -485,6 +485,9 @@ public class ManageProjectsOptionPlugin implements IConfigOptions {
       IHasHopMetadataProvider hasHopMetadataProvider)
       throws HopException {
     ProjectConfig projectConfig = config.findProjectConfig(projectName);
+    if (projectConfig == null) {
+      throw new HopException("Unable to find project '" + projectName + "'");
+    }
     Project project = projectConfig.loadProject(variables);
     ProjectsUtil.enableProject(
         log, projectName, project, variables, new ArrayList<>(), null, hasHopMetadataProvider);
@@ -525,6 +528,9 @@ public class ManageProjectsOptionPlugin implements IConfigOptions {
           IllegalAccessException,
           IOException {
     ProjectConfig projectConfig = config.findProjectConfig(projectName);
+    if (projectConfig == null) {
+      throw new HopException("Unable to find project '" + projectName + "'");
+    }
     Project project = projectConfig.loadProject(variables);
     ProjectsUtil.enableProject(
         log, projectName, project, variables, new ArrayList<>(), null, hasHopMetadataProvider);

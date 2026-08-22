@@ -18,7 +18,7 @@
 package org.apache.hop.pipeline.transforms.constant;
 
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.core.util.Utils;
@@ -27,6 +27,7 @@ import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.BaseDialog;
+import org.apache.hop.ui.core.dialog.BaseMessageDialog;
 import org.apache.hop.ui.core.widget.ColumnInfo;
 import org.apache.hop.ui.core.widget.TableView;
 import org.apache.hop.ui.pipeline.transform.BaseTransformDialog;
@@ -35,12 +36,9 @@ import org.eclipse.swt.events.ModifyListener;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
-import org.eclipse.swt.layout.FormLayout;
-import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.TableItem;
-import org.eclipse.swt.widgets.Text;
 
 public class ConstantDialog extends BaseTransformDialog {
   private static final Class<?> PKG = ConstantMeta.class;
@@ -59,61 +57,19 @@ public class ConstantDialog extends BaseTransformDialog {
 
   @Override
   public String open() {
-    Shell parent = getParent();
+    createShell(BaseMessages.getString(PKG, "ConstantDialog.DialogTitle"));
 
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
-    PropsUi.setLook(shell);
-    setShellImage(shell, input);
+    buildButtonBar().ok(e -> ok()).cancel(e -> cancel()).build();
 
     ModifyListener lsMod = e -> input.setChanged();
     changed = input.hasChanged();
-
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = PropsUi.getFormMargin();
-    formLayout.marginHeight = PropsUi.getFormMargin();
-
-    shell.setLayout(formLayout);
-    shell.setText(BaseMessages.getString(PKG, "ConstantDialog.DialogTitle"));
-
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
-
-    // The buttons at the bottom of the dialog
-    //
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, e -> ok());
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, e -> cancel());
-    setButtonPositions(new Button[] {wOk, wCancel}, margin, null);
-
-    // TransformName line
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(BaseMessages.getString(PKG, "System.TransformName.Label"));
-    wlTransformName.setToolTipText(BaseMessages.getString(PKG, "System.TransformName.Tooltip"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    fdlTransformName.top = new FormAttachment(0, margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    wTransformName.addModifyListener(lsMod);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(middle, 0);
-    fdTransformName.top = new FormAttachment(0, margin);
-    fdTransformName.right = new FormAttachment(100, 0);
-    wTransformName.setLayoutData(fdTransformName);
 
     Label wlFields = new Label(shell, SWT.NONE);
     wlFields.setText(BaseMessages.getString(PKG, "ConstantDialog.Fields.Label"));
     PropsUi.setLook(wlFields);
     FormData fdlFields = new FormData();
     fdlFields.left = new FormAttachment(0, 0);
-    fdlFields.top = new FormAttachment(wTransformName, margin);
+    fdlFields.top = new FormAttachment(wSpacer, margin);
     wlFields.setLayoutData(fdlFields);
 
     final int FieldsCols = 10;
@@ -173,6 +129,17 @@ public class ConstantDialog extends BaseTransformDialog {
               BaseMessages.getString(PKG, SYSTEM_COMBO_YES),
               BaseMessages.getString(PKG, "System.Combo.No")
             });
+    colinf[0].setToolTip(BaseMessages.getString(PKG, "ConstantDialog.Name.Column.Tooltip"));
+    colinf[1].setToolTip(BaseMessages.getString(PKG, "ConstantDialog.Type.Column.Tooltip"));
+    colinf[2].setToolTip(BaseMessages.getString(PKG, "ConstantDialog.Format.Column.Tooltip"));
+    colinf[3].setToolTip(BaseMessages.getString(PKG, "ConstantDialog.Length.Column.Tooltip"));
+    colinf[4].setToolTip(BaseMessages.getString(PKG, "ConstantDialog.Precision.Column.Tooltip"));
+    colinf[5].setToolTip(BaseMessages.getString(PKG, "ConstantDialog.Currency.Column.Tooltip"));
+    colinf[6].setToolTip(BaseMessages.getString(PKG, "ConstantDialog.Decimal.Column.Tooltip"));
+    colinf[7].setToolTip(BaseMessages.getString(PKG, "ConstantDialog.Group.Column.Tooltip"));
+    colinf[8].setToolTip(BaseMessages.getString(PKG, "ConstantDialog.Value.Column.Tooltip"));
+    colinf[9].setToolTip(
+        BaseMessages.getString(PKG, "ConstantDialog.Value.SetEmptyString.Tooltip"));
 
     wFields =
         new TableView(
@@ -188,7 +155,7 @@ public class ConstantDialog extends BaseTransformDialog {
     fdFields.left = new FormAttachment(0, 0);
     fdFields.top = new FormAttachment(wlFields, margin);
     fdFields.right = new FormAttachment(100, 0);
-    fdFields.bottom = new FormAttachment(wOk, -2 * margin);
+    fdFields.bottom = new FormAttachment(wOk, -margin);
     wFields.setLayoutData(fdFields);
 
     lsResize =
@@ -201,7 +168,7 @@ public class ConstantDialog extends BaseTransformDialog {
     shell.addListener(SWT.Resize, lsResize);
 
     getData();
-
+    focusTransformName();
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 
     return transformName;
@@ -249,9 +216,25 @@ public class ConstantDialog extends BaseTransformDialog {
 
     wFields.setRowNums();
     wFields.optWidth(true);
+  }
 
-    wTransformName.selectAll();
-    wTransformName.setFocus();
+  /**
+   * Returns a comma separated list of the 1-based row numbers that hold something but no field
+   * name, or null when every filled-in row is named. Only rows the save would keep are considered:
+   * completely empty rows are dropped anyway and are not a mistake.
+   */
+  private String findUnnamedRows(int nrFields) {
+    StringBuilder rowNumbers = new StringBuilder();
+    for (int i = 0; i < nrFields; i++) {
+      TableItem item = wFields.getNonEmpty(i);
+      if (Utils.isEmpty(item.getText(1))) {
+        if (rowNumbers.length() > 0) {
+          rowNumbers.append(", ");
+        }
+        rowNumbers.append(wFields.table.indexOf(item) + 1);
+      }
+    }
+    return rowNumbers.length() == 0 ? null : rowNumbers.toString();
   }
 
   private void cancel() {
@@ -265,11 +248,24 @@ public class ConstantDialog extends BaseTransformDialog {
       return;
     }
 
-    transformName = wTransformName.getText(); // return value
-
     int i;
 
     int nrFields = wFields.nrNonEmpty();
+
+    // A row that was filled in but never named cannot become an output field, so saving it would
+    // quietly lose what was typed. Point at the row instead of accepting it.
+    String unnamedRows = findUnnamedRows(nrFields);
+    if (unnamedRows != null) {
+      new BaseMessageDialog(
+              shell,
+              BaseMessages.getString(PKG, "ConstantDialog.NoFieldName.Title"),
+              BaseMessages.getString(PKG, "ConstantDialog.NoFieldName.Message", unnamedRows))
+          .open();
+      return;
+    }
+
+    transformName = wTransformName.getText(); // return value
+
     List<ConstantField> fields = input.getFields();
     fields.clear();
 

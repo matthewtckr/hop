@@ -29,6 +29,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import lombok.Getter;
+import lombok.Setter;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Props;
 import org.apache.hop.core.RowMetaAndData;
@@ -51,6 +54,7 @@ import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.row.RowBuffer;
 import org.apache.hop.core.row.RowMetaBuilder;
+import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.core.xml.XmlHandler;
@@ -60,6 +64,7 @@ import org.apache.hop.execution.ExecutionDataBuilder;
 import org.apache.hop.execution.ExecutionDataSetMeta;
 import org.apache.hop.execution.ExecutionInfoLocation;
 import org.apache.hop.execution.ExecutionState;
+import org.apache.hop.execution.ExecutionStateBuilder;
 import org.apache.hop.execution.ExecutionStateComponentMetrics;
 import org.apache.hop.execution.ExecutionType;
 import org.apache.hop.execution.IExecutionInfoLocation;
@@ -74,17 +79,19 @@ import org.apache.hop.ui.core.dialog.ErrorDialog;
 import org.apache.hop.ui.core.dialog.SelectRowDialog;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.gui.GuiToolbarWidgets;
+import org.apache.hop.ui.core.gui.IToolbarContainer;
 import org.apache.hop.ui.core.widget.ColumnInfo;
 import org.apache.hop.ui.core.widget.TableView;
 import org.apache.hop.ui.hopgui.CanvasFacade;
 import org.apache.hop.ui.hopgui.CanvasListener;
 import org.apache.hop.ui.hopgui.HopGui;
 import org.apache.hop.ui.hopgui.HopGuiExtensionPoint;
+import org.apache.hop.ui.hopgui.ToolbarFacade;
 import org.apache.hop.ui.hopgui.file.pipeline.HopGuiPipelineGraph;
-import org.apache.hop.ui.hopgui.file.pipeline.HopPipelineFileType;
-import org.apache.hop.ui.hopgui.perspective.TabItemHandler;
-import org.apache.hop.ui.hopgui.perspective.dataorch.HopDataOrchestrationPerspective;
+import org.apache.hop.ui.hopgui.file.pipeline.PipelineMetricDisplayUtil;
+import org.apache.hop.ui.hopgui.perspective.explorer.ExplorerPerspective;
 import org.apache.hop.ui.hopgui.shared.BaseExecutionViewer;
+import org.apache.hop.ui.hopgui.shared.CanvasZoomHelper;
 import org.apache.hop.ui.hopgui.shared.SwtGc;
 import org.apache.hop.ui.util.EnvironmentUtils;
 import org.eclipse.swt.SWT;
@@ -107,11 +114,11 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Listener;
 import org.eclipse.swt.widgets.TableItem;
-import org.eclipse.swt.widgets.Text;
-import org.eclipse.swt.widgets.ToolBar;
 import org.w3c.dom.Node;
 
-@GuiPlugin
+@GuiPlugin(name = "i18n::PipelineExecutionViewer.Name")
+@Getter
+@Setter
 public class PipelineExecutionViewer extends BaseExecutionViewer
     implements IExecutionViewer, PaintListener, MouseListener {
   private static final Class<?> PKG = PipelineExecutionViewer.class;
@@ -175,10 +182,12 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
 
     // A toolbar at the top
     //
-    toolBar = new ToolBar(this, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    IToolbarContainer toolBarContainer =
+        ToolbarFacade.createToolbarContainer(this, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    toolBar = toolBarContainer.getControl();
     toolBarWidgets = new GuiToolbarWidgets();
     toolBarWidgets.registerGuiPluginObject(this);
-    toolBarWidgets.createToolbarWidgets(toolBar, GUI_PLUGIN_TOOLBAR_PARENT_ID);
+    toolBarWidgets.createToolbarWidgets(toolBarContainer, GUI_PLUGIN_TOOLBAR_PARENT_ID);
     FormData layoutData = new FormData();
     layoutData.left = new FormAttachment(0, 0);
     layoutData.top = new FormAttachment(0, 0);
@@ -202,11 +211,20 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
     // The canvas at the top
     //
     canvas = new Canvas(sash, SWT.NO_BACKGROUND | SWT.BORDER);
+    canvas.setData("hop-zoom-canvas", "true"); // Mark this canvas for zoom handling
     Listener listener = CanvasListener.getInstance();
     canvas.addListener(SWT.MouseDown, listener);
     canvas.addListener(SWT.MouseMove, listener);
     canvas.addListener(SWT.MouseUp, listener);
     canvas.addListener(SWT.Paint, listener);
+    canvas.addListener(SWT.MouseWheel, listener);
+    canvas.addListener(SWT.MouseVerticalWheel, listener);
+
+    // For web/RAP, create a zoom handler to sync mouse wheel zoom back to server
+    if (EnvironmentUtils.getInstance().isWeb()) {
+      CanvasZoomHelper.createZoomHandler(this, canvas, this);
+    }
+
     FormData fdCanvas = new FormData();
     fdCanvas.left = new FormAttachment(0, 0);
     fdCanvas.top = new FormAttachment(0, 0);
@@ -241,7 +259,7 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
     hopGui.replaceKeyboardShortcutListeners(this);
 
     tabFolder.setSelection(0);
-    sash.setWeights(new int[] {60, 40});
+    sash.setWeights(60, 40);
   }
 
   private void addInfoTab() {
@@ -297,17 +315,13 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
       // Calculate information staleness
       //
       String statusDescription = executionState.getStatusDescription();
-      if (Pipeline.STRING_RUNNING.equalsIgnoreCase(statusDescription)
-          || Pipeline.STRING_INITIALIZING.equalsIgnoreCase(statusDescription)) {
-        long loggingInterval = Const.toLong(location.getDataLoggingInterval(), 20000);
-        if (System.currentTimeMillis() - executionState.getUpdateTime().getTime()
-            > loggingInterval) {
-          // The information is stale, not getting updates!
-          //
-          TableItem item = infoView.add("Update state", STRING_STATE_STALE);
-          item.setBackground(GuiResource.getInstance().getColorLightBlue());
-          item.setForeground(GuiResource.getInstance().getColorWhite());
-        }
+      long loggingInterval = Const.toLong(location.getDataLoggingInterval(), 20000);
+      if (executionState.isStale(loggingInterval)) {
+        // The information is stale, not getting updates!
+        //
+        TableItem item = infoView.add("Update state", STRING_STATE_STALE);
+        item.setBackground(GuiResource.getInstance().getColorLightBlue());
+        item.setForeground(GuiResource.getInstance().getColorWhite());
       }
 
       infoView.add("Name", execution.getName());
@@ -317,9 +331,16 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
       infoView.add("Parent ID", execution.getParentId());
       infoView.add("Registration", formatDate(execution.getRegistrationDate()));
       infoView.add("Start", formatDate(execution.getExecutionStartDate()));
+      infoView.add("End", formatDate(executionState.getExecutionEndDate()));
+      infoView.add("Duration", formatExecutionDuration(execution, executionState));
       infoView.add("Type", executionState.getExecutionType().name());
       infoView.add("Status", statusDescription);
       infoView.add("Status Last updated", formatDate(executionState.getUpdateTime()));
+      infoView.add(
+          "Failed",
+          executionState.isFailed()
+              ? BaseMessages.getString("System.Button.Yes")
+              : BaseMessages.getString("System.Button.No"));
       infoView.add("Container ID", executionState.getContainerId());
 
       infoView.optimizeTableView();
@@ -411,7 +432,7 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
 
     dataView.optimizeTableView();
 
-    dataSash.setWeights(new int[] {30, 70});
+    dataSash.setWeights(30, 70);
 
     dataTab.setControl(dataSash);
   }
@@ -453,7 +474,7 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
 
       // We display everything that makes sense:
       // name, copy, inits, input, read, written, output, updated, rejected, errors, buffer in,
-      // buffer out
+      // buffer out, data volume, data volume in, data volume out, duration, speed
       //
       List<ColumnInfo> columns = new ArrayList<>();
       columns.add(new ColumnInfo("Name", ColumnInfo.COLUMN_TYPE_TEXT, false, true));
@@ -467,6 +488,14 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
       addColumn(columns, indexMap, metricNames, Pipeline.METRIC_UPDATED);
       addColumn(columns, indexMap, metricNames, Pipeline.METRIC_REJECTED);
       addColumn(columns, indexMap, metricNames, Pipeline.METRIC_ERROR);
+      addColumn(columns, indexMap, metricNames, Pipeline.METRIC_BUFFER_IN);
+      addColumn(columns, indexMap, metricNames, Pipeline.METRIC_BUFFER_OUT);
+      addColumn(columns, indexMap, metricNames, Pipeline.METRIC_DATA_VOLUME);
+      addColumn(columns, indexMap, metricNames, Pipeline.METRIC_DATA_VOLUME_IN);
+      addColumn(columns, indexMap, metricNames, Pipeline.METRIC_DATA_VOLUME_OUT);
+      // Always reserve Duration / Speed columns (blank when not recorded for a component).
+      addNamedColumn(columns, indexMap, ExecutionStateBuilder.METRIC_HEADER_DURATION, "Duration");
+      addNamedColumn(columns, indexMap, ExecutionStateBuilder.METRIC_HEADER_SPEED, "Speed (r/s)");
 
       metricsView =
           new TableView(
@@ -488,7 +517,11 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
           Integer index = indexMap.get(metricHeader);
           Long value = metrics.getMetrics().get(metricHeader);
           if (value != null && index != null && index > 1 && index <= columns.size()) {
-            item.setText(index, value.toString());
+            if (ExecutionStateBuilder.METRIC_HEADER_DURATION.equals(metricHeader)) {
+              item.setText(index, Utils.getDurationHMS(value / 1000.0));
+            } else {
+              item.setText(index, value.toString());
+            }
           }
         }
       }
@@ -505,10 +538,21 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
       Set<String> metricNames,
       IEngineMetric metric) {
     if (metricNames.contains(metric.getHeader())) {
-      columns.add(new ColumnInfo(metric.getHeader(), ColumnInfo.COLUMN_TYPE_TEXT, true, true));
-      // Index +1 because of the left-hand row number
+      columns.add(
+          new ColumnInfo(
+              PipelineMetricDisplayUtil.getDisplayHeaderWithUnit(metric),
+              ColumnInfo.COLUMN_TYPE_TEXT,
+              true,
+              true));
+      // Index +1 because of the left-hand row number; use raw header for lookup
       indexMap.put(metric.getHeader(), columns.size());
     }
+  }
+
+  private void addNamedColumn(
+      List<ColumnInfo> columns, Map<String, Integer> indexMap, String key, String displayHeader) {
+    columns.add(new ColumnInfo(displayHeader, ColumnInfo.COLUMN_TYPE_TEXT, true, true));
+    indexMap.put(key, columns.size());
   }
 
   /** An entry is selected in the data list. Show the corresponding rows. */
@@ -532,6 +576,10 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
       // Look up the key in the metadata...
       //
       ExecutionData data = loadSelectedTransformData();
+      if (data == null) {
+        return;
+      }
+      Map<String, Map<String, String>> dataSetErrors = data.getDataSetErrors();
 
       for (ExecutionDataSetMeta setMeta : data.getSetMetaData().values()) {
         if (setDescription.equals(setMeta.getDescription())) {
@@ -541,6 +589,9 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
           if (rowBuffer != null) {
             java.util.List<ColumnInfo> columns = new ArrayList<>();
             IRowMeta rowMeta = rowBuffer.getRowMeta();
+            Map<String, String> valueErrorsMap =
+                dataSetErrors.computeIfAbsent(setMeta.getSetKey(), f -> new HashMap<>());
+
             // Add a column for every
             for (IValueMeta valueMeta : rowMeta.getValueMetaList()) {
               ColumnInfo columnInfo =
@@ -549,6 +600,15 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
               columnInfo.setValueMeta(valueMeta);
               columnInfo.setToolTip(valueMeta.toStringMeta());
               columnInfo.setImage(GuiResource.getInstance().getImage(valueMeta));
+
+              // Add a tooltip concerning a data conversion error, if there are any
+              //
+              String error = valueErrorsMap.get(valueMeta.getName());
+              if (StringUtils.isNotEmpty(error)) {
+                columnInfo.setToolTip(error);
+                columnInfo.setImage(GuiResource.getInstance().getImageError());
+              }
+
               columns.add(columnInfo);
             }
 
@@ -582,6 +642,9 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
               }
             }
             dataView.optWidth(true);
+
+            // We found the data set we'd been looking for. We can break out of the loop.
+            //
             break;
           }
         }
@@ -601,10 +664,8 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
     logTab.setImage(GuiResource.getInstance().getImageShowLog());
     logTab.setText(BaseMessages.getString(PKG, "PipelineExecutionViewer.LogTab.Title"));
 
-    loggingText = new Text(tabFolder, SWT.MULTI | SWT.H_SCROLL | SWT.V_SCROLL | SWT.READ_ONLY);
-    PropsUi.setLook(loggingText);
-
-    logTab.setControl(loggingText);
+    executionLogPanel = new ExecutionLogPanel();
+    logTab.setControl(executionLogPanel.create(tabFolder));
 
     // When the logging tab comes into focus, re-load the logging text
     //
@@ -619,7 +680,7 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
 
   @Override
   public Image getTitleImage() {
-    return GuiResource.getInstance().getImagePipeline();
+    return ExecutionStatusIcon.imageFor(ExecutionType.Pipeline, executionState, loggingInterval());
   }
 
   @Override
@@ -683,12 +744,6 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
     super.zoomFitToScreen();
   }
 
-  @Override
-  protected Point getArea() {
-    org.eclipse.swt.graphics.Rectangle rect = canvas.getClientArea();
-    return new Point(rect.width, rect.height);
-  }
-
   public void drawPipelineImage(GC swtGc, int width, int height, float magnificationFactor) {
 
     IGc gc = new SwtGc(swtGc, width, height, iconSize);
@@ -738,6 +793,8 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
 
         viewPort = pipelinePainter.getViewPort();
         graphPort = pipelinePainter.getGraphPort();
+        canvas.setData("viewPort", viewPort);
+        canvas.setData("graphPort", graphPort);
       } catch (Exception e) {
         new ErrorDialog(hopGui.getActiveShell(), CONST_ERROR, "Error drawing pipeline image", e);
       }
@@ -765,7 +822,8 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
     refreshStatus();
     refreshMetrics();
     refreshTransformData();
-    setFocus();
+    perspective.updateViewerTabImage(this);
+    redraw();
   }
 
   @GuiToolbarElement(
@@ -786,17 +844,17 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
       root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
       id = TOOLBAR_ITEM_TO_EDITOR,
       toolTip = "i18n::PipelineExecutionViewer.ToolbarElement.NavigateToEditor.Tooltip",
-      image = "ui/images/data_orch.svg")
-  @GuiKeyboardShortcut(key = SWT.F5)
-  @GuiOsxKeyboardShortcut(key = SWT.F5)
+      image = "ui/images/edit.svg")
+  @GuiKeyboardShortcut(key = SWT.F3)
+  @GuiOsxKeyboardShortcut(key = SWT.F3)
   public void navigateToEditor() {
     try {
       // First try to see if this pipeline is running in Hop GUI...
       //
-      HopDataOrchestrationPerspective perspective = HopGui.getDataOrchestrationPerspective();
-      TabItemHandler item = perspective.findPipeline(execution.getId());
-      if (item != null) {
-        perspective.switchToTab(item);
+      ExplorerPerspective perspective = HopGui.getExplorerPerspective();
+      HopGuiPipelineGraph pipelineGraph = perspective.findPipeline(execution.getId());
+      if (pipelineGraph != null) {
+        perspective.setActiveFileTypeHandler(pipelineGraph);
         perspective.activate();
         return;
       }
@@ -872,7 +930,12 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
     lastClick = new Point(real.x, real.y);
     boolean control = (event.stateMask & SWT.MOD1) != 0;
 
-    if (setupDragView(event.button, control, new Point(event.x, event.y))) {
+    Point clickScreen = new Point(event.x, event.y);
+    if (setupDragViewPort(clickScreen)) {
+      return;
+    }
+
+    if (setupDragView(event.button, control, clickScreen)) {
       return;
     }
 
@@ -894,6 +957,8 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
           //
           selectedTransform = (TransformMeta) areaOwner.getParent();
           refreshTransformData();
+          break;
+        default:
           break;
       }
     }
@@ -1033,7 +1098,7 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
           if (childExecutions.isEmpty()) {
             break;
           }
-          Execution child = childExecutions.get(0);
+          Execution child = childExecutions.getFirst();
 
           // Don't load logging text as that can be a lot of data.
           // Lazily load that when the logging text comes into focus.
@@ -1066,7 +1131,7 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
       }
       Execution transformExecution;
       if (executions.size() == 1) {
-        transformExecution = executions.get(0);
+        transformExecution = executions.getFirst();
       } else {
         transformExecution = selectExecution(executions);
       }
@@ -1083,7 +1148,7 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
       }
       Execution childExecution;
       if (childExecutions.size() == 1) {
-        childExecution = childExecutions.get(0);
+        childExecution = childExecutions.getFirst();
       } else {
         childExecution = selectExecution(childExecutions);
       }
@@ -1217,13 +1282,12 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
 
       PipelineMeta pipelineMeta = new PipelineMeta(pipelineNode, metadataProvider);
 
-      HopDataOrchestrationPerspective p = HopGui.getDataOrchestrationPerspective();
-      HopGuiPipelineGraph graph =
-          (HopGuiPipelineGraph) p.addPipeline(hopGui, pipelineMeta, new HopPipelineFileType<>());
+      ExplorerPerspective perspective = HopGui.getExplorerPerspective();
+      HopGuiPipelineGraph graph = (HopGuiPipelineGraph) perspective.addPipeline(pipelineMeta);
 
       graph.setVariables(variables);
 
-      p.activate();
+      perspective.activate();
     } catch (Exception e) {
       new ErrorDialog(getShell(), CONST_ERROR, "Error viewing the executor", e);
     }
@@ -1252,98 +1316,5 @@ public class PipelineExecutionViewer extends BaseExecutionViewer
     }
     // If we're still here, return the pipeline log channel ID
     return getLogChannelId();
-  }
-
-  /**
-   * Gets pipelineMeta
-   *
-   * @return value of pipelineMeta
-   */
-  public PipelineMeta getPipelineMeta() {
-    return pipelineMeta;
-  }
-
-  /**
-   * Gets execution
-   *
-   * @return value of execution
-   */
-  @Override
-  public Execution getExecution() {
-    return execution;
-  }
-
-  /**
-   * Gets selectedTransform
-   *
-   * @return value of selectedTransform
-   */
-  public TransformMeta getSelectedTransform() {
-    return selectedTransform;
-  }
-
-  /**
-   * Sets selectedTransform
-   *
-   * @param selectedTransform value of selectedTransform
-   */
-  public void setSelectedTransform(TransformMeta selectedTransform) {
-    this.selectedTransform = selectedTransform;
-  }
-
-  /**
-   * Gets locationName
-   *
-   * @return value of locationName
-   */
-  @Override
-  public String getLocationName() {
-    return locationName;
-  }
-
-  /**
-   * Gets selectedTransformData
-   *
-   * @return value of selectedTransformData
-   */
-  public ExecutionData getSelectedTransformData() {
-    return selectedTransformData;
-  }
-
-  /**
-   * Sets selectedTransformData
-   *
-   * @param selectedTransformData value of selectedTransformData
-   */
-  public void setSelectedTransformData(ExecutionData selectedTransformData) {
-    this.selectedTransformData = selectedTransformData;
-  }
-
-  /**
-   * Gets dataList
-   *
-   * @return value of dataList
-   */
-  public org.eclipse.swt.widgets.List getDataList() {
-    return dataList;
-  }
-
-  /**
-   * Sets dataList
-   *
-   * @param dataList value of dataList
-   */
-  public void setDataList(org.eclipse.swt.widgets.List dataList) {
-    this.dataList = dataList;
-  }
-
-  /**
-   * Gets perspective
-   *
-   * @return value of perspective
-   */
-  @Override
-  public ExecutionPerspective getPerspective() {
-    return perspective;
   }
 }

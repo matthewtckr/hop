@@ -21,7 +21,9 @@ import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 
@@ -29,7 +31,8 @@ import org.apache.hop.core.row.IValueMeta;
 @DatabaseMetaPlugin(
     type = "VERTICA",
     typeDescription = "Vertica",
-    documentationUrl = "/database/databases/vertica.html")
+    documentationUrl = "/database/databases/vertica.html",
+    classLoaderGroup = "vertica5")
 @GuiPlugin(id = "GUI-VerticaDatabaseMeta")
 public class VerticaDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
 
@@ -48,6 +51,20 @@ public class VerticaDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   @Override
   public String getDriverClass() {
     return "com.vertica.Driver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("com.vertica.jdbc:vertica-jdbc")
+        .defaultVersion("25.3.0-0")
+        .licenseCategory("X")
+        .licenseName("Vertica JDBC Driver License")
+        .licenseUrl(
+            "https://docs.vertica.com/latest/en/connecting-to/client-libraries/client-drivers/jdbc/")
+        .vendor("OpenText Vertica")
+        .vendorUrl("https://docs.vertica.com/")
+        .build();
   }
 
   @Override
@@ -91,7 +108,7 @@ public class VerticaDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "--NOTE: Table cannot be altered unless all projections are dropped.\nALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -113,7 +130,8 @@ public class VerticaDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
         + " ALTER COLUMN "
         + v.getName()
         + " SET DATA TYPE "
-        + getFieldDefinition(v, tk, pk, useAutoinc, false, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, false, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -575,11 +593,6 @@ public class VerticaDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return false;
   }
 
-  @Override
-  public boolean isSupportsBooleanDataType() {
-    return true;
-  }
-
   /**
    * @return true if the database requires you to cast a parameter to varchar before comparing to
    *     null. Only required for DB2 and Vertica
@@ -665,5 +678,10 @@ public class VerticaDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   @Override
   public boolean isDisplaySizeTwiceThePrecision() {
     return true;
+  }
+
+  @Override
+  public void addDefaultOptions() {
+    setSupportsBooleanDataType(true);
   }
 }

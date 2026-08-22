@@ -18,7 +18,7 @@
 package org.apache.hop.pipeline.transforms.gettablenames;
 
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.ICheckResult;
 import org.apache.hop.core.annotations.Transform;
@@ -145,30 +145,6 @@ public class GetTableNamesMeta extends BaseTransformMeta<GetTableNames, GetTable
 
   public GetTableNamesMeta() {
     super();
-  }
-
-  public GetTableNamesMeta(GetTableNamesMeta m) {
-    this();
-    this.connection = m.connection;
-    this.schemaName = m.schemaName;
-    this.tableNameFieldName = m.tableNameFieldName;
-    this.sqlCreationFieldName = m.sqlCreationFieldName;
-    this.objectTypeFieldName = m.objectTypeFieldName;
-    this.isSystemObjectFieldName = m.isSystemObjectFieldName;
-    this.includeCatalog = m.includeCatalog;
-    this.includeSchema = m.includeSchema;
-    this.includeTable = m.includeTable;
-    this.includeView = m.includeView;
-    this.includeProcedure = m.includeProcedure;
-    this.includeSynonym = m.includeSynonym;
-    this.addSchemaInOutput = m.addSchemaInOutput;
-    this.dynamicSchema = m.dynamicSchema;
-    this.schemaNameField = m.schemaNameField;
-  }
-
-  @Override
-  public GetTableNamesMeta clone() {
-    return new GetTableNamesMeta(this);
   }
 
   @Override

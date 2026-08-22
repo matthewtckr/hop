@@ -17,20 +17,24 @@
 
 package org.apache.hop.www.async;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.Serial;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.annotations.HopServerServlet;
 import org.apache.hop.core.encryption.Encr;
@@ -62,8 +66,7 @@ import org.json.simple.JSONObject;
 public class AsyncRunServlet extends BaseHttpServlet implements IHopServerPlugin {
 
   private static final Class<?> PKG = WebServiceServlet.class;
-
-  private static final long serialVersionUID = 3834384735363246432L;
+  @Serial private static final long serialVersionUID = 3834384735363246432L;
 
   public static final String CONTEXT_PATH = "/hop/asyncRun";
   public static final String CONST_ERROR_RUNNING_ASYNCHRONOUS_WEB_SERVICE =
@@ -138,7 +141,7 @@ public class AsyncRunServlet extends BaseHttpServlet implements IHopServerPlugin
       // We give back the ID of the executing workflow...
       //
       response.setContentType("application/json");
-      response.setCharacterEncoding(Const.XML_ENCODING);
+      response.setCharacterEncoding(Const.UTF_8);
 
       String serverObjectId = UUID.randomUUID().toString();
       SimpleLoggingObject servletLoggingObject =
@@ -168,11 +171,13 @@ public class AsyncRunServlet extends BaseHttpServlet implements IHopServerPlugin
       workflow.initializeFrom(variables);
       workflow.setVariable("SERVER_OBJECT_ID", serverObjectId);
 
-      // See if we need to pass a variable with the content in it...
-      //
-      // Read the content posted?
+      // Pass body and header content into variables when configured.
+      // Guard both independently so an unset header variable never injects a null key
+      // (which caused NPE in Kafka Consumer init via replaceVariableValues — issue #7067).
       //
       String contentVariable = variables.resolve(webService.getBodyContentVariable());
+      String headerContentVariable = variables.resolve(webService.getHeaderContentVariable());
+
       String content = "";
       if (StringUtils.isNotEmpty(contentVariable)) {
         try (InputStream in = request.getInputStream()) {
@@ -190,6 +195,21 @@ public class AsyncRunServlet extends BaseHttpServlet implements IHopServerPlugin
           }
         }
         workflow.setVariable(contentVariable, Const.NVL(content, ""));
+      }
+
+      if (StringUtils.isNotEmpty(headerContentVariable)) {
+        // Create JSON object containing all request headers
+        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectNode headersJson = objectMapper.createObjectNode();
+
+        Enumeration<String> headerNames = request.getHeaderNames();
+        while (headerNames.hasMoreElements()) {
+          String headerName = headerNames.nextElement();
+          String headerValue = request.getHeader(headerName);
+          headersJson.put(headerName, headerValue);
+        }
+        String headerContent = objectMapper.writeValueAsString(headersJson);
+        workflow.setVariable(headerContentVariable, Const.NVL(headerContent, ""));
       }
 
       // Set all the other parameters as variables/parameters...

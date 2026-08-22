@@ -24,11 +24,11 @@ import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.Getter;
 import lombok.Setter;
 import org.apache.commons.vfs2.AllFileSelector;
+import org.apache.commons.vfs2.FileName;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.commons.vfs2.FileSelectInfo;
 import org.apache.commons.vfs2.FileSystemException;
@@ -44,6 +44,8 @@ import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.lineage.LineageFileIoEmitter;
+import org.apache.hop.lineage.model.FileIoOperation;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.workflow.WorkflowMeta;
@@ -189,12 +191,6 @@ public class ActionUnZip extends ActionBase implements Cloneable, IAction {
 
   public ActionUnZip() {
     this("");
-  }
-
-  @Override
-  public Object clone() {
-    ActionUnZip je = (ActionUnZip) super.clone();
-    return je;
   }
 
   @Override
@@ -480,8 +476,6 @@ public class ActionUnZip extends ActionBase implements Cloneable, IAction {
           if (!children[i].getType().equals(FileType.FOLDER)) {
             boolean unzip = true;
 
-            String filename = children[i].getName().getPath();
-
             Pattern patternSource = null;
 
             if (!Utils.isEmpty(realWildcardSource)) {
@@ -490,8 +484,7 @@ public class ActionUnZip extends ActionBase implements Cloneable, IAction {
 
             // First see if the file matches the regular expression!
             if (patternSource != null) {
-              Matcher matcher = patternSource.matcher(filename);
-              unzip = matcher.matches();
+              unzip = matchesWildcard(patternSource, children[i]);
             }
             if (unzip) {
               if (!unzipFile(
@@ -539,6 +532,15 @@ public class ActionUnZip extends ActionBase implements Cloneable, IAction {
     String unzipToFolder = realTargetdirectory;
     try {
 
+      if (sourceFileObject.getType().hasContent()) {
+        long size = sourceFileObject.getContent().getSize();
+        if (size > 0) {
+          result.setBytesReadThisAction(result.getBytesReadThisAction() + size);
+          emitFileIoLineage(
+              parentWorkflow, FileIoOperation.READ, sourceFileObject, null, size, true, null);
+        }
+      }
+
       if (isDetailed()) {
         logDetailed(
             BaseMessages.getString(
@@ -577,204 +579,222 @@ public class ActionUnZip extends ActionBase implements Cloneable, IAction {
       // Try to read the entries from the VFS object...
       //
       String zipFilename = "zip:" + sourceFileObject.getName().getFriendlyURI();
-      FileObject zipFile = HopVfs.getFileObject(zipFilename, getVariables());
-      FileObject[] items =
-          zipFile.findFiles(
-              new AllFileSelector() {
-                @Override
-                public boolean traverseDescendents(FileSelectInfo info) {
-                  return true;
-                }
-
-                @Override
-                public boolean includeFile(FileSelectInfo info) {
-                  // Never return the parent directory of a file list.
-                  if (info.getDepth() == 0) {
-                    return false;
+      FileObject zipFile = null;
+      try {
+        zipFile = HopVfs.getFileObject(zipFilename, getVariables());
+        FileObject[] items =
+            zipFile.findFiles(
+                new AllFileSelector() {
+                  @Override
+                  public boolean traverseDescendents(FileSelectInfo info) {
+                    return true;
                   }
 
-                  FileObject fileObject = info.getFile();
-                  return fileObject != null;
-                }
-              });
+                  @Override
+                  public boolean includeFile(FileSelectInfo info) {
+                    // Never return the parent directory of a file list.
+                    if (info.getDepth() == 0) {
+                      return false;
+                    }
 
-      Pattern pattern = null;
-      if (!Utils.isEmpty(realWildcard)) {
-        pattern = Pattern.compile(realWildcard);
-      }
-      Pattern patternexclude = null;
-      if (!Utils.isEmpty(realWildcardExclude)) {
-        patternexclude = Pattern.compile(realWildcardExclude);
-      }
+                    FileObject fileObject = info.getFile();
+                    return fileObject != null;
+                  }
+                });
 
-      for (FileObject item : items) {
-
-        if (successConditionBroken) {
-          if (!successConditionBrokenExit) {
-            logError(
-                BaseMessages.getString(
-                    PKG, CONST_ACTION_UN_ZIP_ERROR_SUCCESS_CONDITIONBROKEN, "" + nrErrors));
-            successConditionBrokenExit = true;
-          }
-          return false;
+        Pattern pattern = null;
+        if (!Utils.isEmpty(realWildcard)) {
+          pattern = Pattern.compile(realWildcard);
+        }
+        Pattern patternexclude = null;
+        if (!Utils.isEmpty(realWildcardExclude)) {
+          patternexclude = Pattern.compile(realWildcardExclude);
         }
 
-        synchronized (HopVfs.getFileSystemManager(getVariables())) {
-          FileObject newFileObject = null;
-          try {
-            if (isDetailed()) {
-              logDetailed(
+        for (FileObject item : items) {
+
+          if (successConditionBroken) {
+            if (!successConditionBrokenExit) {
+              logError(
                   BaseMessages.getString(
-                      PKG,
-                      "ActionUnZip.Log.ProcessingZipEntry",
-                      item.getName().getURI(),
-                      sourceFileObject.toString()));
+                      PKG, CONST_ACTION_UN_ZIP_ERROR_SUCCESS_CONDITIONBROKEN, "" + nrErrors));
+              successConditionBrokenExit = true;
             }
+            return false;
+          }
 
-            // get real destination filename
-            //
-            String newFileName = unzipToFolder + Const.FILE_SEPARATOR + getTargetFilename(item);
-            newFileObject = HopVfs.getFileObject(newFileName, getVariables());
-
-            if (item.getType().equals(FileType.FOLDER)) {
-              // Directory
-              //
+          synchronized (HopVfs.getFileSystemManager(getVariables())) {
+            FileObject newFileObject = null;
+            // Whether this entry actually produced a target file (or folder). Only then may we
+            // stamp the archived modification date on it: entries that were skipped, filtered
+            // out by a wildcard, refused by the "if file exists" rule or that failed halfway
+            // must leave the file that is already on disk untouched (issue #4143).
+            boolean targetWritten = false;
+            try {
               if (isDetailed()) {
                 logDetailed(
                     BaseMessages.getString(
-                        PKG, "ActionUnZip.CreatingDirectory.Label", newFileName));
+                        PKG,
+                        "ActionUnZip.Log.ProcessingZipEntry",
+                        item.getName().getURI(),
+                        sourceFileObject.toString()));
               }
 
-              // Create Directory if necessary ...
+              // get real destination filename
               //
-              if (!newFileObject.exists()) {
-                newFileObject.createFolder();
-              }
-            } else {
-              // File
-              //
-              boolean getIt = true;
-              boolean getItexclude = false;
+              String newFileName = unzipToFolder + Const.FILE_SEPARATOR + getTargetFilename(item);
+              newFileObject = HopVfs.getFileObject(newFileName, getVariables());
 
-              // First see if the file matches the regular expression!
-              //
-              if (pattern != null) {
-                Matcher matcher = pattern.matcher(item.getName().getURI());
-                getIt = matcher.matches();
-              }
-
-              if (patternexclude != null) {
-                Matcher matcherexclude = patternexclude.matcher(item.getName().getURI());
-                getItexclude = matcherexclude.matches();
-              }
-
-              boolean take = takeThisFile(item, newFileName);
-
-              if (getIt && !getItexclude && take) {
+              if (item.getType().equals(FileType.FOLDER)) {
+                // Directory
+                //
                 if (isDetailed()) {
                   logDetailed(
                       BaseMessages.getString(
-                          PKG,
-                          "ActionUnZip.ExtractingEntry.Label",
-                          item.getName().getURI(),
-                          newFileName));
+                          PKG, "ActionUnZip.CreatingDirectory.Label", newFileName));
                 }
 
-                if (ifFileExist == FileExistsEnum.UNIQ) {
-                  // Create file with unique name
-
-                  int lenstring = newFileName.length();
-                  int lastindexOfDot = newFileName.lastIndexOf('.');
-                  if (lastindexOfDot == -1) {
-                    lastindexOfDot = lenstring;
-                  }
-
-                  newFileName =
-                      newFileName.substring(0, lastindexOfDot)
-                          + StringUtil.getFormattedDateTimeNow(true)
-                          + newFileName.substring(lastindexOfDot, lenstring);
-
-                  if (isDebug()) {
-                    logDebug(
-                        BaseMessages.getString(
-                            PKG, "ActionUnZip.Log.CreatingUniqFile", newFileName));
-                  }
-                }
-
-                // See if the folder to the target file exists...
+                // Create Directory if necessary ...
                 //
-                if (!newFileObject.getParent().exists()) {
-                  newFileObject.getParent().createFolder(); // creates the whole path.
+                if (!newFileObject.exists()) {
+                  newFileObject.createFolder();
+                  targetWritten = true;
                 }
-                InputStream is = null;
-                OutputStream os = null;
+              } else {
+                // File
+                //
+                boolean getIt = true;
+                boolean getItexclude = false;
 
-                try {
-                  is = HopVfs.getInputStream(item);
-                  os = HopVfs.getOutputStream(newFileObject, false);
+                // First see if the file matches the regular expression!
+                //
+                if (pattern != null) {
+                  getIt = matchesWildcard(pattern, item);
+                }
 
-                  if (is != null) {
-                    byte[] buff = new byte[2048];
-                    int len;
+                if (patternexclude != null) {
+                  getItexclude = matchesWildcard(patternexclude, item);
+                }
 
-                    while ((len = is.read(buff)) > 0) {
-                      os.write(buff, 0, len);
+                boolean take = takeThisFile(item, newFileName);
+
+                if (getIt && !getItexclude && take) {
+                  if (isDetailed()) {
+                    logDetailed(
+                        BaseMessages.getString(
+                            PKG,
+                            "ActionUnZip.ExtractingEntry.Label",
+                            item.getName().getURI(),
+                            newFileName));
+                  }
+
+                  if (ifFileExist == FileExistsEnum.UNIQ) {
+                    // Create file with unique name
+
+                    int lenstring = newFileName.length();
+                    int lastindexOfDot = newFileName.lastIndexOf('.');
+                    if (lastindexOfDot == -1) {
+                      lastindexOfDot = lenstring;
                     }
 
-                    // Add filename to result filenames
-                    addFilenameToResultFilenames(result, parentWorkflow, newFileName);
-                  }
-                } finally {
-                  if (is != null) {
-                    is.close();
-                  }
-                  if (os != null) {
-                    os.close();
-                  }
-                }
-              } // end if take
-            }
-          } catch (Exception e) {
-            updateErrors();
-            logError(
-                BaseMessages.getString(
-                    PKG,
-                    "ActionUnZip.Error.CanNotProcessZipEntry",
-                    item.getName().getURI(),
-                    sourceFileObject.toString()),
-                e);
-          } finally {
-            if (newFileObject != null) {
-              try {
-                newFileObject.close();
-                if (setOriginalModificationDate) {
-                  // Change last modification date
-                  newFileObject
-                      .getContent()
-                      .setLastModifiedTime(item.getContent().getLastModifiedTime());
-                }
-              } catch (Exception e) {
-                /* Ignore */
-              } // ignore this
-            }
-            // Close file object
-            // close() does not release resources!
-            HopVfs.getFileSystemManager(getVariables()).closeFileSystem(item.getFileSystem());
-            if (items != null) {
-              items = null;
-            }
-          }
-        } // Synchronized block on HopVfs.getInstance().getFileSystemManager()
-      } // End for
+                    newFileName =
+                        newFileName.substring(0, lastindexOfDot)
+                            + StringUtil.getFormattedDateTimeNow(true)
+                            + newFileName.substring(lastindexOfDot, lenstring);
 
-      // Here gc() is explicitly called if e.g. createfile is used in the same
-      // workflow for the same file. The problem is that after creating the file the
-      // file object is not properly garbaged collected and thus the file cannot
-      // be deleted anymore. This is a known problem in the JVM.
+                    if (isDebug()) {
+                      logDebug(
+                          BaseMessages.getString(
+                              PKG, "ActionUnZip.Log.CreatingUniqFile", newFileName));
+                    }
+                  }
+
+                  // See if the folder to the target file exists...
+                  //
+                  if (!newFileObject.getParent().exists()) {
+                    newFileObject.getParent().createFolder(); // creates the whole path.
+                  }
+                  InputStream is = null;
+                  OutputStream os = null;
+
+                  try {
+                    is = HopVfs.getInputStream(item);
+                    os = HopVfs.getOutputStream(newFileObject, false);
+
+                    if (is != null) {
+                      byte[] buff = new byte[2048];
+                      int len;
+                      long entryBytes = 0L;
+                      while ((len = is.read(buff)) > 0) {
+                        os.write(buff, 0, len);
+                        result.setBytesWrittenThisAction(result.getBytesWrittenThisAction() + len);
+                        entryBytes += len;
+                      }
+                      if (entryBytes > 0) {
+                        emitFileIoLineage(
+                            parentWorkflow,
+                            FileIoOperation.COPY,
+                            item,
+                            newFileObject,
+                            entryBytes,
+                            true,
+                            null);
+                      }
+
+                      // Add filename to result filenames
+                      addFilenameToResultFilenames(result, parentWorkflow, newFileName);
+                    }
+                  } finally {
+                    if (is != null) {
+                      is.close();
+                    }
+                    if (os != null) {
+                      os.close();
+                    }
+                  }
+
+                  // The entry was written to the target folder, so the archived modification
+                  // date may be applied to it below.
+                  targetWritten = true;
+                } // end if take
+              }
+            } catch (Exception e) {
+              updateErrors();
+              logError(
+                  BaseMessages.getString(
+                      PKG,
+                      "ActionUnZip.Error.CanNotProcessZipEntry",
+                      item.getName().getURI(),
+                      sourceFileObject.toString()),
+                  e);
+            } finally {
+              if (newFileObject != null) {
+                try {
+                  newFileObject.close();
+                  if (targetWritten && setOriginalModificationDate) {
+                    // Change last modification date
+                    newFileObject
+                        .getContent()
+                        .setLastModifiedTime(item.getContent().getLastModifiedTime());
+                  }
+                } catch (Exception e) {
+                  /* Ignore */
+                } // ignore this
+              }
+            }
+          } // Synchronized block on HopVfs.getInstance().getFileSystemManager()
+        } // End for
+      } finally {
+        // Close the zip filesystem once after all entries are processed.
+        // Closing it per entry (as we used to) forces java.util.zip.ZipFile to re-parse the
+        // entire central directory for every file — catastrophic for archives with hundreds of
+        // thousands of entries (issue #2235).
+        releaseZipFileSystem(zipFile);
+      }
 
       // Unzip done...
       if (afterUnzip > 0) {
-        doUnzipPostProcessing(sourceFileObject, movetodir, realMovetodirectory);
+        doUnzipPostProcessing(sourceFileObject, movetodir, realMovetodirectory, result);
       }
       retval = true;
     } catch (Exception e) {
@@ -788,11 +808,66 @@ public class ActionUnZip extends ActionBase implements Cloneable, IAction {
     return retval;
   }
 
+  /**
+   * Releases the VFS zip filesystem after all entries have been processed.
+   *
+   * <p>Must be called once per archive (not per entry). Closing the filesystem after every entry
+   * re-opens {@code java.util.zip.ZipFile} and re-parses the central directory for each file, which
+   * is catastrophic for archives with hundreds of thousands of entries (issue #2235).
+   *
+   * <p>Package-private so unit tests can override and count invocations.
+   */
+  void releaseZipFileSystem(FileObject zipFile) {
+    if (zipFile == null) {
+      return;
+    }
+    try {
+      // close() alone does not release the layered zip filesystem resources
+      HopVfs.getFileSystemManager(getVariables()).closeFileSystem(zipFile.getFileSystem());
+    } catch (Exception e) {
+      /* Ignore */
+    }
+    try {
+      zipFile.close();
+    } catch (Exception e) {
+      /* Ignore */
+    }
+  }
+
+  private void emitFileIoLineage(
+      IWorkflowEngine<WorkflowMeta> wf,
+      FileIoOperation operation,
+      FileObject source,
+      FileObject target,
+      Long bytesTransferred,
+      boolean success,
+      String message) {
+    if (wf == null) {
+      return;
+    }
+    LineageFileIoEmitter.emitWorkflowActionFileIo(
+        wf, this, operation, source, target, bytesTransferred, success, message);
+  }
+
   /** Moving or deleting source file. */
   private void doUnzipPostProcessing(
-      FileObject sourceFileObject, FileObject movetodir, String realMovetodirectory)
+      FileObject sourceFileObject, FileObject movetodir, String realMovetodirectory, Result result)
       throws FileSystemException {
+    IWorkflowEngine<WorkflowMeta> wf = getParentWorkflow();
     if (afterUnzip == 1) {
+      Long deleteBytes = null;
+      try {
+        if (sourceFileObject.getType().hasContent()) {
+          long sz = sourceFileObject.getContent().getSize();
+          if (sz > 0) {
+            deleteBytes = sz;
+          }
+        }
+      } catch (Exception ignored) {
+        // optional for lineage
+      }
+      emitFileIoLineage(
+          wf, FileIoOperation.DELETE, sourceFileObject, null, deleteBytes, true, null);
       // delete zip file
       boolean deleted = sourceFileObject.delete();
       if (!deleted) {
@@ -815,7 +890,32 @@ public class ActionUnZip extends ActionBase implements Cloneable, IAction {
             movetodir + Const.FILE_SEPARATOR + sourceFileObject.getName().getBaseName();
         destFile = HopVfs.getFileObject(destinationFilename, getVariables());
 
-        sourceFileObject.moveTo(destFile);
+        long archiveSize = 0;
+        try {
+          if (sourceFileObject.getType().hasContent()) {
+            long sz = sourceFileObject.getContent().getSize();
+            if (sz > 0) {
+              archiveSize = sz;
+            }
+          }
+        } catch (Exception ignored) {
+          // best-effort for metrics only
+        }
+
+        emitFileIoLineage(
+            wf,
+            FileIoOperation.MOVE,
+            sourceFileObject,
+            destFile,
+            archiveSize > 0 ? archiveSize : null,
+            true,
+            null);
+
+        HopVfs.moveFile(sourceFileObject, destFile);
+
+        if (archiveSize > 0) {
+          result.setBytesWrittenThisAction(result.getBytesWrittenThisAction() + archiveSize);
+        }
 
         // File moved
         if (isDetailed()) {
@@ -894,6 +994,20 @@ public class ActionUnZip extends ActionBase implements Cloneable, IAction {
     }
 
     return retval;
+  }
+
+  /**
+   * Matches a compiled wildcard against a file. To stay consistent with the shared file readers
+   * ({@link org.apache.hop.core.fileinput.FileInputList}, used by Text File Input, Get File Names,
+   * ...) the pattern is tested against the file's base name, while also keeping the historical
+   * behavior of matching the full path/URI so that path-style patterns (those that include a
+   * directory prefix, as reported in issue #5943) keep working. A file matches when either form
+   * matches.
+   */
+  private static boolean matchesWildcard(Pattern pattern, FileObject file) {
+    FileName name = file.getName();
+    return pattern.matcher(name.getBaseName()).matches()
+        || pattern.matcher(name.getURI()).matches();
   }
 
   private boolean takeThisFile(FileObject sourceFile, String destinationFile)

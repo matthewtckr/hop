@@ -17,35 +17,46 @@
 
 package org.apache.hop.ui.core.database;
 
+import java.sql.Driver;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Props;
+import org.apache.hop.core.config.DescribedVariablesConfigFile;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabasePluginType;
 import org.apache.hop.core.database.DatabaseTestResults;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.plugins.IPlugin;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.util.Utils;
+import org.apache.hop.core.variables.DescribedVariable;
 import org.apache.hop.core.variables.IVariables;
+import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.database.dialog.DatabaseExplorerDialog;
+import org.apache.hop.ui.core.dialog.BaseDialog;
 import org.apache.hop.ui.core.dialog.ErrorDialog;
+import org.apache.hop.ui.core.dialog.HopDescribedVariablesDialog;
 import org.apache.hop.ui.core.dialog.MessageBox;
 import org.apache.hop.ui.core.dialog.ShowMessageDialog;
 import org.apache.hop.ui.core.gui.GuiCompositeWidgets;
 import org.apache.hop.ui.core.gui.GuiCompositeWidgetsAdapter;
 import org.apache.hop.ui.core.gui.GuiResource;
+import org.apache.hop.ui.core.gui.IGuiPluginCompositeWidgetsListener;
 import org.apache.hop.ui.core.metadata.MetadataEditor;
 import org.apache.hop.ui.core.metadata.MetadataManager;
 import org.apache.hop.ui.core.widget.ColumnInfo;
@@ -71,6 +82,7 @@ import org.eclipse.swt.widgets.TableItem;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.widgets.ToolBar;
 import org.eclipse.swt.widgets.ToolItem;
+import org.jspecify.annotations.Nullable;
 
 @GuiPlugin(description = "This is the editor for database connection metadata")
 /**
@@ -86,6 +98,7 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
   private Text wName;
   private Combo wConnectionType;
   private Label wDriverInfo;
+  private Button wbDownloadDriver;
   private TextVar wManualUrl;
   private Label wlUsername;
   private TextVar wUsername;
@@ -106,11 +119,24 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
 
   private TableView wOptions;
 
+  // SSH Tunnel tab widgets
+  private Button wSshTunnelEnabled;
+  private TextVar wSshTunnelHost;
+  private TextVar wSshTunnelPort;
+  private TextVar wSshTunnelUsername;
+  private TextVar wSshTunnelPassword;
+  private Button wSshTunnelUsePrivateKey;
+  private TextVar wSshTunnelPrivateKeyFile;
+  private TextVar wSshTunnelPassphrase;
+  private Label wlSshTunnelPrivateKeyFile;
+  private Label wlSshTunnelPassphrase;
+
   private PropsUi props;
   private int middle;
   private int margin;
 
   private Map<Class<? extends IDatabase>, IDatabase> metaMap;
+  private List<String> excludedElementIds;
 
   /**
    * @param hopGui The hop GUI
@@ -119,8 +145,24 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
    */
   public DatabaseMetaEditor(
       HopGui hopGui, MetadataManager<DatabaseMeta> manager, DatabaseMeta databaseMeta) {
+    this(hopGui, manager, databaseMeta, databaseMeta.getRemoveItems());
+  }
+
+  /**
+   * @param hopGui The hop GUI
+   * @param manager The metadata
+   * @param databaseMeta The object to edit
+   * @param excludedElementIds List of GUI element IDs to exclude from the editor
+   */
+  public DatabaseMetaEditor(
+      HopGui hopGui,
+      MetadataManager<DatabaseMeta> manager,
+      DatabaseMeta databaseMeta,
+      List<String> excludedElementIds) {
     super(hopGui, manager, databaseMeta);
     props = PropsUi.getInstance();
+    this.excludedElementIds =
+        excludedElementIds != null ? excludedElementIds : databaseMeta.getRemoveItems();
     metaMap = populateMetaMap();
     metaMap.put(databaseMeta.getIDatabase().getClass(), databaseMeta.getIDatabase());
   }
@@ -164,7 +206,7 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     wIcon.setLayoutData(fdlicon);
     PropsUi.setLook(wIcon);
 
-    // What's the name
+    // What's the name - always required, never excluded
     Label wlName = new Label(parent, SWT.RIGHT);
     PropsUi.setLook(wlName);
     wlName.setText(BaseMessages.getString(PKG, "DatabaseDialog.label.ConnectionName"));
@@ -195,6 +237,7 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     addGeneralTab();
     addAdvancedTab();
     addOptionsTab();
+    addSshTunnelTab();
 
     // Select the general tab
     //
@@ -220,9 +263,15 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     wName.addListener(SWT.Modify, modifyListener);
     wConnectionType.addListener(SWT.Modify, modifyListener);
     wConnectionType.addListener(SWT.Modify, event -> changeConnectionType());
-    wUsername.addListener(SWT.Modify, modifyListener);
-    wPassword.addListener(SWT.Modify, modifyListener);
-    wManualUrl.addListener(SWT.Modify, modifyListener);
+    if (wUsername != null) {
+      wUsername.addListener(SWT.Modify, modifyListener);
+    }
+    if (wPassword != null) {
+      wPassword.addListener(SWT.Modify, modifyListener);
+    }
+    if (wManualUrl != null) {
+      wManualUrl.addListener(SWT.Modify, modifyListener);
+    }
     wSupportsBoolean.addListener(SWT.Selection, modifyListener);
     wSupportsTimestamp.addListener(SWT.Selection, modifyListener);
     wQuoteAll.addListener(SWT.Selection, modifyListener);
@@ -232,6 +281,16 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     wPreferredSchema.addListener(SWT.Modify, modifyListener);
     wSqlStatements.addListener(SWT.Modify, modifyListener);
     wOptions.addListener(SWT.Modify, modifyListener);
+    wSshTunnelEnabled.addListener(SWT.Selection, modifyListener);
+    wSshTunnelEnabled.addListener(SWT.Selection, event -> enableSshTunnelFields());
+    wSshTunnelHost.addListener(SWT.Modify, modifyListener);
+    wSshTunnelPort.addListener(SWT.Modify, modifyListener);
+    wSshTunnelUsername.addListener(SWT.Modify, modifyListener);
+    wSshTunnelPassword.addListener(SWT.Modify, modifyListener);
+    wSshTunnelUsePrivateKey.addListener(SWT.Selection, modifyListener);
+    wSshTunnelUsePrivateKey.addListener(SWT.Selection, event -> enableSshTunnelFields());
+    wSshTunnelPrivateKeyFile.addListener(SWT.Modify, modifyListener);
+    wSshTunnelPassphrase.addListener(SWT.Modify, modifyListener);
   }
 
   private void addGeneralTab() {
@@ -271,7 +330,7 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     item.setToolTipText(BaseMessages.getString(PKG, "System.Tooltip.Help"));
     item.addListener(SWT.Selection, e -> onHelpDatabaseType());
 
-    wConnectionType = new Combo(wGeneralComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    wConnectionType = new Combo(wGeneralComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER | SWT.READ_ONLY);
     wConnectionType.setItems(getConnectionTypes());
     PropsUi.setLook(wConnectionType);
     FormData fdConnectionType = new FormData();
@@ -292,58 +351,74 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     fdlDriverInfo.right = new FormAttachment(middle, -margin);
     wlDriverInfo.setLayoutData(fdlDriverInfo);
 
+    // "Download driver" button - shown only when the selected database type has a downloadable
+    // driver in the catalog that isn't installed yet (toggled in updateDriverInfo()).
+    wbDownloadDriver = new Button(wGeneralComp, SWT.PUSH);
+    PropsUi.setLook(wbDownloadDriver);
+    wbDownloadDriver.setText(BaseMessages.getString(PKG, "DatabaseDialog.button.DownloadDriver"));
+    FormData fdDownloadDriver = new FormData();
+    fdDownloadDriver.top = new FormAttachment(wlDriverInfo, 0, SWT.CENTER);
+    fdDownloadDriver.right = new FormAttachment(100, 0);
+    wbDownloadDriver.setLayoutData(fdDownloadDriver);
+    wbDownloadDriver.addListener(SWT.Selection, e -> downloadDriver());
+    wbDownloadDriver.setVisible(false);
+
     wDriverInfo = new Label(wGeneralComp, SWT.LEFT);
     wDriverInfo.setEnabled(false);
     PropsUi.setLook(wDriverInfo);
     FormData fdDriverInfo = new FormData();
     fdDriverInfo.top = new FormAttachment(wlDriverInfo, 0, SWT.CENTER);
     fdDriverInfo.left = new FormAttachment(middle, 0);
-    fdDriverInfo.right = new FormAttachment(100, 0);
+    fdDriverInfo.right = new FormAttachment(wbDownloadDriver, -margin);
     wDriverInfo.setLayoutData(fdDriverInfo);
-    lastControl = wDriverInfo;
+    lastControl = wbDownloadDriver;
 
-    // Username field
+    // Username field - only create if not excluded
     //
-    wlUsername = new Label(wGeneralComp, SWT.RIGHT);
-    PropsUi.setLook(wlUsername);
-    wlUsername.setText(BaseMessages.getString(PKG, "DatabaseDialog.label.Username"));
-    FormData fdlUsername = new FormData();
-    fdlUsername.top = new FormAttachment(lastControl, margin * 2); // At the bottom of this tab
-    fdlUsername.left = new FormAttachment(0, 0); // First one in the left top corner
-    fdlUsername.right = new FormAttachment(middle, -margin);
-    wlUsername.setLayoutData(fdlUsername);
-    wUsername =
-        new TextVar(manager.getVariables(), wGeneralComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    PropsUi.setLook(wUsername);
-    FormData fdUsername = new FormData();
-    fdUsername.top = new FormAttachment(wlUsername, 0, SWT.CENTER);
-    fdUsername.left = new FormAttachment(middle, 0); // To the right of the label
-    fdUsername.right = new FormAttachment(100, 0);
-    wUsername.setLayoutData(fdUsername);
-    lastControl = wUsername;
+    if (!excludedElementIds.contains(BaseDatabaseMeta.ELEMENT_ID_USERNAME)) {
+      wlUsername = new Label(wGeneralComp, SWT.RIGHT);
+      PropsUi.setLook(wlUsername);
+      wlUsername.setText(BaseMessages.getString(PKG, "DatabaseDialog.label.Username"));
+      FormData fdlUsername = new FormData();
+      fdlUsername.top = new FormAttachment(lastControl, margin * 2); // At the bottom of this tab
+      fdlUsername.left = new FormAttachment(0, 0); // First one in the left top corner
+      fdlUsername.right = new FormAttachment(middle, -margin);
+      wlUsername.setLayoutData(fdlUsername);
+      wUsername =
+          new TextVar(manager.getVariables(), wGeneralComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+      PropsUi.setLook(wUsername);
+      FormData fdUsername = new FormData();
+      fdUsername.top = new FormAttachment(wlUsername, 0, SWT.CENTER);
+      fdUsername.left = new FormAttachment(middle, 0); // To the right of the label
+      fdUsername.right = new FormAttachment(100, 0);
+      wUsername.setLayoutData(fdUsername);
+      lastControl = wUsername;
+    }
 
-    // Password field
+    // Password field - only create if not excluded
     //
-    wlPassword = new Label(wGeneralComp, SWT.RIGHT);
-    PropsUi.setLook(wlPassword);
-    wlPassword.setText(BaseMessages.getString(PKG, "DatabaseDialog.label.Password"));
-    FormData fdlPassword = new FormData();
-    fdlPassword.top = new FormAttachment(lastControl, margin * 2); // At the bottom of this tab
-    fdlPassword.left = new FormAttachment(0, 0); // First one in the left top corner
-    fdlPassword.right = new FormAttachment(middle, -margin);
-    wlPassword.setLayoutData(fdlPassword);
-    wPassword =
-        new TextVar(
-            manager.getVariables(),
-            wGeneralComp,
-            SWT.SINGLE | SWT.LEFT | SWT.BORDER | SWT.PASSWORD);
-    PropsUi.setLook(wPassword);
-    FormData fdPassword = new FormData();
-    fdPassword.top = new FormAttachment(wlPassword, 0, SWT.CENTER);
-    fdPassword.left = new FormAttachment(middle, 0); // To the right of the label
-    fdPassword.right = new FormAttachment(100, 0);
-    wPassword.setLayoutData(fdPassword);
-    lastControl = wPassword;
+    if (!excludedElementIds.contains(BaseDatabaseMeta.ELEMENT_ID_PASSWORD)) {
+      wlPassword = new Label(wGeneralComp, SWT.RIGHT);
+      PropsUi.setLook(wlPassword);
+      wlPassword.setText(BaseMessages.getString(PKG, "DatabaseDialog.label.Password"));
+      FormData fdlPassword = new FormData();
+      fdlPassword.top = new FormAttachment(lastControl, margin * 2); // At the bottom of this tab
+      fdlPassword.left = new FormAttachment(0, 0); // First one in the left top corner
+      fdlPassword.right = new FormAttachment(middle, -margin);
+      wlPassword.setLayoutData(fdlPassword);
+      wPassword =
+          new TextVar(
+              manager.getVariables(),
+              wGeneralComp,
+              SWT.SINGLE | SWT.LEFT | SWT.BORDER | SWT.PASSWORD);
+      PropsUi.setLook(wPassword);
+      FormData fdPassword = new FormData();
+      fdPassword.top = new FormAttachment(wlPassword, 0, SWT.CENTER);
+      fdPassword.left = new FormAttachment(middle, 0); // To the right of the label
+      fdPassword.right = new FormAttachment(100, 0);
+      wPassword.setLayoutData(fdPassword);
+      lastControl = wPassword;
+    }
 
     // Add a composite area
     //
@@ -368,37 +443,31 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
         null);
 
     // Add listener to detect change
-    guiCompositeWidgets.setWidgetsListener(
-        new GuiCompositeWidgetsAdapter() {
-          @Override
-          public void widgetModified(
-              GuiCompositeWidgets compositeWidgets, Control changedWidget, String widgetId) {
-            setChanged();
-            updateDriverInfo();
-          }
-        });
+    guiCompositeWidgets.setWidgetsListener(createWidgetsListener());
 
     addCompositeWidgetsUsernamePassword();
 
-    // manual URL field
+    // manual URL field - only create if not excluded
     //
-    Label wlManualUrl = new Label(wGeneralComp, SWT.RIGHT);
-    PropsUi.setLook(wlManualUrl);
-    wlManualUrl.setText(BaseMessages.getString(PKG, "DatabaseDialog.label.ManualUrl"));
-    FormData fdlManualUrl = new FormData();
-    fdlManualUrl.top = new FormAttachment(lastControl, margin * 2); // At the bottom of this tab
-    fdlManualUrl.left = new FormAttachment(0, 0); // First one in the left top corner
-    fdlManualUrl.right = new FormAttachment(middle, -margin);
-    wlManualUrl.setLayoutData(fdlManualUrl);
-    wManualUrl =
-        new TextVar(manager.getVariables(), wGeneralComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    PropsUi.setLook(wManualUrl);
-    FormData fdManualUrl = new FormData();
-    fdManualUrl.top = new FormAttachment(wlManualUrl, 0, SWT.CENTER);
-    fdManualUrl.left = new FormAttachment(middle, 0); // To the right of the label
-    fdManualUrl.right = new FormAttachment(100, 0);
-    wManualUrl.setLayoutData(fdManualUrl);
-    wManualUrl.addListener(SWT.Modify, e -> enableFields());
+    if (!excludedElementIds.contains(BaseDatabaseMeta.ELEMENT_ID_MANUAL_URL)) {
+      Label wlManualUrl = new Label(wGeneralComp, SWT.RIGHT);
+      PropsUi.setLook(wlManualUrl);
+      wlManualUrl.setText(BaseMessages.getString(PKG, "DatabaseDialog.label.ManualUrl"));
+      FormData fdlManualUrl = new FormData();
+      fdlManualUrl.top = new FormAttachment(lastControl, margin * 2); // At the bottom of this tab
+      fdlManualUrl.left = new FormAttachment(0, 0); // First one in the left top corner
+      fdlManualUrl.right = new FormAttachment(middle, -margin);
+      wlManualUrl.setLayoutData(fdlManualUrl);
+      wManualUrl =
+          new TextVar(manager.getVariables(), wGeneralComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+      PropsUi.setLook(wManualUrl);
+      FormData fdManualUrl = new FormData();
+      fdManualUrl.top = new FormAttachment(wlManualUrl, 0, SWT.CENTER);
+      fdManualUrl.left = new FormAttachment(middle, 0); // To the right of the label
+      fdManualUrl.right = new FormAttachment(100, 0);
+      wManualUrl.setLayoutData(fdManualUrl);
+      wManualUrl.addListener(SWT.Modify, e -> enableFields());
+    }
 
     FormData fdGeneralComp = new FormData();
     fdGeneralComp.left = new FormAttachment(0, 0);
@@ -411,13 +480,66 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     wGeneralTab.setControl(wGeneralComp);
   }
 
+  /**
+   * The composite has a single listener slot, which this editor needs for its own change tracking.
+   * Database plugins that implement {@link IGuiPluginCompositeWidgetsListener} -- to enable, hide
+   * or otherwise adjust their own widgets -- are forwarded to from here; without this their
+   * callbacks would never fire.
+   */
+  private IGuiPluginCompositeWidgetsListener createWidgetsListener() {
+    return new GuiCompositeWidgetsAdapter() {
+      @Override
+      public void widgetsCreated(GuiCompositeWidgets compositeWidgets) {
+        pluginWidgetsListener().ifPresent(listener -> listener.widgetsCreated(compositeWidgets));
+      }
+
+      @Override
+      public void widgetsPopulated(GuiCompositeWidgets compositeWidgets) {
+        pluginWidgetsListener().ifPresent(listener -> listener.widgetsPopulated(compositeWidgets));
+      }
+
+      @Override
+      public void widgetModified(
+          GuiCompositeWidgets compositeWidgets, Control changedWidget, String widgetId) {
+        setChanged();
+        updateDriverInfo();
+        pluginWidgetsListener()
+            .ifPresent(
+                listener -> listener.widgetModified(compositeWidgets, changedWidget, widgetId));
+      }
+
+      @Override
+      public void persistContents(GuiCompositeWidgets compositeWidgets) {
+        pluginWidgetsListener().ifPresent(listener -> listener.persistContents(compositeWidgets));
+      }
+    };
+  }
+
+  private Optional<IGuiPluginCompositeWidgetsListener> pluginWidgetsListener() {
+    DatabaseMeta databaseMeta = getMetadata();
+    if (databaseMeta == null) {
+      return Optional.empty();
+    }
+    return databaseMeta.getIDatabase() instanceof IGuiPluginCompositeWidgetsListener listener
+        ? Optional.of(listener)
+        : Optional.empty();
+  }
+
   private void addCompositeWidgetsUsernamePassword() {
     // Add username and password to the mix so folks can enable/disable those
     //
-    guiCompositeWidgets.getWidgetsMap().put(BaseDatabaseMeta.ID_USERNAME_LABEL, wlUsername);
-    guiCompositeWidgets.getWidgetsMap().put(BaseDatabaseMeta.ID_USERNAME_WIDGET, wUsername);
-    guiCompositeWidgets.getWidgetsMap().put(BaseDatabaseMeta.ID_PASSWORD_LABEL, wlPassword);
-    guiCompositeWidgets.getWidgetsMap().put(BaseDatabaseMeta.ID_PASSWORD_WIDGET, wPassword);
+    if (wlUsername != null) {
+      guiCompositeWidgets.getWidgetsMap().put(BaseDatabaseMeta.ID_USERNAME_LABEL, wlUsername);
+    }
+    if (wUsername != null) {
+      guiCompositeWidgets.getWidgetsMap().put(BaseDatabaseMeta.ID_USERNAME_WIDGET, wUsername);
+    }
+    if (wlPassword != null) {
+      guiCompositeWidgets.getWidgetsMap().put(BaseDatabaseMeta.ID_PASSWORD_LABEL, wlPassword);
+    }
+    if (wPassword != null) {
+      guiCompositeWidgets.getWidgetsMap().put(BaseDatabaseMeta.ID_PASSWORD_WIDGET, wPassword);
+    }
   }
 
   private AtomicBoolean busyChangingConnectionType = new AtomicBoolean(false);
@@ -470,15 +592,7 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
         wDatabaseSpecificComp,
         DatabaseMeta.GUI_PLUGIN_ELEMENT_PARENT_ID,
         null);
-    guiCompositeWidgets.setWidgetsListener(
-        new GuiCompositeWidgetsAdapter() {
-          @Override
-          public void widgetModified(
-              GuiCompositeWidgets compositeWidgets, Control changedWidget, String widgetId) {
-            setChanged();
-            updateDriverInfo();
-          }
-        });
+    guiCompositeWidgets.setWidgetsListener(createWidgetsListener());
     addCompositeWidgetsUsernamePassword();
 
     // Put the data back
@@ -495,7 +609,7 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     CTabItem wAdvancedTab = new CTabItem(wTabFolder, SWT.NONE);
     wAdvancedTab.setFont(GuiResource.getInstance().getFontDefault());
     wAdvancedTab.setText(
-        "   " + BaseMessages.getString(PKG, "DatabaseDialog.AdvancedTab.title") + "   ");
+        "  " + BaseMessages.getString(PKG, "DatabaseDialog.AdvancedTab.title") + "  ");
 
     Composite wAdvancedComp = new Composite(wTabFolder, SWT.NONE);
     PropsUi.setLook(wAdvancedComp);
@@ -749,10 +863,227 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     wOptionsTab.setControl(wOptionsComp);
   }
 
+  private void addSshTunnelTab() {
+
+    CTabItem wSshTunnelTab = new CTabItem(wTabFolder, SWT.NONE);
+    wSshTunnelTab.setFont(GuiResource.getInstance().getFontDefault());
+    wSshTunnelTab.setText(
+        "  " + BaseMessages.getString(PKG, "DatabaseDialog.SshTunnelTab.title") + "  ");
+
+    Composite wSshTunnelComp = new Composite(wTabFolder, SWT.NONE);
+    PropsUi.setLook(wSshTunnelComp);
+
+    FormLayout sshLayout = new FormLayout();
+    sshLayout.marginWidth = PropsUi.getFormMargin() * 2;
+    sshLayout.marginHeight = PropsUi.getFormMargin() * 2;
+    wSshTunnelComp.setLayout(sshLayout);
+
+    // Enable SSH Tunnel checkbox
+    Label wlSshTunnelEnabled = new Label(wSshTunnelComp, SWT.RIGHT);
+    PropsUi.setLook(wlSshTunnelEnabled);
+    wlSshTunnelEnabled.setText(
+        BaseMessages.getString(PKG, "DatabaseDialog.label.SshTunnelEnabled"));
+    FormData fdlSshTunnelEnabled = new FormData();
+    fdlSshTunnelEnabled.top = new FormAttachment(0, 0);
+    fdlSshTunnelEnabled.left = new FormAttachment(0, 0);
+    fdlSshTunnelEnabled.right = new FormAttachment(middle, 0);
+    wlSshTunnelEnabled.setLayoutData(fdlSshTunnelEnabled);
+    wSshTunnelEnabled = new Button(wSshTunnelComp, SWT.CHECK | SWT.LEFT);
+    PropsUi.setLook(wSshTunnelEnabled);
+    FormData fdSshTunnelEnabled = new FormData();
+    fdSshTunnelEnabled.top = new FormAttachment(wlSshTunnelEnabled, 0, SWT.CENTER);
+    fdSshTunnelEnabled.left = new FormAttachment(middle, margin);
+    fdSshTunnelEnabled.right = new FormAttachment(100, 0);
+    wSshTunnelEnabled.setLayoutData(fdSshTunnelEnabled);
+    Control lastControl = wSshTunnelEnabled;
+
+    // SSH Host
+    Label wlSshTunnelHost = new Label(wSshTunnelComp, SWT.RIGHT);
+    PropsUi.setLook(wlSshTunnelHost);
+    wlSshTunnelHost.setText(BaseMessages.getString(PKG, "DatabaseDialog.label.SshTunnelHost"));
+    FormData fdlSshTunnelHost = new FormData();
+    fdlSshTunnelHost.top = new FormAttachment(lastControl, margin);
+    fdlSshTunnelHost.left = new FormAttachment(0, 0);
+    fdlSshTunnelHost.right = new FormAttachment(middle, 0);
+    wlSshTunnelHost.setLayoutData(fdlSshTunnelHost);
+    wSshTunnelHost =
+        new TextVar(manager.getVariables(), wSshTunnelComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    PropsUi.setLook(wSshTunnelHost);
+    FormData fdSshTunnelHost = new FormData();
+    fdSshTunnelHost.top = new FormAttachment(wlSshTunnelHost, 0, SWT.CENTER);
+    fdSshTunnelHost.left = new FormAttachment(middle, margin);
+    fdSshTunnelHost.right = new FormAttachment(100, 0);
+    wSshTunnelHost.setLayoutData(fdSshTunnelHost);
+    lastControl = wSshTunnelHost;
+
+    // SSH Port
+    Label wlSshTunnelPort = new Label(wSshTunnelComp, SWT.RIGHT);
+    PropsUi.setLook(wlSshTunnelPort);
+    wlSshTunnelPort.setText(BaseMessages.getString(PKG, "DatabaseDialog.label.SshTunnelPort"));
+    FormData fdlSshTunnelPort = new FormData();
+    fdlSshTunnelPort.top = new FormAttachment(lastControl, margin);
+    fdlSshTunnelPort.left = new FormAttachment(0, 0);
+    fdlSshTunnelPort.right = new FormAttachment(middle, 0);
+    wlSshTunnelPort.setLayoutData(fdlSshTunnelPort);
+    wSshTunnelPort =
+        new TextVar(manager.getVariables(), wSshTunnelComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    PropsUi.setLook(wSshTunnelPort);
+    FormData fdSshTunnelPort = new FormData();
+    fdSshTunnelPort.top = new FormAttachment(wlSshTunnelPort, 0, SWT.CENTER);
+    fdSshTunnelPort.left = new FormAttachment(middle, margin);
+    fdSshTunnelPort.right = new FormAttachment(100, 0);
+    wSshTunnelPort.setLayoutData(fdSshTunnelPort);
+    lastControl = wSshTunnelPort;
+
+    // SSH Username
+    Label wlSshTunnelUsername = new Label(wSshTunnelComp, SWT.RIGHT);
+    PropsUi.setLook(wlSshTunnelUsername);
+    wlSshTunnelUsername.setText(
+        BaseMessages.getString(PKG, "DatabaseDialog.label.SshTunnelUsername"));
+    FormData fdlSshTunnelUsername = new FormData();
+    fdlSshTunnelUsername.top = new FormAttachment(lastControl, margin);
+    fdlSshTunnelUsername.left = new FormAttachment(0, 0);
+    fdlSshTunnelUsername.right = new FormAttachment(middle, 0);
+    wlSshTunnelUsername.setLayoutData(fdlSshTunnelUsername);
+    wSshTunnelUsername =
+        new TextVar(manager.getVariables(), wSshTunnelComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    PropsUi.setLook(wSshTunnelUsername);
+    FormData fdSshTunnelUsername = new FormData();
+    fdSshTunnelUsername.top = new FormAttachment(wlSshTunnelUsername, 0, SWT.CENTER);
+    fdSshTunnelUsername.left = new FormAttachment(middle, margin);
+    fdSshTunnelUsername.right = new FormAttachment(100, 0);
+    wSshTunnelUsername.setLayoutData(fdSshTunnelUsername);
+    lastControl = wSshTunnelUsername;
+
+    // SSH Password
+    Label wlSshTunnelPassword = new Label(wSshTunnelComp, SWT.RIGHT);
+    PropsUi.setLook(wlSshTunnelPassword);
+    wlSshTunnelPassword.setText(
+        BaseMessages.getString(PKG, "DatabaseDialog.label.SshTunnelPassword"));
+    FormData fdlSshTunnelPassword = new FormData();
+    fdlSshTunnelPassword.top = new FormAttachment(lastControl, margin);
+    fdlSshTunnelPassword.left = new FormAttachment(0, 0);
+    fdlSshTunnelPassword.right = new FormAttachment(middle, 0);
+    wlSshTunnelPassword.setLayoutData(fdlSshTunnelPassword);
+    wSshTunnelPassword =
+        new TextVar(
+            manager.getVariables(),
+            wSshTunnelComp,
+            SWT.SINGLE | SWT.LEFT | SWT.BORDER | SWT.PASSWORD);
+    PropsUi.setLook(wSshTunnelPassword);
+    FormData fdSshTunnelPassword = new FormData();
+    fdSshTunnelPassword.top = new FormAttachment(wlSshTunnelPassword, 0, SWT.CENTER);
+    fdSshTunnelPassword.left = new FormAttachment(middle, margin);
+    fdSshTunnelPassword.right = new FormAttachment(100, 0);
+    wSshTunnelPassword.setLayoutData(fdSshTunnelPassword);
+    lastControl = wSshTunnelPassword;
+
+    // Use Private Key checkbox
+    Label wlSshTunnelUsePrivateKey = new Label(wSshTunnelComp, SWT.RIGHT);
+    PropsUi.setLook(wlSshTunnelUsePrivateKey);
+    wlSshTunnelUsePrivateKey.setText(
+        BaseMessages.getString(PKG, "DatabaseDialog.label.SshTunnelUsePrivateKey"));
+    FormData fdlSshTunnelUsePrivateKey = new FormData();
+    fdlSshTunnelUsePrivateKey.top = new FormAttachment(lastControl, margin);
+    fdlSshTunnelUsePrivateKey.left = new FormAttachment(0, 0);
+    fdlSshTunnelUsePrivateKey.right = new FormAttachment(middle, 0);
+    wlSshTunnelUsePrivateKey.setLayoutData(fdlSshTunnelUsePrivateKey);
+    wSshTunnelUsePrivateKey = new Button(wSshTunnelComp, SWT.CHECK | SWT.LEFT);
+    PropsUi.setLook(wSshTunnelUsePrivateKey);
+    FormData fdSshTunnelUsePrivateKey = new FormData();
+    fdSshTunnelUsePrivateKey.top = new FormAttachment(wlSshTunnelUsePrivateKey, 0, SWT.CENTER);
+    fdSshTunnelUsePrivateKey.left = new FormAttachment(middle, margin);
+    fdSshTunnelUsePrivateKey.right = new FormAttachment(100, 0);
+    wSshTunnelUsePrivateKey.setLayoutData(fdSshTunnelUsePrivateKey);
+    lastControl = wSshTunnelUsePrivateKey;
+
+    // Private Key File
+    wlSshTunnelPrivateKeyFile = new Label(wSshTunnelComp, SWT.RIGHT);
+    PropsUi.setLook(wlSshTunnelPrivateKeyFile);
+    wlSshTunnelPrivateKeyFile.setText(
+        BaseMessages.getString(PKG, "DatabaseDialog.label.SshTunnelPrivateKeyFile"));
+    FormData fdlSshTunnelPrivateKeyFile = new FormData();
+    fdlSshTunnelPrivateKeyFile.top = new FormAttachment(lastControl, margin);
+    fdlSshTunnelPrivateKeyFile.left = new FormAttachment(0, 0);
+    fdlSshTunnelPrivateKeyFile.right = new FormAttachment(middle, 0);
+    wlSshTunnelPrivateKeyFile.setLayoutData(fdlSshTunnelPrivateKeyFile);
+    wSshTunnelPrivateKeyFile =
+        new TextVar(manager.getVariables(), wSshTunnelComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    PropsUi.setLook(wSshTunnelPrivateKeyFile);
+    FormData fdSshTunnelPrivateKeyFile = new FormData();
+    fdSshTunnelPrivateKeyFile.top = new FormAttachment(wlSshTunnelPrivateKeyFile, 0, SWT.CENTER);
+    fdSshTunnelPrivateKeyFile.left = new FormAttachment(middle, margin);
+    fdSshTunnelPrivateKeyFile.right = new FormAttachment(100, 0);
+    wSshTunnelPrivateKeyFile.setLayoutData(fdSshTunnelPrivateKeyFile);
+    lastControl = wSshTunnelPrivateKeyFile;
+
+    // Passphrase
+    wlSshTunnelPassphrase = new Label(wSshTunnelComp, SWT.RIGHT);
+    PropsUi.setLook(wlSshTunnelPassphrase);
+    wlSshTunnelPassphrase.setText(
+        BaseMessages.getString(PKG, "DatabaseDialog.label.SshTunnelPassphrase"));
+    FormData fdlSshTunnelPassphrase = new FormData();
+    fdlSshTunnelPassphrase.top = new FormAttachment(lastControl, margin);
+    fdlSshTunnelPassphrase.left = new FormAttachment(0, 0);
+    fdlSshTunnelPassphrase.right = new FormAttachment(middle, 0);
+    wlSshTunnelPassphrase.setLayoutData(fdlSshTunnelPassphrase);
+    wSshTunnelPassphrase =
+        new TextVar(
+            manager.getVariables(),
+            wSshTunnelComp,
+            SWT.SINGLE | SWT.LEFT | SWT.BORDER | SWT.PASSWORD);
+    PropsUi.setLook(wSshTunnelPassphrase);
+    FormData fdSshTunnelPassphrase = new FormData();
+    fdSshTunnelPassphrase.top = new FormAttachment(wlSshTunnelPassphrase, 0, SWT.CENTER);
+    fdSshTunnelPassphrase.left = new FormAttachment(middle, margin);
+    fdSshTunnelPassphrase.right = new FormAttachment(100, 0);
+    wSshTunnelPassphrase.setLayoutData(fdSshTunnelPassphrase);
+    lastControl = wSshTunnelPassphrase;
+
+    // Informational note about the ${sshTunnel.localPort} variable for manual JDBC URLs
+    Label wlSshTunnelLocalPortInfo = new Label(wSshTunnelComp, SWT.LEFT | SWT.WRAP);
+    PropsUi.setLook(wlSshTunnelLocalPortInfo);
+    wlSshTunnelLocalPortInfo.setText(
+        BaseMessages.getString(PKG, "DatabaseDialog.label.SshTunnelLocalPortInfo"));
+    FormData fdlSshTunnelLocalPortInfo = new FormData();
+    fdlSshTunnelLocalPortInfo.top = new FormAttachment(lastControl, margin * 2);
+    fdlSshTunnelLocalPortInfo.left = new FormAttachment(middle, margin);
+    fdlSshTunnelLocalPortInfo.right = new FormAttachment(100, 0);
+    wlSshTunnelLocalPortInfo.setLayoutData(fdlSshTunnelLocalPortInfo);
+
+    FormData fdSshTunnelComp = new FormData();
+    fdSshTunnelComp.left = new FormAttachment(0, 0);
+    fdSshTunnelComp.top = new FormAttachment(0, 0);
+    fdSshTunnelComp.right = new FormAttachment(100, 0);
+    fdSshTunnelComp.bottom = new FormAttachment(100, 0);
+    wSshTunnelComp.setLayoutData(fdSshTunnelComp);
+
+    wSshTunnelComp.layout();
+    wSshTunnelTab.setControl(wSshTunnelComp);
+  }
+
+  private void enableSshTunnelFields() {
+    boolean enabled = wSshTunnelEnabled.getSelection();
+    boolean usePrivateKey = wSshTunnelUsePrivateKey.getSelection();
+
+    wSshTunnelHost.setEnabled(enabled);
+    wSshTunnelPort.setEnabled(enabled);
+    wSshTunnelUsername.setEnabled(enabled);
+    wSshTunnelPassword.setEnabled(enabled && !usePrivateKey);
+    wSshTunnelUsePrivateKey.setEnabled(enabled);
+    wSshTunnelPrivateKeyFile.setEnabled(enabled && usePrivateKey);
+    wSshTunnelPassphrase.setEnabled(enabled && usePrivateKey);
+    wlSshTunnelPrivateKeyFile.setEnabled(enabled && usePrivateKey);
+    wlSshTunnelPassphrase.setEnabled(enabled && usePrivateKey);
+  }
+
   private void enableFields() {
-    boolean manualUrl =
-        StringUtils.isNotEmpty(wManualUrl.getText())
-            && StringUtils.isNotBlank(wManualUrl.getText());
+    boolean manualUrl = false;
+    if (wManualUrl != null) {
+      manualUrl =
+          StringUtils.isNotEmpty(wManualUrl.getText())
+              && StringUtils.isNotBlank(wManualUrl.getText());
+    }
 
     // Also enable/disable the custom native fields
     //
@@ -763,23 +1094,33 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
   private void test() {
     DatabaseMeta meta = new DatabaseMeta();
     getWidgetsContent(meta);
-    testConnection(getShell(), manager.getVariables(), meta);
+    //    boolean hideUrl = shouldHideUrlForDatabase(meta);
+    testConnection(getShell(), manager.getVariables(), meta, meta.isHideUrlInTestConnection());
   }
 
   private void explore() {
-    DatabaseMeta meta = new DatabaseMeta();
-    getWidgetsContent(meta);
-    try {
-      DatabaseExplorerDialog dialog =
-          new DatabaseExplorerDialog(
-              getShell(),
-              SWT.NONE,
-              manager.getVariables(),
-              meta,
-              manager.getSerializer().loadAll());
-      dialog.open();
-    } catch (Exception e) {
-      new ErrorDialog(getShell(), "Error", "Error exploring database", e);
+    if (!getMetadata().isExploringDisabled()) {
+      DatabaseMeta meta = new DatabaseMeta();
+      getWidgetsContent(meta);
+      try {
+        DatabaseExplorerDialog dialog =
+            new DatabaseExplorerDialog(
+                getShell(),
+                SWT.NONE,
+                manager.getVariables(),
+                meta,
+                manager.getSerializer().loadAll(),
+                true,
+                true);
+        dialog.open();
+      } catch (Exception e) {
+        new ErrorDialog(getShell(), "Error", "Error exploring database", e);
+      }
+    } else {
+      MessageBox mb = new MessageBox(HopGui.getInstance().getShell(), SWT.OK | SWT.ICON_ERROR);
+      mb.setText(BaseMessages.getString(PKG, "DatabaseDialog.Exploring.Disabled.title"));
+      mb.setMessage(BaseMessages.getString(PKG, "DatabaseDialog.Exploring.Disabled.description"));
+      mb.open();
     }
   }
 
@@ -802,15 +1143,26 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     wName.setText(Const.NVL(databaseMeta.getName(), ""));
     wConnectionType.setText(Const.NVL(databaseMeta.getPluginName(), ""));
 
-    wUsername.setText(Const.NVL(databaseMeta.getUsername(), ""));
-    wPassword.setText(Const.NVL(databaseMeta.getPassword(), ""));
+    if (wUsername != null) {
+      wUsername.setText(Const.NVL(databaseMeta.getUsername(), ""));
+    }
+    if (wPassword != null) {
+      wPassword.setText(Const.NVL(databaseMeta.getPassword(), ""));
+    }
 
     guiCompositeWidgets.setWidgetsContents(
         databaseMeta.getIDatabase(),
         wDatabaseSpecificComp,
         DatabaseMeta.GUI_PLUGIN_ELEMENT_PARENT_ID);
 
-    wManualUrl.setText(Const.NVL(databaseMeta.getManualUrl(), ""));
+    // The widgets now hold the values of this connection, so a database plugin can adjust which of
+    // its own widgets apply.
+    //
+    pluginWidgetsListener().ifPresent(listener -> listener.widgetsPopulated(guiCompositeWidgets));
+
+    if (wManualUrl != null) {
+      wManualUrl.setText(Const.NVL(databaseMeta.getManualUrl(), ""));
+    }
     wSupportsBoolean.setSelection(databaseMeta.supportsBooleanDataType());
     wSupportsTimestamp.setSelection(databaseMeta.supportsTimestampDataType());
     wQuoteAll.setSelection(databaseMeta.isQuoteAllFields());
@@ -834,8 +1186,19 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     wOptions.setRowNums();
     wOptions.optWidth(true);
 
+    // SSH Tunnel fields
+    wSshTunnelEnabled.setSelection(databaseMeta.isSshTunnelEnabled());
+    wSshTunnelHost.setText(Const.NVL(databaseMeta.getSshTunnelHost(), ""));
+    wSshTunnelPort.setText(Const.NVL(databaseMeta.getSshTunnelPort(), "22"));
+    wSshTunnelUsername.setText(Const.NVL(databaseMeta.getSshTunnelUsername(), ""));
+    wSshTunnelPassword.setText(Const.NVL(databaseMeta.getSshTunnelPassword(), ""));
+    wSshTunnelUsePrivateKey.setSelection(databaseMeta.isSshTunnelUsePrivateKey());
+    wSshTunnelPrivateKeyFile.setText(Const.NVL(databaseMeta.getSshTunnelPrivateKeyFile(), ""));
+    wSshTunnelPassphrase.setText(Const.NVL(databaseMeta.getSshTunnelPassphrase(), ""));
+
     updateDriverInfo();
     enableFields();
+    enableSshTunnelFields();
   }
 
   @Override
@@ -850,9 +1213,24 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
         meta.getIDatabase(), DatabaseMeta.GUI_PLUGIN_ELEMENT_PARENT_ID);
 
     meta.setAccessType(DatabaseMeta.TYPE_ACCESS_NATIVE);
-    meta.setManualUrl(wManualUrl.getText());
-    meta.setUsername(wUsername.getText());
-    meta.setPassword(wPassword.getText());
+    if (wManualUrl != null) {
+      meta.setManualUrl(wManualUrl.getText());
+    } else {
+      // Initialize excluded manual URL field with empty string to prevent null pointer exceptions
+      meta.setManualUrl("");
+    }
+    if (wUsername != null) {
+      meta.setUsername(wUsername.getText());
+    } else {
+      // Initialize excluded username field with empty string
+      meta.setUsername("");
+    }
+    if (wPassword != null) {
+      meta.setPassword(wPassword.getText());
+    } else {
+      // Initialize excluded password field with empty string
+      meta.setPassword("");
+    }
     meta.setSupportsBooleanDataType(wSupportsBoolean.getSelection());
     meta.setSupportsTimestampDataType(wSupportsTimestamp.getSelection());
     meta.setQuoteAllFields(wQuoteAll.getSelection());
@@ -869,71 +1247,212 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
       String value = item.getText(2);
       meta.addExtraOption(meta.getPluginId(), option, value);
     }
+
+    // SSH Tunnel fields
+    meta.setSshTunnelEnabled(wSshTunnelEnabled.getSelection());
+    meta.setSshTunnelHost(wSshTunnelHost.getText());
+    meta.setSshTunnelPort(wSshTunnelPort.getText());
+    meta.setSshTunnelUsername(wSshTunnelUsername.getText());
+    meta.setSshTunnelPassword(wSshTunnelPassword.getText());
+    meta.setSshTunnelUsePrivateKey(wSshTunnelUsePrivateKey.getSelection());
+    meta.setSshTunnelPrivateKeyFile(wSshTunnelPrivateKeyFile.getText());
+    meta.setSshTunnelPassphrase(wSshTunnelPassphrase.getText());
   }
 
-  /** Update JDBC driver information and version */
+  /** Updates the displayed driver information, including the driver name and version. */
   protected void updateDriverInfo() {
+    String driverName;
+    String driverVersion = null;
+    boolean driverLoaded = false;
+    IDatabase database = null;
     try {
       DatabaseMeta databaseMeta = new DatabaseMeta();
       this.getWidgetsContent(databaseMeta);
+      database = databaseMeta.getIDatabase();
 
-      wDriverInfo.setText("");
-      String driverName = databaseMeta.getDriverClass(getVariables());
+      driverName = databaseMeta.getDriverClass(getVariables());
       if (!Utils.isEmpty(driverName)) {
-        ClassLoader classLoader = databaseMeta.getIDatabase().getClass().getClassLoader();
-        Class<?> driver = classLoader.loadClass(driverName);
-
-        if (driver.getPackage().getImplementationVersion() != null) {
-          driverName = driverName + " (" + driver.getPackage().getImplementationVersion() + ")";
-        }
-
-        wDriverInfo.setText(driverName);
+        ClassLoader classLoader = database.getClass().getClassLoader();
+        Class<? extends Driver> driverClass =
+            classLoader.loadClass(driverName).asSubclass(Driver.class);
+        driverVersion = getDriverVersion(driverClass);
+        driverLoaded = true;
       }
     } catch (Exception e) {
-      wDriverInfo.setText("No driver installed");
+      driverName = "No driver installed";
+    }
+
+    wDriverInfo.setText(driverName + (driverVersion != null ? " (" + driverVersion + ")" : ""));
+    updateDownloadButton(database, driverLoaded);
+  }
+
+  /**
+   * Show the "Download driver" button only when the selected database type declares a downloadable
+   * driver ({@link IDatabase#getDriverDownload()}) and that driver isn't loadable yet.
+   */
+  private void updateDownloadButton(IDatabase database, boolean driverLoaded) {
+    if (wbDownloadDriver == null || wbDownloadDriver.isDisposed()) {
+      return;
+    }
+    boolean show = !driverLoaded && database != null && database.getDriverDownload() != null;
+    wbDownloadDriver.setVisible(show);
+  }
+
+  /** Download + install the JDBC driver for the currently selected database type. */
+  private void downloadDriver() {
+    try {
+      DatabaseMeta databaseMeta = new DatabaseMeta();
+      this.getWidgetsContent(databaseMeta);
+      IDatabase database = databaseMeta.getIDatabase();
+      DriverDownload download = database == null ? null : database.getDriverDownload();
+      if (download == null) {
+        return;
+      }
+      JdbcDriverDownloadDialog dialog =
+          new JdbcDriverDownloadDialog(
+              getShell(), databaseMeta.getPluginId(), databaseMeta.getPluginName(), download);
+      if (dialog.open()) {
+        // The dialog hot-loads the driver into the plugin classloader, so refresh the label - it
+        // may already be available without a restart.
+        updateDriverInfo();
+      }
+    } catch (Exception e) {
+      new ErrorDialog(
+          getShell(),
+          BaseMessages.getString(PKG, "JdbcDriverDownloadDialog.Error.Title"),
+          BaseMessages.getString(PKG, "JdbcDriverDownloadDialog.Error.Generic"),
+          e);
+    }
+  }
+
+  /**
+   * Retrieves the version information for the specified JDBC driver class.
+   *
+   * @param driverClass The JDBC driver class for which to retrieve the version information.
+   * @return The driver version as a string, or null if the version cannot be determined.
+   */
+  private static @Nullable String getDriverVersion(Class<? extends Driver> driverClass) {
+    String version = driverClass.getPackage().getImplementationVersion();
+    if (version != null) {
+      return version;
+    }
+    try {
+      Driver driver = driverClass.getDeclaredConstructor().newInstance();
+      return driver.getMajorVersion() + "." + driver.getMinorVersion();
+    } catch (Exception e) {
+      // Ignore - version could not be determined
+      return null;
     }
   }
 
   /** Test the database connection */
-  public static final void testConnection(
-      Shell shell, IVariables variables, DatabaseMeta databaseMeta) {
-    String[] remarks = databaseMeta.checkParameters();
-    if (remarks.length == 0) {
-      // Get a "test" report from this database
-      DatabaseTestResults databaseTestResults = databaseMeta.testConnectionSuccess(variables);
-      String message = databaseTestResults.getMessage();
-      boolean success = databaseTestResults.isSuccess();
-      String title =
-          success
-              ? BaseMessages.getString(PKG, "DatabaseDialog.DatabaseConnectionTestSuccess.title")
-              : BaseMessages.getString(PKG, "DatabaseDialog.DatabaseConnectionTest.title");
-      if (success && message.contains(Const.CR)) {
-        message =
-            message.substring(0, message.indexOf(Const.CR))
-                + Const.CR
-                + message.substring(message.indexOf(Const.CR));
-        message = message.substring(0, message.lastIndexOf(Const.CR));
-      }
-      ShowMessageDialog msgDialog =
-          new ShowMessageDialog(
-              shell, SWT.ICON_INFORMATION | SWT.OK, title, message, message.length() > 300);
-      msgDialog.setType(
-          success
-              ? Const.SHOW_MESSAGE_DIALOG_DB_TEST_SUCCESS
-              : Const.SHOW_MESSAGE_DIALOG_DB_TEST_DEFAULT);
-      msgDialog.open();
-    } else {
-      String message = "";
-      for (int i = 0; i < remarks.length; i++) {
-        message += "    * " + remarks[i] + Const.CR;
-      }
+  public static void testConnection(Shell shell, IVariables variables, DatabaseMeta databaseMeta) {
+    testConnection(shell, variables, databaseMeta, false);
+  }
 
-      MessageBox mb = new MessageBox(shell, SWT.OK | SWT.ICON_ERROR);
-      mb.setText(BaseMessages.getString(PKG, "DatabaseDialog.ErrorParameters2.title"));
+  /**
+   * Test the database connection with option to hide sensitive URL information
+   *
+   * @param shell The shell for the dialog
+   * @param variables The variables to use
+   * @param databaseMeta The database metadata
+   * @param hideUrl Whether to hide URL information from the test results
+   */
+  public static void testConnection(
+      Shell shell, IVariables variables, DatabaseMeta databaseMeta, boolean hideUrl) {
+    if (databaseMeta.isTestable()) {
+      String[] remarks = databaseMeta.checkParameters();
+      if (remarks.length == 0) {
+        // Get a "test" report from this database
+        DatabaseTestResults databaseTestResults = databaseMeta.testConnectionSuccess(variables);
+        String message = databaseTestResults.getMessage();
+
+        // Hide URL information if requested
+        if (hideUrl && message != null) {
+          message = hideUrlInMessage(message, databaseMeta, variables);
+        }
+        boolean success = databaseTestResults.isSuccess();
+        String title =
+            success
+                ? BaseMessages.getString(PKG, "DatabaseDialog.DatabaseConnectionTestSuccess.title")
+                : BaseMessages.getString(PKG, "DatabaseDialog.DatabaseConnectionTest.title");
+        if (success && message.contains(Const.CR)) {
+          message =
+              message.substring(0, message.indexOf(Const.CR))
+                  + Const.CR
+                  + message.substring(message.indexOf(Const.CR));
+          message = message.substring(0, message.lastIndexOf(Const.CR));
+        }
+        ShowMessageDialog msgDialog =
+            new ShowMessageDialog(
+                shell,
+                (success ? SWT.ICON_INFORMATION : SWT.ICON_ERROR) | SWT.OK | SWT.APPLICATION_MODAL,
+                title,
+                message,
+                message.length() > 300);
+        msgDialog.open();
+      } else {
+        String message = "";
+        for (String remark : remarks) {
+          message += "    * " + remark + Const.CR;
+        }
+
+        MessageBox mb = new MessageBox(shell, SWT.OK | SWT.ICON_ERROR | SWT.APPLICATION_MODAL);
+        mb.setText(BaseMessages.getString(PKG, "DatabaseDialog.ErrorParameters2.title"));
+        mb.setMessage(
+            BaseMessages.getString(PKG, "DatabaseDialog.ErrorParameters2.description", message));
+        mb.open();
+      }
+    } else {
+      String message = databaseMeta.getPluginName();
+      MessageBox mb = new MessageBox(shell, SWT.OK | SWT.ICON_ERROR | SWT.APPLICATION_MODAL);
+      mb.setText(BaseMessages.getString(PKG, "DatabaseDialog.Testing.Disabled.title"));
       mb.setMessage(
-          BaseMessages.getString(PKG, "DatabaseDialog.ErrorParameters2.description", message));
+          BaseMessages.getString(PKG, "DatabaseDialog.Testing.Disabled.description", message));
       mb.open();
     }
+  }
+
+  /**
+   * Helper method to hide URL information from connection test messages
+   *
+   * @param message The original message
+   * @param databaseMeta The database metadata
+   * @param variables The variables
+   * @return The message with URL information hidden
+   */
+  private static String hideUrlInMessage(
+      String message, DatabaseMeta databaseMeta, IVariables variables) {
+    if (message == null) {
+      return message;
+    }
+
+    try {
+      // Get the actual URL to replace it
+      String url = databaseMeta.getURL(variables);
+      if (url != null && !url.isEmpty()) {
+        // Replace the full URL with a masked version
+        String maskedUrl = BaseMessages.getString(PKG, "DatabaseDialog.Url.Hidden");
+        message = message.replace(url, maskedUrl);
+      }
+
+      // Also hide any manual URL if present
+      String manualUrl = databaseMeta.getManualUrl();
+      if (manualUrl != null && !manualUrl.isEmpty()) {
+        String resolvedManualUrl = variables.resolve(manualUrl);
+        message =
+            message.replace(
+                resolvedManualUrl, BaseMessages.getString(PKG, "DatabaseDialog.Url.Hidden"));
+        message =
+            message.replace(manualUrl, BaseMessages.getString(PKG, "DatabaseDialog.Url.Hidden"));
+      }
+
+    } catch (Exception e) {
+      // If there's any issue getting the URL, just return the original message
+      // We don't want to break the test connection functionality
+    }
+
+    return message;
   }
 
   private String[] getConnectionTypes() {
@@ -949,6 +1468,11 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
 
   @Override
   public Button[] createButtonsForButtonBar(Composite parent) {
+    Button wGenerateVariables = new Button(parent, SWT.PUSH);
+    wGenerateVariables.setText(
+        BaseMessages.getString(PKG, "DatabaseDialog.button.GenerateVariables"));
+    wGenerateVariables.addListener(SWT.Selection, e -> generateVariables());
+
     Button wExplore = new Button(parent, SWT.PUSH);
     wExplore.setText(BaseMessages.getString(PKG, "DatabaseDialog.button.Explore"));
     wExplore.addListener(SWT.Selection, e -> explore());
@@ -957,7 +1481,206 @@ public class DatabaseMetaEditor extends MetadataEditor<DatabaseMeta> {
     wTest.setText(BaseMessages.getString(PKG, "System.Button.Test"));
     wTest.addListener(SWT.Selection, e -> test());
 
-    return new Button[] {wExplore, wTest};
+    return new Button[] {wGenerateVariables, wExplore, wTest};
+  }
+
+  /**
+   * Propose connection-scoped environment variables (for example {@code EDW_HOSTNAME}), optionally
+   * write them to a described-variables JSON config file for DTAP environments, and replace the
+   * editor fields with {@code ${…}} expressions.
+   */
+  private void generateVariables() {
+    String connectionName = wName.getText();
+    if (StringUtils.isBlank(connectionName)) {
+      MessageBox box = new MessageBox(getShell(), SWT.OK | SWT.ICON_ERROR);
+      box.setText(
+          BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.NameRequired.Title"));
+      box.setMessage(
+          BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.NameRequired.Message"));
+      box.open();
+      return;
+    }
+
+    DatabaseMeta meta = getMetadata();
+    getWidgetsContent(meta);
+
+    boolean includeUsername =
+        wUsername != null && !excludedElementIds.contains(BaseDatabaseMeta.ELEMENT_ID_USERNAME);
+    boolean includePassword =
+        wPassword != null && !excludedElementIds.contains(BaseDatabaseMeta.ELEMENT_ID_PASSWORD);
+
+    Map<String, String> descriptions = new LinkedHashMap<>();
+    descriptions.put(
+        DatabaseConnectionVariablesHelper.SUFFIX_HOSTNAME,
+        BaseMessages.getString(
+            PKG, "DatabaseDialog.GenerateVariables.Description.Hostname", connectionName));
+    descriptions.put(
+        DatabaseConnectionVariablesHelper.SUFFIX_PORT,
+        BaseMessages.getString(
+            PKG, "DatabaseDialog.GenerateVariables.Description.Port", connectionName));
+    descriptions.put(
+        DatabaseConnectionVariablesHelper.SUFFIX_DATABASE,
+        BaseMessages.getString(
+            PKG, "DatabaseDialog.GenerateVariables.Description.Database", connectionName));
+    descriptions.put(
+        DatabaseConnectionVariablesHelper.SUFFIX_USERNAME,
+        BaseMessages.getString(
+            PKG, "DatabaseDialog.GenerateVariables.Description.Username", connectionName));
+    descriptions.put(
+        DatabaseConnectionVariablesHelper.SUFFIX_PASSWORD,
+        BaseMessages.getString(
+            PKG, "DatabaseDialog.GenerateVariables.Description.Password", connectionName));
+    descriptions.put(
+        DatabaseConnectionVariablesHelper.SUFFIX_URL,
+        BaseMessages.getString(
+            PKG, "DatabaseDialog.GenerateVariables.Description.Url", connectionName));
+
+    List<DescribedVariable> proposed =
+        DatabaseConnectionVariablesHelper.buildProposedVariables(
+            connectionName,
+            meta.getHostname(),
+            meta.getPort(),
+            meta.getDatabaseName(),
+            meta.getUsername(),
+            meta.getPassword(),
+            meta.getManualUrl(),
+            includeUsername,
+            includePassword,
+            descriptions);
+
+    if (proposed.isEmpty()) {
+      MessageBox box = new MessageBox(getShell(), SWT.OK | SWT.ICON_ERROR);
+      box.setText(
+          BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.NameRequired.Title"));
+      box.setMessage(
+          BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.NameRequired.Message"));
+      box.open();
+      return;
+    }
+
+    HopDescribedVariablesDialog variablesDialog =
+        new HopDescribedVariablesDialog(
+            getShell(),
+            BaseMessages.getString(
+                PKG, "DatabaseDialog.GenerateVariables.DialogMessage", connectionName),
+            proposed,
+            null);
+    List<DescribedVariable> confirmed = variablesDialog.open();
+    if (confirmed == null) {
+      return;
+    }
+
+    // Optional: create or update a described-variables JSON file for DTAP / deployment use.
+    // Values may be left empty in the dialog to produce a VCS template; environment-specific
+    // copies are typically deployed per stage and not auto-registered on a lifecycle environment.
+    MessageBox createConfigBox = new MessageBox(getShell(), SWT.YES | SWT.NO | SWT.ICON_QUESTION);
+    createConfigBox.setText(
+        BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.CreateConfig.Title"));
+    createConfigBox.setMessage(
+        BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.CreateConfig.Message"));
+    if (createConfigBox.open() == SWT.YES) {
+      saveVariablesToConfigFile(confirmed, connectionName);
+    }
+
+    applyVariableExpressionsToEditor(meta, confirmed);
+    setWidgetsContent();
+    setChanged();
+    MetadataPerspective.getInstance().updateEditor(this);
+  }
+
+  private void saveVariablesToConfigFile(List<DescribedVariable> variables, String connectionName) {
+    try {
+      String prefix =
+          DatabaseConnectionVariablesHelper.sanitizeConnectionNamePrefix(connectionName);
+      String defaultName = DatabaseConnectionVariablesHelper.defaultConfigFilename(prefix);
+
+      FileObject startFile;
+      String projectHome = manager.getVariables().resolve(Const.VAR_PROJECT_HOME);
+      if (StringUtils.isNotEmpty(projectHome)
+          && !Const.VAR_PROJECT_HOME.equals(projectHome)
+          && HopVfs.fileExists(projectHome)) {
+        startFile = HopVfs.getFileObject(projectHome + Const.FILE_SEPARATOR + defaultName);
+      } else {
+        startFile = HopVfs.getFileObject(defaultName);
+      }
+
+      String configFilename =
+          BaseDialog.presentFileDialog(
+              true,
+              getShell(),
+              null,
+              manager.getVariables(),
+              startFile,
+              new String[] {"*.json", "*"},
+              new String[] {
+                BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.FileFilter.Json"),
+                BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.FileFilter.All")
+              },
+              true);
+      if (StringUtils.isEmpty(configFilename)) {
+        return;
+      }
+
+      // Resolve variables (e.g. ${PROJECT_HOME}) before VFS read/write
+      String realConfigFilename = manager.getVariables().resolve(configFilename);
+
+      DescribedVariablesConfigFile configFile =
+          new DescribedVariablesConfigFile(realConfigFilename);
+      if (HopVfs.fileExists(realConfigFilename)) {
+        configFile.readFromFile();
+      }
+      for (DescribedVariable variable : variables) {
+        if (variable != null && StringUtils.isNotBlank(variable.getName())) {
+          configFile.setDescribedVariable(variable);
+        }
+      }
+      configFile.saveToFile();
+
+      MessageBox done = new MessageBox(getShell(), SWT.OK | SWT.ICON_INFORMATION);
+      done.setText(
+          BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.ConfigSaved.Title"));
+      done.setMessage(
+          BaseMessages.getString(
+              PKG, "DatabaseDialog.GenerateVariables.ConfigSaved.Message", realConfigFilename));
+      done.open();
+    } catch (Exception e) {
+      new ErrorDialog(
+          getShell(),
+          BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.ConfigError.Title"),
+          BaseMessages.getString(PKG, "DatabaseDialog.GenerateVariables.ConfigError.Message"),
+          e);
+    }
+  }
+
+  private void applyVariableExpressionsToEditor(
+      DatabaseMeta meta, List<DescribedVariable> variables) {
+    Map<String, String> namesBySuffix =
+        DatabaseConnectionVariablesHelper.findVariableNamesBySuffix(variables);
+
+    String hostnameVar = namesBySuffix.get(DatabaseConnectionVariablesHelper.SUFFIX_HOSTNAME);
+    if (hostnameVar != null) {
+      meta.setHostname(DatabaseConnectionVariablesHelper.expressionFor(hostnameVar));
+    }
+    String portVar = namesBySuffix.get(DatabaseConnectionVariablesHelper.SUFFIX_PORT);
+    if (portVar != null) {
+      meta.setPort(DatabaseConnectionVariablesHelper.expressionFor(portVar));
+    }
+    String databaseVar = namesBySuffix.get(DatabaseConnectionVariablesHelper.SUFFIX_DATABASE);
+    if (databaseVar != null) {
+      meta.setDBName(DatabaseConnectionVariablesHelper.expressionFor(databaseVar));
+    }
+    String usernameVar = namesBySuffix.get(DatabaseConnectionVariablesHelper.SUFFIX_USERNAME);
+    if (usernameVar != null) {
+      meta.setUsername(DatabaseConnectionVariablesHelper.expressionFor(usernameVar));
+    }
+    String passwordVar = namesBySuffix.get(DatabaseConnectionVariablesHelper.SUFFIX_PASSWORD);
+    if (passwordVar != null) {
+      meta.setPassword(DatabaseConnectionVariablesHelper.expressionFor(passwordVar));
+    }
+    String urlVar = namesBySuffix.get(DatabaseConnectionVariablesHelper.SUFFIX_URL);
+    if (urlVar != null) {
+      meta.setManualUrl(DatabaseConnectionVariablesHelper.expressionFor(urlVar));
+    }
   }
 
   @Override

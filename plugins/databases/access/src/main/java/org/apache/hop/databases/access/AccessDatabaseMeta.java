@@ -17,11 +17,14 @@
 
 package org.apache.hop.databases.access;
 
+import java.util.List;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 
@@ -34,6 +37,13 @@ import org.apache.hop.core.row.IValueMeta;
     classLoaderGroup = "access-db")
 @GuiPlugin(id = "GUI-MSAccessDatabaseMeta")
 public class AccessDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  /** Access limits rows with TOP, between SELECT and the column list. */
+  @Override
+  public String getLimitClausePrefix(int nrRows) {
+    return " TOP " + nrRows;
+  }
+
   @Override
   public int[] getAccessTypeList() {
     return new int[] {DatabaseMeta.TYPE_ACCESS_NATIVE};
@@ -42,6 +52,20 @@ public class AccessDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   @Override
   public String getDriverClass() {
     return "net.ucanaccess.jdbc.UcanaccessDriver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("io.github.spannm:ucanaccess")
+        .defaultVersion("5.1.5")
+        .licenseCategory("A")
+        .licenseName("Apache-2.0")
+        .licenseUrl("https://github.com/spannm/ucanaccess/blob/main/LICENSE")
+        .vendor("UCanAccess (spannm fork)")
+        .vendorUrl("https://github.com/spannm/ucanaccess")
+        .excludes(List.of("org.apache.poi:poi"))
+        .build();
   }
 
   @Override
@@ -57,6 +81,8 @@ public class AccessDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   @Override
   public void addDefaultOptions() {
     addExtraOption(getPluginId(), "newDatabaseVersion", "V2010");
+    setSupportsBooleanDataType(true);
+    setSupportsTimestampDataType(true);
   }
 
   @Override
@@ -95,7 +121,7 @@ public class AccessDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   @Override
@@ -106,7 +132,8 @@ public class AccessDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
         + " ALTER COLUMN "
         + v.getName()
         + " SET "
-        + getFieldDefinition(v, tk, pk, useAutoinc, false, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, false, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -300,11 +327,6 @@ public class AccessDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   @Override
   public boolean isSupportsSequences() {
     return false;
-  }
-
-  @Override
-  public boolean isSupportsBooleanDataType() {
-    return true;
   }
 
   @Override

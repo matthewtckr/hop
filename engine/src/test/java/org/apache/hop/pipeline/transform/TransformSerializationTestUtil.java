@@ -18,39 +18,38 @@
 
 package org.apache.hop.pipeline.transform;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.apache.hop.core.xml.XmlHandler;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.metadata.serializer.xml.XmlMetadataUtil;
-import org.junit.Assert;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 
 public class TransformSerializationTestUtil {
-  public static final <T extends ITransformMeta> T testSerialization(
-      String filename, Class<T> clazz) throws Exception {
+  public static <T extends ITransformMeta> T testSerialization(String filename, Class<T> clazz)
+      throws Exception {
     return testSerialization(filename, clazz, TransformMeta.XML_TAG, new MemoryMetadataProvider());
   }
 
-  public static final <T extends ITransformMeta> T testSerialization(
+  public static <T extends ITransformMeta> T testSerialization(
       String filename, Class<T> clazz, IHopMetadataProvider metadataProvider) throws Exception {
     return testSerialization(filename, clazz, TransformMeta.XML_TAG, metadataProvider);
   }
 
-  public static final <T extends ITransformMeta> T testSerialization(
+  public static <T extends ITransformMeta> T testSerialization(
       String filename, Class<T> clazz, String xmlTag, IHopMetadataProvider metadataProvider)
       throws Exception {
     Document document = XmlHandler.loadXmlFile(clazz.getResourceAsStream(filename));
     Node node = XmlHandler.getSubNode(document, xmlTag);
-    T meta = clazz.getConstructor().newInstance();
-    XmlMetadataUtil.deSerializeFromXml(null, node, clazz, meta, metadataProvider);
+    T meta = XmlMetadataUtil.deSerializeFromXml(node, clazz, metadataProvider);
     String xml = XmlHandler.openTag(xmlTag) + meta.getXml() + XmlHandler.closeTag(xmlTag);
 
     Document copyDocument = XmlHandler.loadXmlString(xml);
     Node copyNode = XmlHandler.getSubNode(copyDocument, xmlTag);
-    T copy = clazz.getConstructor().newInstance();
-    XmlMetadataUtil.deSerializeFromXml(null, copyNode, clazz, copy, metadataProvider);
-    Assert.assertEquals(meta.getXml(), copy.getXml());
+    T copy = XmlMetadataUtil.deSerializeFromXml(copyNode, clazz, metadataProvider);
+    assertEquals(meta.getXml(), copy.getXml());
 
     return meta;
   }

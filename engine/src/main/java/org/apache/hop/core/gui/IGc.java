@@ -49,7 +49,9 @@ public interface IGc {
   enum EFont {
     NOTE,
     GRAPH,
+    GRAPH_BOLD,
     SMALL,
+    TINY,
   }
 
   enum ELineStyle {
@@ -63,7 +65,6 @@ public interface IGc {
   enum EImage {
     LOCK,
     EDIT,
-    CONTEXT_MENU,
     TRUE,
     TRUE_DISABLED,
     FALSE,
@@ -78,7 +79,6 @@ public interface IGc {
     TARGET_DISABLED,
     INPUT,
     OUTPUT,
-    ARROW,
     COPY_ROWS,
     COPY_ROWS_DISABLED,
     UNCONDITIONAL,
@@ -103,6 +103,12 @@ public interface IGc {
   void setLineWidth(int width);
 
   void setFont(EFont font);
+
+  /**
+   * Point size of the font currently selected on this graphics context, or {@code -1} if unknown.
+   * Used to match Markdown note body text to {@link EFont#GRAPH} transform/action labels.
+   */
+  int getFontHeight();
 
   Point textExtent(String text);
 
@@ -133,6 +139,12 @@ public interface IGc {
       float magnification,
       double angle)
       throws HopException;
+
+  /**
+   * Draw a file-backed image (PNG/JPEG/GIF/SVG via VFS path) at the given size in the current
+   * transform space. Returns {@code false} if the image could not be loaded or drawn.
+   */
+  boolean drawFileImage(String path, int x, int y, int width, int height);
 
   void drawLine(int x, int y, int x2, int y2);
 

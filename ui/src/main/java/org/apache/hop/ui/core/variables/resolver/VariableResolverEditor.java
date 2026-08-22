@@ -22,8 +22,10 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.hop.core.Const;
+import org.apache.hop.core.Props;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.plugins.IPlugin;
 import org.apache.hop.core.plugins.PluginRegistry;
@@ -35,10 +37,13 @@ import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.ErrorDialog;
 import org.apache.hop.ui.core.gui.GuiCompositeWidgets;
 import org.apache.hop.ui.core.gui.GuiCompositeWidgetsAdapter;
+import org.apache.hop.ui.core.gui.GuiResource;
+import org.apache.hop.ui.core.gui.IGuiPluginCompositeWidgetsListener;
 import org.apache.hop.ui.core.metadata.MetadataEditor;
 import org.apache.hop.ui.core.metadata.MetadataManager;
 import org.apache.hop.ui.hopgui.HopGui;
 import org.apache.hop.ui.hopgui.perspective.metadata.MetadataPerspective;
+import org.apache.hop.ui.util.HelpUtils;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
@@ -49,6 +54,8 @@ import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Listener;
 import org.eclipse.swt.widgets.Text;
+import org.eclipse.swt.widgets.ToolBar;
+import org.eclipse.swt.widgets.ToolItem;
 
 @GuiPlugin(description = "This is the editor for variable resolver metadata")
 
@@ -144,13 +151,26 @@ public class VariableResolverEditor extends MetadataEditor<VariableResolver> {
     fdlConnectionType.left = new FormAttachment(0, 0); // First one in the left top corner
     fdlConnectionType.right = new FormAttachment(middle, -margin);
     wlResolverType.setLayoutData(fdlConnectionType);
+
+    ToolBar wToolBar = new ToolBar(parent, SWT.FLAT | SWT.HORIZONTAL);
+    FormData fdToolBar = new FormData();
+    fdToolBar.right = new FormAttachment(100, 0);
+    fdToolBar.top = new FormAttachment(spacer, margin);
+    wToolBar.setLayoutData(fdToolBar);
+    PropsUi.setLook(wToolBar, Props.WIDGET_STYLE_DEFAULT);
+
+    ToolItem item = new ToolItem(wToolBar, SWT.PUSH);
+    item.setImage(GuiResource.getInstance().getImageHelp());
+    item.setToolTipText(BaseMessages.getString(PKG, "System.Tooltip.Help"));
+    item.addListener(SWT.Selection, e -> onHelpVariableResolverType());
+
     wResolverType = new Combo(parent, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
     wResolverType.setItems(getResolverTypes());
     PropsUi.setLook(wResolverType);
     FormData fdConnectionType = new FormData();
     fdConnectionType.top = new FormAttachment(wlResolverType, 0, SWT.CENTER);
     fdConnectionType.left = new FormAttachment(middle, 0); // To the right of the label
-    fdConnectionType.right = new FormAttachment(100, 0);
+    fdConnectionType.right = new FormAttachment(wToolBar, -margin);
     wResolverType.setLayoutData(fdConnectionType);
     Control lastControl = wResolverType;
 
@@ -161,7 +181,7 @@ public class VariableResolverEditor extends MetadataEditor<VariableResolver> {
     FormData fdResolverSpecificComp = new FormData();
     fdResolverSpecificComp.left = new FormAttachment(0, 0);
     fdResolverSpecificComp.right = new FormAttachment(100, 0);
-    fdResolverSpecificComp.top = new FormAttachment(lastControl, margin);
+    fdResolverSpecificComp.top = new FormAttachment(lastControl, 0);
     fdResolverSpecificComp.bottom = new FormAttachment(100, 0);
     wResolverSpecificComp.setLayoutData(fdResolverSpecificComp);
     PropsUi.setLook(wResolverSpecificComp);
@@ -178,14 +198,7 @@ public class VariableResolverEditor extends MetadataEditor<VariableResolver> {
         null);
 
     // Add listener to detect change
-    guiCompositeWidgets.setWidgetsListener(
-        new GuiCompositeWidgetsAdapter() {
-          @Override
-          public void widgetModified(
-              GuiCompositeWidgets compositeWidgets, Control changedWidget, String widgetId) {
-            setChanged();
-          }
-        });
+    guiCompositeWidgets.setWidgetsListener(createWidgetsListener());
 
     setWidgetsContent();
 
@@ -234,14 +247,7 @@ public class VariableResolverEditor extends MetadataEditor<VariableResolver> {
         wResolverSpecificComp,
         VariableResolver.GUI_PLUGIN_ELEMENT_PARENT_ID,
         null);
-    guiCompositeWidgets.setWidgetsListener(
-        new GuiCompositeWidgetsAdapter() {
-          @Override
-          public void widgetModified(
-              GuiCompositeWidgets compositeWidgets, Control changedWidget, String widgetId) {
-            setChanged();
-          }
-        });
+    guiCompositeWidgets.setWidgetsListener(createWidgetsListener());
 
     // Put the data back
     //
@@ -250,6 +256,50 @@ public class VariableResolverEditor extends MetadataEditor<VariableResolver> {
     getShell().layout(true, true);
 
     busyChangingConnectionType.set(false);
+  }
+
+  /**
+   * The composite has a single listener slot, which this editor needs for its own change tracking.
+   * Resolver plugins that implement {@link IGuiPluginCompositeWidgetsListener} -- to enable, hide
+   * or otherwise adjust their own widgets -- are forwarded to from here; without this their
+   * callbacks would never fire.
+   */
+  private IGuiPluginCompositeWidgetsListener createWidgetsListener() {
+    return new GuiCompositeWidgetsAdapter() {
+      @Override
+      public void widgetsCreated(GuiCompositeWidgets compositeWidgets) {
+        pluginWidgetsListener().ifPresent(listener -> listener.widgetsCreated(compositeWidgets));
+      }
+
+      @Override
+      public void widgetsPopulated(GuiCompositeWidgets compositeWidgets) {
+        pluginWidgetsListener().ifPresent(listener -> listener.widgetsPopulated(compositeWidgets));
+      }
+
+      @Override
+      public void widgetModified(
+          GuiCompositeWidgets compositeWidgets, Control changedWidget, String widgetId) {
+        setChanged();
+        pluginWidgetsListener()
+            .ifPresent(
+                listener -> listener.widgetModified(compositeWidgets, changedWidget, widgetId));
+      }
+
+      @Override
+      public void persistContents(GuiCompositeWidgets compositeWidgets) {
+        pluginWidgetsListener().ifPresent(listener -> listener.persistContents(compositeWidgets));
+      }
+    };
+  }
+
+  private Optional<IGuiPluginCompositeWidgetsListener> pluginWidgetsListener() {
+    VariableResolver resolver = getMetadata();
+    if (resolver == null) {
+      return Optional.empty();
+    }
+    return resolver.getIResolver() instanceof IGuiPluginCompositeWidgetsListener listener
+        ? Optional.of(listener)
+        : Optional.empty();
   }
 
   private void enableFields() {
@@ -294,6 +344,17 @@ public class VariableResolverEditor extends MetadataEditor<VariableResolver> {
     }
     Arrays.sort(types, String.CASE_INSENSITIVE_ORDER);
     return types;
+  }
+
+  private void onHelpVariableResolverType() {
+    PluginRegistry registry = PluginRegistry.getInstance();
+    String name = wResolverType.getText();
+    for (IPlugin plugin : registry.getPlugins(VariableResolverPluginType.class)) {
+      if (plugin.getName().equals(name)) {
+        HelpUtils.openHelp(getShell(), plugin);
+        break;
+      }
+    }
   }
 
   @Override

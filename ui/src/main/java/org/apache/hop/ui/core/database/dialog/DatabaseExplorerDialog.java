@@ -19,7 +19,10 @@ package org.apache.hop.ui.core.database.dialog;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import java.util.Objects;
+import lombok.Getter;
+import lombok.Setter;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.DbCache;
 import org.apache.hop.core.Props;
@@ -41,32 +44,36 @@ import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.ui.core.ConstUi;
 import org.apache.hop.ui.core.PropsUi;
-import org.apache.hop.ui.core.dialog.EnterNumberDialog;
 import org.apache.hop.ui.core.dialog.EnterSelectionDialog;
 import org.apache.hop.ui.core.dialog.ErrorDialog;
 import org.apache.hop.ui.core.dialog.MessageBox;
-import org.apache.hop.ui.core.dialog.PreviewRowsDialog;
+import org.apache.hop.ui.core.dialog.ShowRowsDialog;
 import org.apache.hop.ui.core.dialog.TransformFieldsDialog;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.gui.GuiToolbarWidgets;
+import org.apache.hop.ui.core.gui.IToolbarContainer;
 import org.apache.hop.ui.core.gui.WindowProperty;
+import org.apache.hop.ui.core.widget.HopTree;
 import org.apache.hop.ui.hopgui.HopGui;
+import org.apache.hop.ui.hopgui.ToolbarFacade;
 import org.apache.hop.ui.pipeline.transform.BaseTransformDialog;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.graphics.Point;
+import org.eclipse.swt.graphics.Rectangle;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
 import org.eclipse.swt.layout.FormLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Dialog;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.MenuItem;
 import org.eclipse.swt.widgets.Shell;
-import org.eclipse.swt.widgets.ToolBar;
 import org.eclipse.swt.widgets.Tree;
 import org.eclipse.swt.widgets.TreeItem;
 
@@ -116,20 +123,24 @@ public class DatabaseExplorerDialog extends Dialog {
   private static final String STRING_SYNONYMS =
       BaseMessages.getString(PKG, "DatabaseExplorerDialog.Synonyms.Label");
 
-  private final Shell parent;
+  private final Shell parentShell;
   private Shell shell;
   private Tree wTree;
   private TreeItem tiTree;
 
-  private String tableName;
+  /** Updated on SWT.Expand/Collapse; used to detect native ">" handling vs DPI miss. */
+  private long lastTreeExpandCollapseNanos;
+
+  @Getter @Setter private String tableName;
 
   private final boolean justLook;
-  private String selectedSchema;
-  private String selectedTable;
+  @Getter @Setter private String selectedSchema;
+  @Setter private String selectedTable;
   private final List<DatabaseMeta> databases;
-  private boolean splitSchemaAndTable;
-  private String schemaName;
+  @Getter @Setter private boolean splitSchemaAndTable;
+  @Getter @Setter private String schemaName;
   private Composite buttonsComposite;
+  private Button wOk;
   private Button bPrev;
   private Button bPrevN;
   private Button bCount;
@@ -140,27 +151,27 @@ public class DatabaseExplorerDialog extends Dialog {
   private String activeSchemaTable;
   private Button bTruncate;
 
-  private ToolBar toolBar;
+  private Control toolBar;
 
   public DatabaseExplorerDialog(
-      Shell parent,
+      Shell parentShell,
       int style,
       IVariables variables,
       DatabaseMeta conn,
       List<DatabaseMeta> databases) {
-    this(parent, style, variables, conn, databases, false, true);
+    this(parentShell, style, variables, conn, databases, false, true);
   }
 
   public DatabaseExplorerDialog(
-      Shell parent,
+      Shell parentShell,
       int style,
       IVariables variables,
       DatabaseMeta conn,
       List<DatabaseMeta> databases,
       boolean look,
       boolean splitSchemaAndTable) {
-    super(parent, style);
-    this.parent = parent;
+    super(parentShell, style);
+    this.parentShell = parentShell;
     this.dbMeta = conn;
     this.variables = variables;
     this.databases = databases;
@@ -176,19 +187,16 @@ public class DatabaseExplorerDialog extends Dialog {
     dbcache = DbCache.getInstance();
   }
 
-  public void setSelectedTable(String selectedTable) {
-    this.selectedTable = selectedTable;
-  }
-
   public boolean open() {
     tableName = null;
 
     if (Const.isLinux()) {
       shell =
           new Shell(
-              parent, SWT.APPLICATION_MODAL | SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
+              parentShell,
+              SWT.APPLICATION_MODAL | SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
     } else {
-      shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
+      shell = new Shell(parentShell, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
     }
     PropsUi.setLook(shell);
     shell.setImage(GuiResource.getInstance().getImageDatabase());
@@ -206,10 +214,11 @@ public class DatabaseExplorerDialog extends Dialog {
     // Main buttons at the bottom
     //
     List<Button> buttons = new ArrayList<>();
-    Button wOk = new Button(shell, SWT.PUSH);
+    wOk = new Button(shell, SWT.PUSH);
     wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
     wOk.addListener(SWT.Selection, e -> ok());
     buttons.add(wOk);
+    shell.setDefaultButton(wOk);
 
     Button wRefresh = new Button(shell, SWT.PUSH);
     wRefresh.setText(BaseMessages.getString(PKG, "System.Button.Refresh"));
@@ -226,10 +235,12 @@ public class DatabaseExplorerDialog extends Dialog {
 
     // Add a toolbar
     //
-    toolBar = new ToolBar(shell, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    IToolbarContainer toolBarContainer =
+        ToolbarFacade.createToolbarContainer(shell, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    toolBar = toolBarContainer.getControl();
     GuiToolbarWidgets toolBarWidgets = new GuiToolbarWidgets();
     toolBarWidgets.registerGuiPluginObject(this);
-    toolBarWidgets.createToolbarWidgets(toolBar, GUI_PLUGIN_TOOLBAR_PARENT_ID);
+    toolBarWidgets.createToolbarWidgets(toolBarContainer, GUI_PLUGIN_TOOLBAR_PARENT_ID);
     FormData layoutData = new FormData();
     layoutData.top = new FormAttachment(0, 0);
     layoutData.left = new FormAttachment(0, 0);
@@ -241,32 +252,34 @@ public class DatabaseExplorerDialog extends Dialog {
     addRightButtons();
     refreshButtons(null);
 
-    // Tree
-    wTree = new Tree(shell, SWT.SINGLE | SWT.BORDER /*| (multiple?SWT.CHECK:SWT.NONE)*/);
+    // Tree /*| (multiple?SWT.CHECK:SWT.NONE)*/
+    wTree = new HopTree(shell, SWT.SINGLE | SWT.BORDER);
     PropsUi.setLook(wTree);
     FormData fdTree = new FormData();
-    fdTree.left = new FormAttachment(0, 0); // To the right of the label
+    // To the right of the label
+    fdTree.left = new FormAttachment(0, 0);
     fdTree.top = new FormAttachment(toolBar, margin);
     fdTree.right = new FormAttachment(buttonsComposite, -margin);
     fdTree.bottom = new FormAttachment(wOk, -2 * margin);
     wTree.setLayoutData(fdTree);
 
     if (!getData()) {
+      if (shell != null && !shell.isDisposed()) {
+        shell.dispose();
+      }
       return false;
     }
 
     wTree.addListener(SWT.Selection, e -> refreshButtons(getSchemaTable()));
     wTree.addListener(SWT.DefaultSelection, this::openSchema);
-    wTree.addListener(
-        SWT.MouseDown,
-        e -> {
-          if (e.button == 3) // right click!
-          {
-            setTreeMenu();
-          }
-        });
+    wTree.addListener(SWT.Expand, e -> lastTreeExpandCollapseNanos = System.nanoTime());
+    wTree.addListener(SWT.Collapse, e -> lastTreeExpandCollapseNanos = System.nanoTime());
+    wTree.addListener(SWT.MouseDown, this::handleTreeMouseDown);
     shell.addListener(SWT.Close, e -> cancel());
 
+    // Prevent resizing below the complete control layout (notably right-side action buttons).
+    Point minSize = shell.computeSize(SWT.DEFAULT, SWT.DEFAULT);
+    shell.setMinimumSize(minSize);
     BaseTransformDialog.setSize(shell);
 
     shell.open();
@@ -307,7 +320,7 @@ public class DatabaseExplorerDialog extends Dialog {
         new SelectionAdapter() {
           @Override
           public void widgetSelected(SelectionEvent e) {
-            previewTable(activeSchemaTable, false);
+            previewTable(activeSchemaTable);
           }
         });
     FormData prevData = new FormData();
@@ -325,7 +338,7 @@ public class DatabaseExplorerDialog extends Dialog {
         new SelectionAdapter() {
           @Override
           public void widgetSelected(SelectionEvent e) {
-            previewTable(activeSchemaTable, true);
+            previewTable(activeSchemaTable);
           }
         });
     FormData prevNData = new FormData();
@@ -391,7 +404,7 @@ public class DatabaseExplorerDialog extends Dialog {
     bDDL2 = new Button(buttonsComposite, SWT.PUSH);
     bDDL2.setText(
         BaseMessages.getString(PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_GEN_DDLOTHER_CONN));
-    bDDL2.setEnabled(activeSchemaTable != null);
+    bDDL2.setEnabled(activeSchemaTable != null && databases != null);
     bDDL2.addSelectionListener(
         new SelectionAdapter() {
           @Override
@@ -399,7 +412,6 @@ public class DatabaseExplorerDialog extends Dialog {
             getDDLForOther(activeSchemaTable);
           }
         });
-    bDDL2.setEnabled(databases != null);
     FormData ddl2Data = new FormData();
     ddl2Data.left = new FormAttachment(0, 0);
     ddl2Data.right = new FormAttachment(100, 0);
@@ -439,12 +451,14 @@ public class DatabaseExplorerDialog extends Dialog {
     FormData truncateData = new FormData();
     truncateData.left = new FormAttachment(0, 0);
     truncateData.right = new FormAttachment(100, 0);
-    truncateData.top = new FormAttachment(bSql, PropsUi.getMargin() * 7);
+    truncateData.top = new FormAttachment(bSql, PropsUi.getMargin());
     bTruncate.setLayoutData(truncateData);
 
     FormData fdComposite = new FormData();
     fdComposite.right = new FormAttachment(100, 0);
-    fdComposite.top = new FormAttachment(0, toolBar.getBounds().height);
+    // Attach to the toolbar control (not a pixel snapshot of its height at creation time).
+    fdComposite.top = new FormAttachment(toolBar, 0);
+    fdComposite.bottom = new FormAttachment(wOk, -2 * PropsUi.getMargin());
     buttonsComposite.setLayoutData(fdComposite);
   }
 
@@ -478,208 +492,240 @@ public class DatabaseExplorerDialog extends Dialog {
   }
 
   private void refreshButtons(String table) {
+    // Avoid setText/layout while expanding folders: Windows DPI often misaligns the native
+    // expander hit target, and synchronous label updates during Selection can make clicks feel
+    // dead unless they land in the tiny gap between ">" and the folder icon.
+    boolean tableChanged = !Objects.equals(activeSchemaTable, table);
     activeSchemaTable = table;
-    bPrev.setText(
-        BaseMessages.getString(
-            PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_PREVIEW_100, Const.NVL(table, "?")));
-    bPrev.setEnabled(table != null);
+    boolean hasTable = table != null;
+    boolean canGenerateDdlForOther = hasTable && databases != null;
 
-    bPrevN.setText(
-        BaseMessages.getString(
-            PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_PREVIEW_N, Const.NVL(table, "?")));
-    bPrevN.setEnabled(table != null);
+    if (tableChanged) {
+      bPrev.setText(
+          BaseMessages.getString(
+              PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_PREVIEW_100, Const.NVL(table, "?")));
+      bPrevN.setText(
+          BaseMessages.getString(
+              PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_PREVIEW_N, Const.NVL(table, "?")));
+      bCount.setText(
+          BaseMessages.getString(
+              PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_SHOW_SIZE, Const.NVL(table, "?")));
+      bShow.setText(
+          BaseMessages.getString(
+              PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_SHOW_LAYOUT, Const.NVL(table, "?")));
+      bDDL.setText(BaseMessages.getString(PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_GEN_DDL));
+      bDDL2.setText(
+          BaseMessages.getString(PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_GEN_DDLOTHER_CONN));
+      bSql.setText(
+          BaseMessages.getString(
+              PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_OPEN_SQL, Const.NVL(table, "?")));
+      bTruncate.setText(
+          BaseMessages.getString(
+              PKG, "DatabaseExplorerDialog.Menu.Truncate", Const.NVL(table, "?")));
+    }
 
-    bCount.setText(
-        BaseMessages.getString(
-            PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_SHOW_SIZE, Const.NVL(table, "?")));
-    bCount.setEnabled(table != null);
+    bPrev.setEnabled(hasTable);
+    bPrevN.setEnabled(hasTable);
+    bCount.setEnabled(hasTable);
+    bShow.setEnabled(hasTable);
+    bDDL.setEnabled(hasTable);
+    bDDL2.setEnabled(canGenerateDdlForOther);
+    bSql.setEnabled(hasTable);
+    bTruncate.setEnabled(hasTable);
 
-    bShow.setText(
-        BaseMessages.getString(
-            PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_SHOW_LAYOUT, Const.NVL(table, "?")));
-    bShow.setEnabled(table != null);
-
-    bDDL.setText(BaseMessages.getString(PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_GEN_DDL));
-    bDDL.setEnabled(table != null);
-
-    bDDL2.setText(
-        BaseMessages.getString(PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_GEN_DDLOTHER_CONN));
-    bDDL2.setEnabled(table != null);
-
-    bSql.setText(
-        BaseMessages.getString(
-            PKG, CONST_DATABASE_EXPLORER_DIALOG_MENU_OPEN_SQL, Const.NVL(table, "?")));
-    bSql.setEnabled(table != null);
-
-    bTruncate.setText(
-        BaseMessages.getString(PKG, "DatabaseExplorerDialog.Menu.Truncate", Const.NVL(table, "?")));
-    bTruncate.setEnabled(table != null);
-
-    shell.layout(true, true);
+    if (!tableChanged || shell == null || shell.isDisposed()) {
+      return;
+    }
+    Display display = shell.getDisplay();
+    display.asyncExec(
+        () -> {
+          if (shell == null || shell.isDisposed()) {
+            return;
+          }
+          buttonsComposite.layout(true, true);
+          shell.layout(true, false);
+        });
   }
 
   private boolean getData() {
     GetDatabaseInfoProgressDialog gdipd =
         new GetDatabaseInfoProgressDialog(shell, variables, dbMeta);
     DatabaseMetaInformation dmi = gdipd.open();
-    if (dmi != null) {
-      // Clear the tree top entry
-      if (tiTree != null && !tiTree.isDisposed()) {
-        tiTree.dispose();
-      }
-
-      // New entry in the tree
-      tiTree = new TreeItem(wTree, SWT.NONE);
-      tiTree.setImage(GuiResource.getInstance().getImageDatabase());
-      tiTree.setText(dbMeta == null ? "" : dbMeta.getName());
-
-      // Show the catalogs...
-      Catalog[] catalogs = dmi.getCatalogs();
-      if (catalogs != null) {
-        TreeItem tiCat = new TreeItem(tiTree, SWT.NONE);
-        tiCat.setImage(GuiResource.getInstance().getImageFolder());
-        tiCat.setText(STRING_CATALOG);
-
-        for (int i = 0; i < catalogs.length; i++) {
-          TreeItem newCat = new TreeItem(tiCat, SWT.NONE);
-          newCat.setImage(GuiResource.getInstance().getImageFolder());
-          newCat.setText(catalogs[i].getCatalogName());
-
-          for (int j = 0; j < catalogs[i].getItems().length; j++) {
-            String tableName = catalogs[i].getItems()[j];
-
-            TreeItem ti = new TreeItem(newCat, SWT.NONE);
-            ti.setImage(GuiResource.getInstance().getImageTable());
-            ti.setText(tableName);
-          }
-        }
-      }
-
-      // The schema's
-      Schema[] schemas = dmi.getSchemas();
-      if (schemas != null) {
-        TreeItem tiSch = new TreeItem(tiTree, SWT.NONE);
-        tiSch.setImage(GuiResource.getInstance().getImageFolder());
-        tiSch.setText(STRING_SCHEMAS);
-
-        for (int i = 0; i < schemas.length; i++) {
-          TreeItem newSch = new TreeItem(tiSch, SWT.NONE);
-          newSch.setImage(GuiResource.getInstance().getImageSchema());
-          newSch.setText(schemas[i].getSchemaName());
-
-          for (int j = 0; j < schemas[i].getItems().length; j++) {
-            String tableName = schemas[i].getItems()[j];
-
-            TreeItem ti = new TreeItem(newSch, SWT.NONE);
-            ti.setImage(GuiResource.getInstance().getImageTable());
-            ti.setText(tableName);
-          }
-        }
-      }
-
-      // The tables in general...
-      TreeItem tiTab = null;
-      String[] tabnames = dmi.getTables();
-      if (tabnames != null) {
-        tiTab = new TreeItem(tiTree, SWT.NONE);
-        tiTab.setImage(GuiResource.getInstance().getImageFolder());
-        tiTab.setText(STRING_TABLES);
-        tiTab.setExpanded(true);
-
-        for (int i = 0; i < tabnames.length; i++) {
-          TreeItem newTab = new TreeItem(tiTab, SWT.NONE);
-          newTab.setImage(GuiResource.getInstance().getImageTable());
-          newTab.setText(tabnames[i]);
-        }
-      }
-
-      // The views...
-      TreeItem tiView = null;
-      String[] views = dmi.getViews();
-      if (views != null) {
-        tiView = new TreeItem(tiTree, SWT.NONE);
-        tiView.setImage(GuiResource.getInstance().getImageFolder());
-        tiView.setText(STRING_VIEWS);
-        for (int i = 0; i < views.length; i++) {
-          TreeItem newView = new TreeItem(tiView, SWT.NONE);
-          newView.setImage(GuiResource.getInstance().getImageView());
-          newView.setText(views[i]);
-        }
-      }
-
-      // The synonyms
-      TreeItem tiSyn = null;
-      String[] syn = dmi.getSynonyms();
-      if (syn != null) {
-        tiSyn = new TreeItem(tiTree, SWT.NONE);
-        tiSyn.setImage(GuiResource.getInstance().getImageFolder());
-        tiSyn.setText(STRING_SYNONYMS);
-        for (int i = 0; i < syn.length; i++) {
-          TreeItem newSyn = new TreeItem(tiSyn, SWT.NONE);
-          newSyn.setImage(GuiResource.getInstance().getImageSynonym());
-          newSyn.setText(syn[i]);
-        }
-      }
-
-      // Make sure the selected table is shown...
-      if (!StringUtils.isEmpty(selectedTable)) {
-        TreeItem ti = null;
-        if (ti == null && tiTab != null) {
-          ti = ConstUi.findTreeItem(tiTab, selectedSchema, selectedTable);
-        }
-        if (ti == null && tiView != null) {
-          ti = ConstUi.findTreeItem(tiView, selectedSchema, selectedTable);
-        }
-        if (ti == null && tiTree != null) {
-          ti = ConstUi.findTreeItem(tiTree, selectedSchema, selectedTable);
-        }
-        if (ti == null && tiSyn != null) {
-          ti = ConstUi.findTreeItem(tiSyn, selectedSchema, selectedTable);
-        }
-
-        if (ti != null) {
-          wTree.setSelection(new TreeItem[] {ti});
-          wTree.showSelection();
-          refreshButtons(
-              dbMeta.getQuotedSchemaTableCombination(variables, selectedSchema, selectedTable));
-        }
-
-        selectedTable = null;
-      }
-
-      tiTree.setExpanded(true);
-    } else {
+    if (dmi == null) {
       return false;
     }
-
+    disposeOldTreeRootIfPresent();
+    createDatabaseRootTreeItem();
+    addCatalogBranches(dmi);
+    addSchemaBranches(dmi);
+    TreeItem tiTab = addTablesBranch(dmi.getTables());
+    TreeItem tiView = addViewsBranch(dmi.getViews());
+    TreeItem tiSyn = addSynonymsBranch(dmi.getSynonyms());
+    selectInitiallySelectedTable(tiTab, tiView, tiSyn);
+    tiTree.setExpanded(true);
     return true;
+  }
+
+  private void disposeOldTreeRootIfPresent() {
+    if (tiTree != null && !tiTree.isDisposed()) {
+      tiTree.dispose();
+    }
+  }
+
+  private void createDatabaseRootTreeItem() {
+    tiTree = new TreeItem(wTree, SWT.NONE);
+    tiTree.setImage(GuiResource.getInstance().getImageDatabase());
+    tiTree.setText(dbMeta == null ? "" : dbMeta.getName());
+  }
+
+  private void addCatalogBranches(DatabaseMetaInformation dmi) {
+    Catalog[] catalogs = dmi.getCatalogs();
+    if (catalogs == null) {
+      return;
+    }
+    TreeItem tiCat = new TreeItem(tiTree, SWT.NONE);
+    tiCat.setImage(GuiResource.getInstance().getImageFolder());
+    tiCat.setText(STRING_CATALOG);
+    for (Catalog catalog : catalogs) {
+      TreeItem newCat = new TreeItem(tiCat, SWT.NONE);
+      newCat.setImage(GuiResource.getInstance().getImageFolder());
+      newCat.setText(catalog.getCatalogName());
+      for (String catalogItemName : catalog.getItems()) {
+        TreeItem ti = new TreeItem(newCat, SWT.NONE);
+        ti.setImage(GuiResource.getInstance().getImageTable());
+        ti.setText(catalogItemName);
+      }
+    }
+  }
+
+  private void addSchemaBranches(DatabaseMetaInformation dmi) {
+    Schema[] schemas = dmi.getSchemas();
+    if (schemas == null) {
+      return;
+    }
+    TreeItem tiSch = new TreeItem(tiTree, SWT.NONE);
+    tiSch.setImage(GuiResource.getInstance().getImageFolder());
+    tiSch.setText(STRING_SCHEMAS);
+    for (Schema schema : schemas) {
+      TreeItem newSch = new TreeItem(tiSch, SWT.NONE);
+      newSch.setImage(GuiResource.getInstance().getImageSchema());
+      newSch.setText(schema.getSchemaName());
+      for (String schemaItemName : schema.getItems()) {
+        TreeItem ti = new TreeItem(newSch, SWT.NONE);
+        ti.setImage(GuiResource.getInstance().getImageTable());
+        ti.setText(schemaItemName);
+      }
+    }
+  }
+
+  private TreeItem addTablesBranch(String[] tabnames) {
+    if (tabnames == null) {
+      return null;
+    }
+    TreeItem tiTab = new TreeItem(tiTree, SWT.NONE);
+    tiTab.setImage(GuiResource.getInstance().getImageFolder());
+    tiTab.setText(STRING_TABLES);
+    for (String tabname : tabnames) {
+      TreeItem newTab = new TreeItem(tiTab, SWT.NONE);
+      newTab.setImage(GuiResource.getInstance().getImageTable());
+      newTab.setText(tabname);
+    }
+    tiTab.setExpanded(true);
+    return tiTab;
+  }
+
+  private TreeItem addViewsBranch(String[] views) {
+    if (views == null) {
+      return null;
+    }
+    TreeItem tiView = new TreeItem(tiTree, SWT.NONE);
+    tiView.setImage(GuiResource.getInstance().getImageFolder());
+    tiView.setText(STRING_VIEWS);
+    for (String view : views) {
+      TreeItem newView = new TreeItem(tiView, SWT.NONE);
+      newView.setImage(GuiResource.getInstance().getImageView());
+      newView.setText(view);
+    }
+    return tiView;
+  }
+
+  private TreeItem addSynonymsBranch(String[] syn) {
+    if (syn == null) {
+      return null;
+    }
+    TreeItem tiSyn = new TreeItem(tiTree, SWT.NONE);
+    tiSyn.setImage(GuiResource.getInstance().getImageFolder());
+    tiSyn.setText(STRING_SYNONYMS);
+    for (String s : syn) {
+      TreeItem newSyn = new TreeItem(tiSyn, SWT.NONE);
+      newSyn.setImage(GuiResource.getInstance().getImageSynonym());
+      newSyn.setText(s);
+    }
+    return tiSyn;
+  }
+
+  private void selectInitiallySelectedTable(TreeItem tiTab, TreeItem tiView, TreeItem tiSyn) {
+    if (StringUtils.isEmpty(selectedTable)) {
+      return;
+    }
+    TreeItem ti = findTreeItemForInitialSelection(tiTab, tiView, tiSyn);
+    if (ti != null) {
+      wTree.setSelection(new TreeItem[] {ti});
+      wTree.showSelection();
+      if (dbMeta != null) {
+        refreshButtons(
+            dbMeta.getQuotedSchemaTableCombination(variables, selectedSchema, selectedTable));
+      }
+    }
+    selectedTable = null;
+  }
+
+  private TreeItem findTreeItemForInitialSelection(
+      TreeItem tiTab, TreeItem tiView, TreeItem tiSyn) {
+    TreeItem ti = null;
+    if (tiTab != null) {
+      ti = ConstUi.findTreeItem(tiTab, selectedSchema, selectedTable);
+    }
+    if (ti == null && tiView != null) {
+      ti = ConstUi.findTreeItem(tiView, selectedSchema, selectedTable);
+    }
+    if (ti == null) {
+      ti = ConstUi.findTreeItem(tiTree, selectedSchema, selectedTable);
+    }
+    if (ti == null && tiSyn != null) {
+      ti = ConstUi.findTreeItem(tiSyn, selectedSchema, selectedTable);
+    }
+    return ti;
   }
 
   private String getSchemaTable() {
     TreeItem[] ti = wTree.getSelection();
-    if (ti.length == 1) {
-      // Get the parent.
-      TreeItem parent = ti[0].getParentItem();
-      if (parent != null) {
-        String schemaName = parent.getText();
-        String tableName = ti[0].getText();
-
-        if (ti[0].getItemCount() == 0) // No children, only the tables themselves...
-        {
-          String tab = null;
-          if (schemaName.equalsIgnoreCase(STRING_TABLES)
-              || schemaName.equalsIgnoreCase(STRING_VIEWS)
-              || schemaName.equalsIgnoreCase(STRING_SYNONYMS)
-              || (schemaName != null && schemaName.isEmpty())) {
-            tab = tableName;
-          } else {
-            tab = dbMeta.getQuotedSchemaTableCombination(variables, schemaName, tableName);
-          }
-          return tab;
-        }
-      }
+    if (ti.length != 1) {
+      return null;
     }
-    return null;
+    TreeItem parentItem = ti[0].getParentItem();
+    if (parentItem == null) {
+      return null;
+    }
+    String parentLabel = parentItem.getText();
+    String itemText = ti[0].getText();
+    if (ti[0].getItemCount() != 0) {
+      return null;
+    }
+    if (isRootTableViewSynonymOrEmptyParent(parentLabel)) {
+      return itemText;
+    }
+    if (dbMeta == null) {
+      return null;
+    }
+    return dbMeta.getQuotedSchemaTableCombination(variables, parentLabel, itemText);
+  }
+
+  private static boolean isRootTableViewSynonymOrEmptyParent(String parentLabel) {
+    return parentLabel.equalsIgnoreCase(STRING_TABLES)
+        || parentLabel.equalsIgnoreCase(STRING_VIEWS)
+        || parentLabel.equalsIgnoreCase(STRING_SYNONYMS)
+        || parentLabel.isEmpty();
   }
 
   public void setTreeMenu() {
@@ -694,7 +740,7 @@ public class DatabaseExplorerDialog extends Dialog {
           new SelectionAdapter() {
             @Override
             public void widgetSelected(SelectionEvent e) {
-              previewTable(table, false);
+              previewTable(table);
             }
           });
       MenuItem miPrevN = new MenuItem(mTree, SWT.PUSH);
@@ -704,7 +750,7 @@ public class DatabaseExplorerDialog extends Dialog {
           new SelectionAdapter() {
             @Override
             public void widgetSelected(SelectionEvent e) {
-              previewTable(table, true);
+              previewTable(table);
             }
           });
       MenuItem miCount = new MenuItem(mTree, SWT.PUSH);
@@ -767,38 +813,48 @@ public class DatabaseExplorerDialog extends Dialog {
     }
   }
 
-  public void previewTable(String tableName, boolean asklimit) {
-    int limit = 100;
-    if (asklimit) {
-      // Ask how many lines we should preview.
-      String shellText = BaseMessages.getString(PKG, "DatabaseExplorerDialog.PreviewTable.Title");
-      String lineText = BaseMessages.getString(PKG, "DatabaseExplorerDialog.PreviewTable.Message");
-      EnterNumberDialog end = new EnterNumberDialog(shell, limit, shellText, lineText);
-      int samples = end.open();
-      if (samples >= 0) {
-        limit = samples;
-      }
+  public void previewTable(String qualifiedTableName) {
+    PreviewTableSettingsDialog settingsDialog =
+        new PreviewTableSettingsDialog(shell, 100, variables, false);
+    PreviewTableSettingsDialog.Settings settings = settingsDialog.open();
+    if (settings == null) {
+      return;
     }
+    int limit = settings.rowLimit;
+    int queryTimeoutSeconds = settings.queryTimeoutSeconds;
 
-    String[] tableNameParts = tableName.split("\\.");
+    String[] tableNameParts = qualifiedTableName.split("\\.");
 
     GetPreviewTableProgressDialog pd = null;
     if (schemaName == null && tableNameParts.length == 2) {
       // Table name contains both schema name and table name concatenated
       pd =
           new GetPreviewTableProgressDialog(
-              shell, variables, dbMeta, tableNameParts[0], tableNameParts[1], limit);
+              shell,
+              variables,
+              dbMeta,
+              tableNameParts[0],
+              tableNameParts[1],
+              limit,
+              queryTimeoutSeconds);
     } else {
-      pd = new GetPreviewTableProgressDialog(shell, variables, dbMeta, null, tableName, limit);
+      pd =
+          new GetPreviewTableProgressDialog(
+              shell, variables, dbMeta, null, qualifiedTableName, limit, queryTimeoutSeconds);
     }
 
     List<Object[]> rows = pd.open();
-    if (rows != null) // otherwise an already shown error...
-    {
+    if (pd.isPreviewSucceeded()) {
       if (!rows.isEmpty()) {
-        PreviewRowsDialog prd =
-            new PreviewRowsDialog(shell, variables, SWT.NONE, tableName, pd.getRowMeta(), rows);
-        prd.open();
+        new ShowRowsDialog(
+                shell,
+                variables,
+                BaseMessages.getString(PKG, "DatabaseExplorerDialog.ShowRows.Title"),
+                BaseMessages.getString(
+                    PKG, "DatabaseExplorerDialog.ShowRows.Message", qualifiedTableName),
+                pd.getRowMeta(),
+                rows)
+            .open();
       } else {
         MessageBox mb = new MessageBox(shell, SWT.ICON_INFORMATION | SWT.OK);
         mb.setMessage(BaseMessages.getString(PKG, "DatabaseExplorerDialog.NoRows.Message"));
@@ -808,28 +864,27 @@ public class DatabaseExplorerDialog extends Dialog {
     }
   }
 
-  public void showTable(String tableName) {
-    String sql = dbMeta.getSqlQueryFields(tableName);
+  public void showTable(String qualifiedTableName) {
+    String sql = dbMeta.getSqlQueryFields(qualifiedTableName);
     IRowMeta result = null;
-    Database db = new Database(HopGui.getInstance().getLoggingObject(), variables, dbMeta);
-    try {
+    try (Database db = new Database(HopGui.getInstance().getLoggingObject(), variables, dbMeta)) {
       db.connect();
       result = db.getQueryFields(sql, false);
     } catch (Exception e) {
       // Do Nothing
-    } finally {
-      db.disconnect();
     }
     if (result != null) {
       TransformFieldsDialog sfd =
-          new TransformFieldsDialog(shell, variables, SWT.NONE, tableName, result);
+          new TransformFieldsDialog(shell, variables, SWT.NONE, qualifiedTableName, result);
       sfd.open();
     }
   }
 
-  public void showCount(String tableName) {
+  public void showCount(String qualifiedTableName) {
     String realTableName =
-        (tableName.contains(".") ? tableName.substring(tableName.indexOf(".") + 1) : tableName);
+        (qualifiedTableName.contains(".")
+            ? qualifiedTableName.substring(qualifiedTableName.indexOf(".") + 1)
+            : qualifiedTableName);
     GetTableSizeProgressDialog pd =
         new GetTableSizeProgressDialog(shell, variables, dbMeta, realTableName);
     Long size = pd.open();
@@ -837,19 +892,23 @@ public class DatabaseExplorerDialog extends Dialog {
       MessageBox mb = new MessageBox(shell, SWT.ICON_INFORMATION | SWT.OK);
       mb.setMessage(
           BaseMessages.getString(
-              PKG, "DatabaseExplorerDialog.TableSize.Message", tableName, size.toString()));
+              PKG,
+              "DatabaseExplorerDialog.TableSize.Message",
+              qualifiedTableName,
+              size.toString()));
       mb.setText(BaseMessages.getString(PKG, "DatabaseExplorerDialog.TableSize.Title"));
       mb.open();
     }
   }
 
-  public void getDDL(String tableName) {
-    Database db = new Database(loggingObject, variables, dbMeta);
-    try {
+  public void getDDL(String qualifiedTableName) {
+    try (Database db = new Database(loggingObject, variables, dbMeta)) {
       db.connect();
-      IRowMeta r = db.getTableFields(tableName);
+      IRowMeta r = db.getTableFields(qualifiedTableName);
       String realTableName =
-          (tableName.contains(".") ? tableName.substring(tableName.indexOf(".") + 1) : tableName);
+          (qualifiedTableName.contains(".")
+              ? qualifiedTableName.substring(qualifiedTableName.indexOf(".") + 1)
+              : qualifiedTableName);
 
       String sql = db.getCreateTableStatement(realTableName, r, null, false, null, true);
       SqlEditor se = new SqlEditor(shell, SWT.NONE, variables, dbMeta, dbcache, sql);
@@ -860,28 +919,27 @@ public class DatabaseExplorerDialog extends Dialog {
           BaseMessages.getString(PKG, "Dialog.Error.Header"),
           BaseMessages.getString(PKG, "DatabaseExplorerDialog.Error.RetrieveLayout"),
           dbe);
-    } finally {
-      db.disconnect();
     }
   }
 
-  public void getDDLForOther(String tableName) {
+  public void getDDLForOther(String qualifiedTableName) {
 
     if (databases != null) {
-      Database database = new Database(loggingObject, variables, dbMeta);
-      try {
+      try (Database database = new Database(loggingObject, variables, dbMeta)) {
         database.connect();
 
         String realTableName =
-            (tableName.contains(".") ? tableName.substring(tableName.indexOf(".") + 1) : tableName);
+            (qualifiedTableName.contains(".")
+                ? qualifiedTableName.substring(qualifiedTableName.indexOf(".") + 1)
+                : qualifiedTableName);
         IRowMeta rowMeta = database.getTableFields(realTableName);
 
         // Now select the other connection...
 
         // Only take non-SAP ERP connections....
         List<DatabaseMeta> databaseMetaList = new ArrayList<>();
-        for (int i = 0; i < databases.size(); i++) {
-          databaseMetaList.add(databases.get(i));
+        for (DatabaseMeta databaseMeta : databases) {
+          databaseMetaList.add(databaseMeta);
         }
 
         String[] connectionNames = new String[databaseMetaList.size()];
@@ -898,12 +956,14 @@ public class DatabaseExplorerDialog extends Dialog {
         String target = enterSelectionDialog.open();
         if (target != null) {
           DatabaseMeta targetDatabaseMeta = DatabaseMeta.findDatabase(databaseMetaList, target);
-          Database targetDatabase = new Database(loggingObject, variables, targetDatabaseMeta);
-
-          String sql =
-              targetDatabase.getCreateTableStatement(tableName, rowMeta, null, false, null, true);
-          SqlEditor sqlEditor = new SqlEditor(shell, SWT.NONE, variables, dbMeta, dbcache, sql);
-          sqlEditor.open();
+          try (Database targetDatabase =
+              new Database(loggingObject, variables, targetDatabaseMeta)) {
+            String sql =
+                targetDatabase.getCreateTableStatement(
+                    qualifiedTableName, rowMeta, null, false, null, true);
+            SqlEditor sqlEditor = new SqlEditor(shell, SWT.NONE, variables, dbMeta, dbcache, sql);
+            sqlEditor.open();
+          }
         }
       } catch (HopDatabaseException dbe) {
         new ErrorDialog(
@@ -911,8 +971,6 @@ public class DatabaseExplorerDialog extends Dialog {
             BaseMessages.getString(PKG, "Dialog.Error.Header"),
             BaseMessages.getString(PKG, "DatabaseExplorerDialog.Error.GenDDL"),
             dbe);
-      } finally {
-        database.disconnect();
       }
     } else {
       MessageBox mb = new MessageBox(shell, SWT.NONE | SWT.ICON_INFORMATION);
@@ -923,19 +981,26 @@ public class DatabaseExplorerDialog extends Dialog {
     }
   }
 
-  public void getSql(String tableName) {
+  public void getSql(String qualifiedTableName) {
     String realTableName =
-        (tableName.contains(".") ? tableName.substring(tableName.indexOf(".") + 1) : tableName);
+        (qualifiedTableName.contains(".")
+            ? qualifiedTableName.substring(qualifiedTableName.indexOf(".") + 1)
+            : qualifiedTableName);
     SqlEditor sqlEditor =
         new SqlEditor(
             shell, SWT.NONE, variables, dbMeta, dbcache, "SELECT * FROM " + realTableName);
     sqlEditor.open();
   }
 
-  public void getTruncate(String activeSchemaTable) {
+  public void getTruncate(String truncateTableReference) {
     SqlEditor sql =
         new SqlEditor(
-            shell, SWT.NONE, variables, dbMeta, dbcache, "-- TRUNCATE TABLE " + activeSchemaTable);
+            shell,
+            SWT.NONE,
+            variables,
+            dbMeta,
+            dbcache,
+            "-- TRUNCATE TABLE " + truncateTableReference);
     sql.open();
   }
 
@@ -949,42 +1014,70 @@ public class DatabaseExplorerDialog extends Dialog {
       dispose();
       return;
     }
-    TreeItem[] ti = wTree.getSelection();
-    if (ti.length == 1) {
-      // Get the parent.
-      String table = ti[0].getText();
-      String[] path = ConstUi.getTreeStrings(ti[0]);
-      if (path.length == 3) {
-        if (STRING_TABLES.equalsIgnoreCase(path[1])
-            || STRING_VIEWS.equalsIgnoreCase(path[1])
-            || STRING_SYNONYMS.equalsIgnoreCase(path[1])) {
-          schemaName = null;
-          tableName = table;
-          String[] st = tableName.split("\\.", 2);
-          if (st.length > 1) { // we have a dot in there and need to separate
-            schemaName = st[0];
-            tableName = st[1];
-          }
-          dispose();
-        }
-      }
-      if (path.length == 4) {
-        if (STRING_SCHEMAS.equals(path[1]) || STRING_CATALOG.equals(path[1])) {
-          if (splitSchemaAndTable) {
-            schemaName = path[2];
-            tableName = path[3];
-          } else {
-            schemaName = null;
-            tableName = dbMeta.getQuotedSchemaTableCombination(variables, path[2], path[3]);
-          }
-          dispose();
-        }
-      }
+    TreeItem[] selection = wTree.getSelection();
+    if (selection.length != 1) {
+      return;
     }
+    TreeItem selected = selection[0];
+    if (completeOkFromThreePartPath(selected)) {
+      return;
+    }
+    completeOkFromFourPartPath(selected);
+  }
+
+  private boolean completeOkFromThreePartPath(TreeItem selected) {
+    String[] path = ConstUi.getTreeStrings(selected);
+    if (path.length != 3 || !isTablesViewsOrSynonymsPathSegment(path[1])) {
+      return false;
+    }
+    applyOkSelectionForFlatTableFolder(selected.getText());
+    dispose();
+    return true;
+  }
+
+  private void applyOkSelectionForFlatTableFolder(String selectedItemText) {
+    schemaName = null;
+    tableName = selectedItemText;
+    String[] st = tableName.split("\\.", 2);
+    if (st.length > 1) {
+      schemaName = st[0];
+      tableName = st[1];
+    }
+  }
+
+  private void completeOkFromFourPartPath(TreeItem selected) {
+    String[] path = ConstUi.getTreeStrings(selected);
+    if (path.length != 4 || !isCatalogOrSchemasPathSegment(path[1])) {
+      return;
+    }
+    if (splitSchemaAndTable) {
+      schemaName = path[2];
+      tableName = path[3];
+    } else {
+      if (dbMeta == null) {
+        return;
+      }
+      schemaName = null;
+      tableName = dbMeta.getQuotedSchemaTableCombination(variables, path[2], path[3]);
+    }
+    dispose();
+  }
+
+  private static boolean isTablesViewsOrSynonymsPathSegment(String pathSegment) {
+    return STRING_TABLES.equalsIgnoreCase(pathSegment)
+        || STRING_VIEWS.equalsIgnoreCase(pathSegment)
+        || STRING_SYNONYMS.equalsIgnoreCase(pathSegment);
+  }
+
+  private static boolean isCatalogOrSchemasPathSegment(String pathSegment) {
+    return STRING_SCHEMAS.equals(pathSegment) || STRING_CATALOG.equals(pathSegment);
   }
 
   public void openSchema(Event e) {
     TreeItem sel = (TreeItem) e.item;
+    if (sel == null) {
+      return;
+    }
 
     TreeItem up1 = sel.getParentItem();
     if (up1 != null) {
@@ -996,71 +1089,106 @@ public class DatabaseExplorerDialog extends Dialog {
           if (!justLook) {
             ok();
           } else {
-            previewTable(tableName, false);
+            previewTable(tableName);
           }
         }
       }
     }
   }
 
-  /**
-   * @return the schemaName
-   */
-  public String getSchemaName() {
-    return schemaName;
+  private void handleTreeMouseDown(Event e) {
+    if (e.button == 3) {
+      setTreeMenu();
+      return;
+    }
+    if (e.button != 1) {
+      return;
+    }
+
+    TreeItem item = wTree.getItem(new Point(e.x, e.y));
+    if (item == null) {
+      // Expander ">" is often outside getItem()'s hit box; resolve the row by Y.
+      item = findTreeItemAtY(e.y);
+    }
+    if (item == null || item.getItemCount() == 0) {
+      return;
+    }
+
+    Rectangle textBounds = item.getBounds(0);
+    Rectangle imageBounds = item.getImageBounds(0);
+    boolean inGutter = e.x < textBounds.x;
+    boolean onImage =
+        imageBounds != null && !imageBounds.isEmpty() && imageBounds.contains(e.x, e.y);
+    if (!inGutter && !onImage) {
+      return;
+    }
+
+    if (onImage) {
+      // Folder icon is outside the native expander hit target.
+      item.setExpanded(!item.getExpanded());
+      return;
+    }
+
+    // Gutter / ">": native may or may not handle the click (works at 100%, often misses at
+    // high DPI). Wait one display turn; only complement when Expand/Collapse did not fire
+    // around this click — avoids the expand-then-collapse race at 100%.
+    final TreeItem target = item;
+    final boolean expandedBefore = item.getExpanded();
+    final long mouseDownNanos = System.nanoTime();
+    wTree
+        .getDisplay()
+        .asyncExec(
+            () -> {
+              if (target.isDisposed()) {
+                return;
+              }
+              long delta = lastTreeExpandCollapseNanos - mouseDownNanos;
+              // Native handled if Expand/Collapse fired just before or after MouseDown.
+              if (Math.abs(delta) < 100_000_000L) {
+                return;
+              }
+              if (target.getExpanded() != expandedBefore) {
+                return;
+              }
+              target.setExpanded(!expandedBefore);
+            });
   }
 
-  /**
-   * @param schemaName the schemaName to set
-   */
-  public void setSchemaName(String schemaName) {
-    this.schemaName = schemaName;
+  private TreeItem findTreeItemAtY(int y) {
+    for (TreeItem root : wTree.getItems()) {
+      TreeItem found = findTreeItemAtY(root, y);
+      if (found != null) {
+        return found;
+      }
+    }
+    return null;
   }
 
-  /**
-   * @return the tableName
-   */
-  public String getTableName() {
-    return tableName;
+  private static TreeItem findTreeItemAtY(TreeItem item, int y) {
+    Rectangle textBounds = item.getBounds(0);
+    Rectangle imageBounds = item.getImageBounds(0);
+    int top = textBounds.y;
+    int bottom = textBounds.y + textBounds.height;
+    if (imageBounds != null && !imageBounds.isEmpty()) {
+      top = Math.min(top, imageBounds.y);
+      bottom = Math.max(bottom, imageBounds.y + imageBounds.height);
+    }
+    if (y >= top && y < bottom) {
+      return item;
+    }
+    if (item.getExpanded()) {
+      for (TreeItem child : item.getItems()) {
+        TreeItem found = findTreeItemAtY(child, y);
+        if (found != null) {
+          return found;
+        }
+      }
+    }
+    return null;
   }
 
-  /**
-   * @param tableName the tableName to set
-   */
-  public void setTableName(String tableName) {
-    this.tableName = tableName;
-  }
-
-  /**
-   * @return the splitSchemaAndTable
-   */
-  public boolean isSplitSchemaAndTable() {
-    return splitSchemaAndTable;
-  }
-
-  /**
-   * @param splitSchemaAndTable the splitSchemaAndTable to set
-   */
-  public void setSplitSchemaAndTable(boolean splitSchemaAndTable) {
-    this.splitSchemaAndTable = splitSchemaAndTable;
-  }
-
-  /**
-   * @return the selectSchema
-   */
-  public String getSelectedSchema() {
-    return selectedSchema;
-  }
-
-  /**
-   * @param selectSchema the selectSchema to set
-   */
-  public void setSelectedSchema(String selectSchema) {
-    this.selectedSchema = selectSchema;
-  }
-
-  public void setSelectedSchemaAndTable(String schemaName, String tableName) {
-    this.selectedSchema = schemaName;
-    this.selectedTable = tableName;
+  public void setSelectedSchemaAndTable(String schema, String table) {
+    this.selectedSchema = schema;
+    this.selectedTable = table;
   }
 }

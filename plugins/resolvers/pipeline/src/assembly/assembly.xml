@@ -27,16 +27,20 @@
     <files>
         <file>
             <source>${project.basedir}/src/main/resources/version.xml</source>
-            <outputDirectory>plugins/resolvers/pipeline</outputDirectory>
+            <outputDirectory>${hop.plugin.libdir}</outputDirectory>
             <filtered>true</filtered>
         </file>
     </files>
-    <dependencySets>
-        <dependencySet>
-            <includes>
-                <include>org.apache.hop:hop-resolvers-pipeline:jar</include>
-            </includes>
-            <outputDirectory>plugins/resolvers/pipeline</outputDirectory>
-        </dependencySet>
-    </dependencySets>
+
+    <fileSets>
+        <fileSet>
+            <directory>${project.basedir}/src/main/samples</directory>
+            <outputDirectory>config/projects/samples/</outputDirectory>
+        </fileSet>
+    </fileSets>
+
+
+    <componentDescriptors>
+        <componentDescriptor>${maven.multiModuleProjectDirectory}/assemblies/shared/hop-plugin-libs.xml</componentDescriptor>
+    </componentDescriptors>
 </assembly>

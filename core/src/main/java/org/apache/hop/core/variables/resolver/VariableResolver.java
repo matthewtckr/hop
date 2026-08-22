@@ -22,8 +22,8 @@ import lombok.Getter;
 import lombok.Setter;
 import org.apache.hop.metadata.api.HopMetadata;
 import org.apache.hop.metadata.api.HopMetadataBase;
+import org.apache.hop.metadata.api.HopMetadataCategory;
 import org.apache.hop.metadata.api.HopMetadataProperty;
-import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadata;
 
 @HopMetadata(
@@ -31,8 +31,8 @@ import org.apache.hop.metadata.api.IHopMetadata;
     name = "i18n::VariableResolver.name",
     description = "i18n::VariableResolver.Description",
     image = "ui/images/variable.svg",
-    documentationUrl = "/metadata-types/variable-resolver/",
-    hopMetadataPropertyType = HopMetadataPropertyType.RDBMS_CONNECTION)
+    category = HopMetadataCategory.VARIABLES,
+    documentationUrl = "/metadata-types/variable-resolver/")
 @Getter
 @Setter
 public class VariableResolver extends HopMetadataBase implements IHopMetadata {

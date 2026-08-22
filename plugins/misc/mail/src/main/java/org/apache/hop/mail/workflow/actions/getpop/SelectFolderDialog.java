@@ -24,6 +24,7 @@ import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.BaseDialog;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.gui.WindowProperty;
+import org.apache.hop.ui.core.widget.HopTree;
 import org.apache.hop.ui.pipeline.transform.BaseTransformDialog;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.layout.FormAttachment;
@@ -72,7 +73,7 @@ public class SelectFolderDialog extends Dialog {
     shell.setLayout(formLayout);
 
     // Tree
-    wTree = new Tree(shell, SWT.SINGLE | SWT.BORDER);
+    wTree = new HopTree(shell, SWT.SINGLE | SWT.BORDER);
     PropsUi.setLook(wTree);
     // Double click in tree: select the value
     wTree.addListener(SWT.DefaultSelection, e -> ok());
@@ -128,7 +129,7 @@ public class SelectFolderDialog extends Dialog {
       Folder[] f = folder.list();
       for (Folder value : f) {
         tiTree = topfolder ? new TreeItem(wTree, SWT.NONE) : new TreeItem(parentTreeItem, SWT.NONE);
-        tiTree.setImage(guiresource.getImageBol());
+        tiTree.setImage(guiresource.getImageFolder());
         tiTree.setText(value.getName());
         // Search for sub folders
         if ((value.getType() & Folder.HOLDS_FOLDERS) != 0) {

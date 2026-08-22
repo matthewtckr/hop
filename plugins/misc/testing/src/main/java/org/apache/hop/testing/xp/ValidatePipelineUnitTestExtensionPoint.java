@@ -32,9 +32,8 @@ import org.apache.hop.pipeline.engine.IPipelineEngine;
 import org.apache.hop.testing.PipelineUnitTest;
 import org.apache.hop.testing.UnitTestResult;
 import org.apache.hop.testing.util.DataSetConst;
-import org.apache.hop.ui.core.dialog.PreviewRowsDialog;
+import org.apache.hop.ui.core.dialog.ShowRowsDialog;
 import org.apache.hop.ui.hopgui.HopGui;
-import org.eclipse.swt.SWT;
 
 @ExtensionPoint(
     extensionPointId = "PipelineFinish",
@@ -83,7 +82,7 @@ public class ValidatePipelineUnitTestExtensionPoint
       //
       int errors =
           DataSetConst.validateTransformResultAgainstUnitTest(
-              pipeline, unitTest, metadataProvider, results);
+              pipeline, unitTest, metadataProvider, variables, results);
       if (errors == 0) {
         log.logBasic("Unit test '" + unitTest.getName() + "' passed successfully");
       } else {
@@ -130,22 +129,14 @@ public class ValidatePipelineUnitTestExtensionPoint
         .getShell()
         .getDisplay()
         .asyncExec(
-            () -> {
-              PreviewRowsDialog dialog =
-                  new PreviewRowsDialog(
-                      hopGui.getShell(),
-                      pipeline,
-                      SWT.NONE,
-                      "Unit test results",
-                      UnitTestResult.getRowMeta(),
-                      UnitTestResult.getRowData(results));
-              dialog.setDynamic(false);
-              dialog.setProposingToGetMoreRows(false);
-              dialog.setProposingToStop(false);
-              dialog.setTitleMessage(
-                  BaseMessages.getString(PKG, "UnitTestsResult.Dialog.Header"),
-                  BaseMessages.getString(PKG, "UnitTestsResult.Dialog.Message"));
-              dialog.open();
-            });
+            () ->
+                new ShowRowsDialog(
+                        hopGui.getShell(),
+                        pipeline,
+                        BaseMessages.getString(PKG, "UnitTestsResult.Dialog.Header"),
+                        BaseMessages.getString(PKG, "UnitTestsResult.Dialog.Message"),
+                        UnitTestResult.getRowMeta(),
+                        UnitTestResult.getRowData(results))
+                    .open());
   }
 }

@@ -17,8 +17,9 @@
 
 package org.apache.hop.pipeline.transforms.update;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -27,13 +28,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
-import org.apache.commons.lang.builder.EqualsBuilder;
+import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.hop.core.HopEnvironment;
+import org.apache.hop.core.ICheckResult;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.logging.ILoggingObject;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.core.row.RowMeta;
+import org.apache.hop.core.variables.Variables;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
+import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
@@ -46,14 +51,15 @@ import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValid
 import org.apache.hop.pipeline.transforms.loadsave.validator.ListLoadSaveValidator;
 import org.apache.hop.pipeline.transforms.loadsave.validator.ObjectValidator;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.mockito.Mockito;
 
-public class UpdateMetaTest implements IInitializer<ITransformMeta> {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+class UpdateMetaTest implements IInitializer<ITransformMeta> {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
   private TransformMeta transformMeta;
   private Update upd;
@@ -63,8 +69,8 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
   Class<UpdateMeta> testMetaClass = UpdateMeta.class;
   private TransformMockHelper<UpdateMeta, UpdateData> mockHelper;
 
-  @Before
-  public void setUp() throws HopException {
+  @BeforeEach
+  void setUp() throws HopException {
     HopEnvironment.init();
     PluginRegistry.init();
     PipelineMeta pipelineMeta = new PipelineMeta();
@@ -101,7 +107,7 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
             "use_batch");
 
     Map<String, String> getterMap =
-        new HashMap<String, String>() {
+        new HashMap<>() {
           {
             put("connection", "getConnection");
             put("lookup", "getLookupField");
@@ -113,7 +119,7 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
           }
         };
     Map<String, String> setterMap =
-        new HashMap<String, String>() {
+        new HashMap<>() {
           {
             put("connection", "setConnection");
             put("lookup", "setLookupField");
@@ -143,11 +149,11 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
 
     validatorFactory.registerValidator(
         validatorFactory.getName(UpdateLookupField.class),
-        new ObjectValidator<UpdateLookupField>(
+        new ObjectValidator<>(
             validatorFactory,
             UpdateLookupField.class,
             Arrays.asList("schema", "table", "key", "value"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("schema", "getSchemaName");
                 put("table", "getTableName");
@@ -155,7 +161,7 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
                 put("value", "getUpdateFields");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("schema", "setSchemaName");
                 put("table", "setTableName");
@@ -166,15 +172,15 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
 
     validatorFactory.registerValidator(
         validatorFactory.getName(List.class, UpdateLookupField.class),
-        new ListLoadSaveValidator<UpdateLookupField>(new UpdateLookupFieldLoadSaveValidator()));
+        new ListLoadSaveValidator<>(new UpdateLookupFieldLoadSaveValidator()));
 
     validatorFactory.registerValidator(
         validatorFactory.getName(UpdateKeyField.class),
-        new ObjectValidator<UpdateKeyField>(
+        new ObjectValidator<>(
             validatorFactory,
             UpdateKeyField.class,
             Arrays.asList("name", "field", "condition", "name2"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "getKeyStream");
                 put("field", "getKeyLookup");
@@ -182,7 +188,7 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
                 put("name2", "getKeyStream2");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "setKeyStream");
                 put("field", "setKeyLookup");
@@ -193,21 +199,21 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
 
     validatorFactory.registerValidator(
         validatorFactory.getName(List.class, UpdateKeyField.class),
-        new ListLoadSaveValidator<UpdateKeyField>(new UpdateKeyFieldLoadSaveValidator()));
+        new ListLoadSaveValidator<>(new UpdateKeyFieldLoadSaveValidator()));
 
     validatorFactory.registerValidator(
         validatorFactory.getName(UpdateField.class),
-        new ObjectValidator<UpdateField>(
+        new ObjectValidator<>(
             validatorFactory,
             UpdateField.class,
             Arrays.asList("name", "rename"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "getUpdateLookup");
                 put("rename", "getUpdateStream");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "setUpdateLookup");
                 put("rename", "setUpdateStream");
@@ -216,34 +222,68 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
 
     validatorFactory.registerValidator(
         validatorFactory.getName(List.class, UpdateField.class),
-        new ListLoadSaveValidator<UpdateField>(new UpdateFieldLoadSaveValidator()));
+        new ListLoadSaveValidator<>(new UpdateFieldLoadSaveValidator()));
   }
 
-  @After
-  public void cleanUp() {
+  @AfterEach
+  void cleanUp() {
     mockHelper.cleanUp();
   }
 
   @Test
-  public void testCommitCountFixed() {
+  void testCommitCountFixed() {
     umi.setCommitSize("100");
     assertEquals(100, umi.getCommitSize(upd));
   }
 
   @Test
-  public void testCommitCountVar() {
+  void testCommitCountVar() {
     umi.setCommitSize("${max.sz}");
     assertEquals(10, umi.getCommitSize(upd));
   }
 
   @Test
-  public void testCommitCountMissedVar() {
+  void testCommitCountMissedVar() {
     umi.setCommitSize("missed-var");
     try {
       umi.getCommitSize(upd);
       fail();
     } catch (Exception ex) {
     }
+  }
+
+  /**
+   * The lookup keys build the WHERE clause of the UPDATE, so an empty key grid can only produce
+   * invalid SQL - check() has to say so at design time rather than let the database complain at
+   * runtime. See <a href="https://github.com/apache/hop/issues/4772">issue #4772</a>.
+   */
+  @Test
+  void checkReportsMissingKeyFields() {
+    UpdateLookupField lookupField = new UpdateLookupField();
+    lookupField.setTableName("table_name");
+    lookupField.setLookupKeys(new ArrayList<>());
+    lookupField.setUpdateFields(List.of(new UpdateField("name", "name")));
+    umi.setLookupField(lookupField);
+
+    List<ICheckResult> remarks = new ArrayList<>();
+    umi.check(
+        remarks,
+        null,
+        transformMeta,
+        new RowMeta(),
+        new String[] {"previous transform"},
+        new String[0],
+        null,
+        new Variables(),
+        new MemoryMetadataProvider());
+
+    assertTrue(
+        remarks.stream()
+            .anyMatch(
+                r ->
+                    r.getType() == ICheckResult.TYPE_RESULT_ERROR
+                        && r.getText().contains("No key fields are specified")),
+        "check() should flag the empty key grid, got: " + remarks);
   }
 
   // Call the allocate method on the LoadSaveTester meta class
@@ -273,7 +313,7 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
   }
 
   @Test
-  public void testSerialization() throws HopException {
+  void testSerialization() throws HopException {
     loadSaveTester.testSerialization();
   }
 
@@ -286,8 +326,8 @@ public class UpdateMetaTest implements IInitializer<ITransformMeta> {
       return new UpdateLookupField(
           UUID.randomUUID().toString(),
           UUID.randomUUID().toString(),
-          new ArrayList<UpdateKeyField>(),
-          new ArrayList<UpdateField>());
+          new ArrayList<>(),
+          new ArrayList<>());
     }
 
     @Override

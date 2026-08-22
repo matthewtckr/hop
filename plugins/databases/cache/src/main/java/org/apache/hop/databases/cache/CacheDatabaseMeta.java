@@ -22,6 +22,7 @@ import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 
@@ -30,9 +31,16 @@ import org.apache.hop.core.row.IValueMeta;
     type = "CACHE",
     typeDescription = "InterSystems Cache",
     image = "intersystems.svg",
-    documentationUrl = "/database/databases/cache.html")
+    documentationUrl = "/database/databases/cache.html",
+    classLoaderGroup = "cache-db")
 @GuiPlugin(id = "GUI-CacheDatabaseMeta")
 public class CacheDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  /** Cache limits rows with TOP, between SELECT and the column list. */
+  @Override
+  public String getLimitClausePrefix(int nrRows) {
+    return " TOP " + nrRows;
+  }
 
   public static final String CONST_ALTER_TABLE = "ALTER TABLE ";
 
@@ -94,7 +102,7 @@ public class CacheDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return CONST_ALTER_TABLE
         + tableName
         + " ADD COLUMN ( "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false)
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN)
         + " ) ";
   }
 
@@ -132,7 +140,8 @@ public class CacheDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return CONST_ALTER_TABLE
         + tableName
         + " ALTER COLUMN "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -157,37 +166,35 @@ public class CacheDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
         retval += "CHAR(1)";
         break;
       case IValueMeta.TYPE_NUMBER, IValueMeta.TYPE_INTEGER, IValueMeta.TYPE_BIGNUMBER:
-        if (fieldname.equalsIgnoreCase(tk)) { // Technical & primary key : see at bottom
+        // Technical & primary key : see at bottom
+        if (fieldname.equalsIgnoreCase(tk)) {
           retval += "DECIMAL";
         } else {
-          if (type == IValueMeta.TYPE_INTEGER) {
-            // Integer values...
-            if (length > 9) {
-              retval += "DECIMAL(" + length + ")";
-            } else {
-              retval += "INT";
+          switch (type) {
+            case IValueMeta.TYPE_INTEGER -> {
+              // Integer values...
+              if (length > 9) {
+                retval += "DECIMAL(" + length + ")";
+              } else {
+                retval += "INT";
+              }
             }
-          } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-            // Fixed point value...
-            if (length
-                < 1) { // user configured no value for length. Use 16 digits, which is comparable to
+            case IValueMeta.TYPE_BIGNUMBER -> {
+              // user configured no value for length. Use 16 digits, which is comparable to
               // mantissa 2^53 of IEEE 754 binary64 "double".
-              length = 16;
+              int len = (length < 1) ? 16 : length;
+              // user configured no value for precision. Use 16 digits, which is comparable to IEEE
+              // 754 binary64 "double".
+              int p = (precision < 1) ? 16 : precision;
+              retval += "DECIMAL(" + len + "," + p + ")";
             }
-            if (precision
-                < 1) { // user configured no value for precision. Use 16 digits, which is comparable
-              // to IEEE 754 binary64 "double".
-              precision = 16;
-            }
-            retval += "DECIMAL(" + length + "," + precision + ")";
-          } else {
-            // Floating point value with double precision...
-            retval += "DOUBLE";
+              // Floating point value with double precision...
+            default -> retval += "DOUBLE";
           }
         }
         break;
-      case IValueMeta
-          .TYPE_STRING: // CLOBs are just VARCHAR in the Cache database: can be very large!
+        // CLOBs are just VARCHAR in the Cache database: can be very large!
+      case IValueMeta.TYPE_STRING:
         retval += "VARCHAR";
         if (length > 0) {
           retval += "(" + length + ")";

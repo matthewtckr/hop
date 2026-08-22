@@ -17,6 +17,7 @@
 
 package org.apache.hop.workflow.actions.abort;
 
+import org.apache.hop.core.logging.LogLevel;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
@@ -24,25 +25,15 @@ import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.BaseDialog;
 import org.apache.hop.ui.core.dialog.MessageBox;
 import org.apache.hop.ui.core.widget.TextVar;
-import org.apache.hop.ui.pipeline.transform.BaseTransformDialog;
 import org.apache.hop.ui.workflow.action.ActionDialog;
-import org.apache.hop.ui.workflow.dialog.WorkflowDialog;
 import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.action.IAction;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.ModifyEvent;
-import org.eclipse.swt.events.ModifyListener;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
-import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
-import org.eclipse.swt.layout.FormLayout;
-import org.eclipse.swt.widgets.Button;
-import org.eclipse.swt.widgets.Event;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
-import org.eclipse.swt.widgets.Text;
 
 /** This dialog allows you to edit a Action Abort object. */
 public class ActionAbortDialog extends ActionDialog {
@@ -52,11 +43,9 @@ public class ActionAbortDialog extends ActionDialog {
 
   private boolean changed;
 
-  private Text wName;
-
   private TextVar wMessageAbort;
 
-  private Button wAlwaysLogRows;
+  private Combo wMessageLogLevel;
 
   public ActionAbortDialog(
       Shell parent, ActionAbort action, WorkflowMeta workflowMeta, IVariables variables) {
@@ -69,44 +58,10 @@ public class ActionAbortDialog extends ActionDialog {
 
   @Override
   public IAction open() {
+    createShell(BaseMessages.getString(PKG, "ActionAbortDialog.Title"), action);
+    buildButtonBar().ok(e -> ok()).cancel(e -> cancel()).build();
 
-    shell = new Shell(getParent(), SWT.DIALOG_TRIM | SWT.MIN | SWT.MAX | SWT.RESIZE);
-    shell.setMinimumSize(400, 200);
-    PropsUi.setLook(shell);
-    WorkflowDialog.setShellImage(shell, action);
-
-    ModifyListener lsMod = (ModifyEvent e) -> action.setChanged();
     changed = action.hasChanged();
-
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = PropsUi.getFormMargin();
-    formLayout.marginHeight = PropsUi.getFormMargin();
-    formLayout.spacing = PropsUi.getFormMargin();
-
-    shell.setLayout(formLayout);
-    shell.setText(BaseMessages.getString(PKG, "ActionAbortDialog.Title"));
-
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
-
-    // Filename line
-    Label wlName = new Label(shell, SWT.RIGHT);
-    wlName.setText(BaseMessages.getString(PKG, "System.ActionName.Label"));
-    wlName.setToolTipText(BaseMessages.getString(PKG, "System.ActionName.Tooltip"));
-    PropsUi.setLook(wlName);
-    FormData fdlName = new FormData();
-    fdlName.left = new FormAttachment(0, 0);
-    fdlName.right = new FormAttachment(middle, -margin);
-    fdlName.top = new FormAttachment(0, margin);
-    wlName.setLayoutData(fdlName);
-    wName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    PropsUi.setLook(wName);
-    wName.addModifyListener(lsMod);
-    FormData fdName = new FormData();
-    fdName.left = new FormAttachment(middle, 0);
-    fdName.top = new FormAttachment(0, margin);
-    fdName.right = new FormAttachment(100, 0);
-    wName.setLayoutData(fdName);
 
     // Message line
     Label wlMessageAbort = new Label(shell, SWT.RIGHT);
@@ -115,54 +70,54 @@ public class ActionAbortDialog extends ActionDialog {
     FormData fdlMessageAbort = new FormData();
     fdlMessageAbort.left = new FormAttachment(0, 0);
     fdlMessageAbort.right = new FormAttachment(middle, -margin);
-    fdlMessageAbort.top = new FormAttachment(wName, margin);
+    fdlMessageAbort.top = new FormAttachment(wSpacer, margin);
     wlMessageAbort.setLayoutData(fdlMessageAbort);
 
     wMessageAbort = new TextVar(variables, shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
     PropsUi.setLook(wMessageAbort);
     wMessageAbort.setToolTipText(
         BaseMessages.getString(PKG, "ActionAbortDialog.MessageAbort.Tooltip"));
-    wMessageAbort.addModifyListener(lsMod);
+    wMessageAbort.addModifyListener(e -> action.setChanged());
     FormData fdMessageAbort = new FormData();
     fdMessageAbort.left = new FormAttachment(middle, 0);
-    fdMessageAbort.top = new FormAttachment(wName, margin);
+    fdMessageAbort.top = new FormAttachment(wlMessageAbort, 0, SWT.CENTER);
     fdMessageAbort.right = new FormAttachment(100, 0);
     wMessageAbort.setLayoutData(fdMessageAbort);
 
-    SelectionListener slMod =
-        new SelectionAdapter() {
-          @Override
-          public void widgetSelected(SelectionEvent e) {
-            action.setChanged();
-          }
-        };
-    // Always log rows
-    wAlwaysLogRows = new Button(shell, SWT.CHECK);
-    wAlwaysLogRows.setSelection(true);
-    PropsUi.setLook(wAlwaysLogRows);
-    wAlwaysLogRows.setText(BaseMessages.getString(PKG, "ActionAbortDialog.AlwaysLogRows.Label"));
-    wAlwaysLogRows.setToolTipText(
-        BaseMessages.getString(PKG, "ActionAbortDialog.AlwaysLogRows.Tooltip"));
-    wAlwaysLogRows.addSelectionListener(slMod);
-    FormData fdAlwaysLogRows = new FormData();
-    fdAlwaysLogRows.left = new FormAttachment(middle, 0);
-    fdAlwaysLogRows.top = new FormAttachment(wMessageAbort, margin);
-    fdAlwaysLogRows.right = new FormAttachment(100, 0);
-    wAlwaysLogRows.setLayoutData(fdAlwaysLogRows);
+    // Log level of the message
+    Label wlMessageLogLevel = new Label(shell, SWT.RIGHT);
+    wlMessageLogLevel.setText(
+        BaseMessages.getString(PKG, "ActionAbortDialog.MessageLogLevels.Label"));
+    PropsUi.setLook(wlMessageLogLevel);
+    FormData fdlMessageLogLevel = new FormData();
+    fdlMessageLogLevel.left = new FormAttachment(0, 0);
+    fdlMessageLogLevel.right = new FormAttachment(middle, -margin);
+    fdlMessageLogLevel.top = new FormAttachment(wMessageAbort, margin);
+    wlMessageLogLevel.setLayoutData(fdlMessageLogLevel);
 
-    Button wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, (Event e) -> ok());
-    Button wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, (Event e) -> cancel());
-    BaseTransformDialog.positionBottomButtons(shell, new Button[] {wOk, wCancel}, margin, 0, null);
+    wMessageLogLevel = new Combo(shell, SWT.SINGLE | SWT.READ_ONLY | SWT.BORDER);
+    wMessageLogLevel.setItems(LogLevel.getLogLevelDescriptions());
+    PropsUi.setLook(wMessageLogLevel);
+    wMessageLogLevel.setToolTipText(
+        BaseMessages.getString(PKG, "ActionAbortDialog.MessageLogLevels.Tooltip"));
+    wMessageLogLevel.addModifyListener(e -> action.setChanged());
+    FormData fdMessageLogLevel = new FormData();
+    fdMessageLogLevel.left = new FormAttachment(middle, 0);
+    fdMessageLogLevel.top = new FormAttachment(wlMessageLogLevel, 0, SWT.CENTER);
+    fdMessageLogLevel.right = new FormAttachment(100, 0);
+    wMessageLogLevel.setLayoutData(fdMessageLogLevel);
 
     getData();
+    focusActionName();
 
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 
     return action;
+  }
+
+  @Override
+  protected void onActionNameModified() {
+    action.setChanged();
   }
 
   /** Copy information from the meta-data input to the dialog fields. */
@@ -173,10 +128,7 @@ public class ActionAbortDialog extends ActionDialog {
     if (action.getMessageAbort() != null) {
       wMessageAbort.setText(action.getMessageAbort());
     }
-    wAlwaysLogRows.setSelection(action.isAlwaysLogRows());
-
-    wName.selectAll();
-    wName.setFocus();
+    wMessageLogLevel.select(action.getMessageLogLevel().getLevel());
   }
 
   private void cancel() {
@@ -195,7 +147,9 @@ public class ActionAbortDialog extends ActionDialog {
     }
     action.setName(wName.getText());
     action.setMessageAbort(wMessageAbort.getText());
-    action.setAlwaysLogRows(wAlwaysLogRows.getSelection());
+    if (wMessageLogLevel.getSelectionIndex() != -1) {
+      action.setMessageLogLevel(LogLevel.values()[wMessageLogLevel.getSelectionIndex()]);
+    }
     dispose();
   }
 }

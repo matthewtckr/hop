@@ -23,10 +23,10 @@ import java.util.TimerTask;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.extension.ExtensionPoint;
 import org.apache.hop.core.extension.IExtensionPoint;
 import org.apache.hop.core.logging.ILogChannel;
-import org.apache.hop.core.logging.LogLevel;
 import org.apache.hop.core.util.ExecutorUtil;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.vfs.HopVfs;
@@ -46,6 +46,7 @@ import org.apache.hop.workflow.engine.IWorkflowEngine;
     extensionPointId = "WorkflowStart",
     description = "At the start of a workflow, handle any Workflow Log metadata objects")
 public class WorkflowStartLoggingXp implements IExtensionPoint<IWorkflowEngine<WorkflowMeta>> {
+  @SuppressWarnings("javabugs:S2259") // a running workflow always has a metadata provider
   @Override
   public void callExtensionPoint(
       ILogChannel log, IVariables variables, IWorkflowEngine<WorkflowMeta> workflow)
@@ -76,10 +77,9 @@ public class WorkflowStartLoggingXp implements IExtensionPoint<IWorkflowEngine<W
 
     // If we log parent (root) workflows only we don't want a parent
     //
-    if (workflowLog.isLoggingParentsOnly()) {
-      if (workflow.getParentPipeline() != null || workflow.getParentWorkflow() != null) {
-        return;
-      }
+    if (workflowLog.isLoggingParentsOnly()
+        && (workflow.getParentPipeline() != null || workflow.getParentWorkflow() != null)) {
+      return;
     }
 
     // Load the pipeline filename specified in the Workflow Log object...
@@ -97,30 +97,41 @@ public class WorkflowStartLoggingXp implements IExtensionPoint<IWorkflowEngine<W
         return;
       }
     } catch (Exception e) {
-      workflow.stopExecution();
-      throw new HopException(
-          "Error handling Workflow Log metadata object '"
-              + workflowLog.getName()
-              + "' at the start of pipeline: "
-              + workflow,
-          e);
+      if (workflowLog.isFailParentOnLoggingFailure()) {
+        workflow.stopExecution();
+        throw new HopException(
+            "Error handling Workflow Log metadata object '"
+                + workflowLog.getName()
+                + "' at the start of workflow: "
+                + e.getMessage(),
+            e);
+      } else {
+        log.logError(
+            "Error handling Workflow Log metadata object '"
+                + workflowLog.getName()
+                + "' at the start of workflow: "
+                + e.getMessage(),
+            e);
+        return;
+      }
     }
 
     if (workflowLog.getWorkflowToLog().isEmpty()) {
-      logWorkflow(workflowLog, workflow, variables, loggingPipelineFilename);
+      logWorkflow(log, workflowLog, workflow, variables, loggingPipelineFilename);
     } else {
       for (String workflowToLog : workflowLog.getWorkflowToLog()) {
         String workflowUri = HopVfs.getFileObject(workflow.getFilename()).getPublicURIString();
         String workflowToLogUri =
             HopVfs.getFileObject(variables.resolve(workflowToLog)).getPublicURIString();
         if (workflowUri.equals(workflowToLogUri)) {
-          logWorkflow(workflowLog, workflow, variables, loggingPipelineFilename);
+          logWorkflow(log, workflowLog, workflow, variables, loggingPipelineFilename);
         }
       }
     }
   }
 
   private void logWorkflow(
+      ILogChannel log,
       WorkflowLog workflowLog,
       IWorkflowEngine<WorkflowMeta> workflow,
       IVariables variables,
@@ -136,9 +147,23 @@ public class WorkflowStartLoggingXp implements IExtensionPoint<IWorkflowEngine<W
       if (workflowLog.isExecutingAtEnd()) {
         workflow.addExecutionFinishedListener(
             engine -> {
-              executeLoggingPipeline(
-                  workflowLog, "end", loggingPipelineFilename, workflow, variables);
-              ExecutorUtil.cleanup(timer);
+              try {
+                executeLoggingPipeline(
+                    workflowLog, "end", loggingPipelineFilename, workflow, variables);
+              } catch (HopException e) {
+                if (workflowLog.isFailParentOnLoggingFailure()) {
+                  throw e;
+                } else {
+                  log.logError(
+                      "Error handling Workflow Log metadata object '"
+                          + workflowLog.getName()
+                          + "' at the end of workflow: "
+                          + e.getMessage(),
+                      e);
+                }
+              } finally {
+                ExecutorUtil.cleanup(timer);
+              }
             });
       }
 
@@ -154,11 +179,20 @@ public class WorkflowStartLoggingXp implements IExtensionPoint<IWorkflowEngine<W
                     executeLoggingPipeline(
                         workflowLog, "interval", loggingPipelineFilename, workflow, variables);
                   } catch (Exception e) {
-                    throw new RuntimeException(
-                        "Unable to do interval logging for Workflow Log object '"
-                            + workflowLog.getName()
-                            + "'",
-                        e);
+                    if (workflowLog.isFailParentOnLoggingFailure()) {
+                      throw new HopRuntimeException(
+                          "Unable to do interval logging for Workflow Log object '"
+                              + workflowLog.getName()
+                              + "'",
+                          e);
+                    } else {
+                      log.logError(
+                          "Unable to do interval logging for Workflow Log object '"
+                              + workflowLog.getName()
+                              + "': "
+                              + e.getMessage(),
+                          e);
+                    }
                   }
                 }
               };
@@ -166,13 +200,22 @@ public class WorkflowStartLoggingXp implements IExtensionPoint<IWorkflowEngine<W
         }
       }
     } catch (Exception e) {
-      workflow.stopExecution();
-      throw new HopException(
-          "Error handling Workflow Log metadata object '"
-              + workflowLog.getName()
-              + "' at the start of pipeline: "
-              + workflow,
-          e);
+      if (workflowLog.isFailParentOnLoggingFailure()) {
+        workflow.stopExecution();
+        throw new HopException(
+            "Error handling Workflow Log metadata object '"
+                + workflowLog.getName()
+                + "' at the start of workflow: "
+                + e.getMessage(),
+            e);
+      } else {
+        log.logError(
+            "Error handling Workflow Log metadata object '"
+                + workflowLog.getName()
+                + "' at the start of workflow: "
+                + e.getMessage(),
+            e);
+      }
     }
   }
 
@@ -191,17 +234,12 @@ public class WorkflowStartLoggingXp implements IExtensionPoint<IWorkflowEngine<W
     //
     LocalPipelineEngine loggingPipeline =
         new LocalPipelineEngine(loggingPipelineMeta, variables, workflow);
-
-    // Do NOT link to parent to avoid stopped() being transferred to the logging pipeline(s).
-    loggingPipeline.setParent(null);
     loggingPipeline.setParentWorkflow(null);
 
     // Flag it as a logging pipeline so we don't log ourselves...
     //
     loggingPipeline.getExtensionDataMap().put(PipelineStartLoggingXp.PIPELINE_LOGGING_FLAG, "Y");
-
-    // Only log errors
-    loggingPipeline.setLogLevel(LogLevel.ERROR);
+    loggingPipeline.setLogLevel(pipelineLog.getLogLevel());
     loggingPipeline.prepareExecution();
 
     // Grab the WorkflowLogging transforms and inject the pipeline information...
@@ -217,5 +255,9 @@ public class WorkflowStartLoggingXp implements IExtensionPoint<IWorkflowEngine<W
     //
     loggingPipeline.startThreads();
     loggingPipeline.waitUntilFinished();
+
+    if (loggingPipeline.getErrors() > 0) {
+      throw new HopException("Errors occurred during logging pipeline execution.");
+    }
   }
 }

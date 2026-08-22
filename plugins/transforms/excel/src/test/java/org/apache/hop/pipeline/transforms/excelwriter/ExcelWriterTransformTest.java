@@ -17,10 +17,11 @@
 
 package org.apache.hop.pipeline.transforms.excelwriter;
 
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -33,12 +34,14 @@ import static org.mockito.Mockito.when;
 
 import com.google.common.io.Files;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.logging.ILoggingObject;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.IValueMeta;
@@ -55,14 +58,17 @@ import org.apache.hop.utils.TestUtils;
 import org.apache.poi.hssf.usermodel.HSSFSheet;
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
-public class ExcelWriterTransformTest {
+class ExcelWriterTransformTest {
 
   private static final String SHEET_NAME = "Sheet1";
   private static final String XLS = "xls";
@@ -81,8 +87,8 @@ public class ExcelWriterTransformTest {
 
   private File templateFile;
 
-  @Before
-  public void setUp() throws Exception {
+  @BeforeEach
+  void setUp() throws Exception {
     String path = TestUtils.createRamFile(getClass().getSimpleName() + "/testXLSProtect.xls");
     FileObject xlsFile = TestUtils.getFileObject(path);
     wb = createWorkbook(xlsFile);
@@ -119,20 +125,20 @@ public class ExcelWriterTransformTest {
     assertTrue(transform.init());
   }
 
-  @After
-  public void cleanUp() {
+  @AfterEach
+  void cleanUp() {
     mockHelper.cleanUp();
   }
 
   @Test
-  public void testProtectSheet() throws Exception {
+  void testProtectSheet() throws Exception {
 
     transform.protectSheet(wb.getSheet(SHEET_NAME), "aa");
     assertTrue(wb.getSheet(SHEET_NAME).getProtect());
   }
 
   @Test
-  public void testMaxSheetNameLength() {
+  void testMaxSheetNameLength() {
 
     transform =
         spy(
@@ -162,7 +168,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testPrepareNextOutputFile() throws Exception {
+  void testPrepareNextOutputFile() throws Exception {
     assertTrue(transform.init());
     File outDir = Files.createTempDir();
     String testFileOut = outDir.getAbsolutePath() + File.separator + "test.xlsx";
@@ -179,7 +185,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testWriteUsingTemplateWithFormatting() throws Exception {
+  void testWriteUsingTemplateWithFormatting() throws Exception {
 
     String path = Files.createTempDir().getAbsolutePath() + File.separator + "formatted.xlsx";
 
@@ -222,7 +228,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testWriteUsingTemplateWithFormatting_Streaming() throws Exception {
+  void testWriteUsingTemplateWithFormatting_Streaming() throws Exception {
 
     String path =
         Files.createTempDir().getAbsolutePath() + File.separator + "formatted_streaming.xlsx";
@@ -267,8 +273,103 @@ public class ExcelWriterTransformTest {
     verify(dataMock.currentWorkbookDefinition.getSheet()).getRow(1);
   }
 
+  /**
+   * Issue #6520: with "Replace with new sheet" the sheet coming from the template file was removed
+   * right after the template was copied into place, so the template sheet could no longer be found.
+   */
   @Test
-  public void testValueBigNumber() throws Exception {
+  void testTemplateSheetSurvivesReplaceWithNewSheet() throws Exception {
+
+    String path = Files.createTempDir().getAbsolutePath() + File.separator + "template_sheet.xlsx";
+
+    dataMock.createNewFile = true;
+    // "If sheet exists in output file" = "Replace with new sheet"
+    dataMock.createNewSheet = true;
+    dataMock.realTemplateFileName =
+        getClass().getResource("template_with_formatting.xlsx").getFile();
+    // the output sheet carries the same name as the template sheet
+    dataMock.realSheetname = "TicketData";
+    dataMock.realTemplateSheetName = "TicketData";
+
+    when(transform.buildFilename(0)).thenReturn(path);
+    when(metaMock.getFile().getExtension()).thenReturn(XLSX);
+    when(metaMock.getTemplate().isTemplateEnabled()).thenReturn(true);
+    when(metaMock.getTemplate().isTemplateSheetEnabled()).thenReturn(true);
+    when(metaMock.isHeaderEnabled()).thenReturn(false);
+
+    transform.prepareNextOutputFile(any(Object[].class));
+
+    Sheet sheet = dataMock.currentWorkbookDefinition.getSheet();
+    assertNotNull(sheet);
+    assertEquals("TicketData", sheet.getSheetName());
+  }
+
+  /**
+   * Issue #6520: the same removal silently dropped the content and formatting of the template sheet
+   * when only a template file (no template sheet) was used.
+   */
+  @Test
+  void testTemplateContentPreservedWithReplaceWithNewSheet() throws Exception {
+
+    String path = Files.createTempDir().getAbsolutePath() + File.separator + "template_file.xlsx";
+    String templateFileName = getClass().getResource("template_with_formatting.xlsx").getFile();
+
+    int templateRows;
+    try (Workbook template = WorkbookFactory.create(new File(templateFileName))) {
+      templateRows = template.getSheet("TicketData").getPhysicalNumberOfRows();
+    }
+    assertTrue(templateRows > 0);
+
+    dataMock.createNewFile = true;
+    dataMock.createNewSheet = true;
+    dataMock.realTemplateFileName = templateFileName;
+    dataMock.realSheetname = "TicketData";
+
+    when(transform.buildFilename(0)).thenReturn(path);
+    when(metaMock.getFile().getExtension()).thenReturn(XLSX);
+    when(metaMock.getTemplate().isTemplateEnabled()).thenReturn(true);
+    when(metaMock.getTemplate().isTemplateSheetEnabled()).thenReturn(false);
+    when(metaMock.isHeaderEnabled()).thenReturn(false);
+
+    transform.prepareNextOutputFile(any(Object[].class));
+
+    Sheet sheet = dataMock.currentWorkbookDefinition.getSheet();
+    assertEquals(templateRows, sheet.getPhysicalNumberOfRows());
+  }
+
+  /**
+   * "Replace with new sheet" must keep working for a sheet that already exists in a re-used output
+   * file: only then is there something to replace.
+   */
+  @Test
+  void testExistingSheetInReusedFileIsStillReplaced() throws Exception {
+
+    File outputFile =
+        new File(Files.createTempDir().getAbsolutePath() + File.separator + "existing.xlsx");
+    try (Workbook existing = new XSSFWorkbook()) {
+      Sheet sheet = existing.createSheet("TicketData");
+      sheet.createRow(0).createCell(0).setCellValue("stale");
+      try (OutputStream out = new FileOutputStream(outputFile)) {
+        existing.write(out);
+      }
+    }
+
+    dataMock.createNewFile = false;
+    dataMock.createNewSheet = true;
+    dataMock.realSheetname = "TicketData";
+
+    when(transform.buildFilename(0)).thenReturn(outputFile.getAbsolutePath());
+    when(metaMock.getFile().getExtension()).thenReturn(XLSX);
+    when(metaMock.getTemplate().isTemplateEnabled()).thenReturn(false);
+    when(metaMock.isHeaderEnabled()).thenReturn(false);
+
+    transform.prepareNextOutputFile(any(Object[].class));
+
+    assertEquals(0, dataMock.currentWorkbookDefinition.getSheet().getPhysicalNumberOfRows());
+  }
+
+  @Test
+  void testValueBigNumber() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaBigNumber.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -280,7 +381,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testValueBinary() throws Exception {
+  void testValueBinary() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaBinary.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -292,7 +393,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testValueBoolean() throws Exception {
+  void testValueBoolean() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaInteger.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -304,7 +405,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testValueDate() throws Exception {
+  void testValueDate() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaDate.class);
     Object vObj = new Object();
@@ -316,7 +417,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testValueInteger() throws Exception {
+  void testValueInteger() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaInteger.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -328,7 +429,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testValueInternetAddress() throws Exception {
+  void testValueInternetAddress() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaInternetAddress.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -340,7 +441,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testValueNumber() throws Exception {
+  void testValueNumber() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaNumber.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -352,7 +453,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testValueString() throws Exception {
+  void testValueString() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaString.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -364,7 +465,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void testValueTimestamp() throws Exception {
+  void testValueTimestamp() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaTimestamp.class);
     Object vObj = new Object();
@@ -376,7 +477,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void test_Xlsx_Stream_NoTemplate() throws Exception {
+  void test_Xlsx_Stream_NoTemplate() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaInternetAddress.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -388,7 +489,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void test_Xlsx_NoStream_NoTemplate() throws Exception {
+  void test_Xlsx_NoStream_NoTemplate() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaInternetAddress.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -400,7 +501,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void test_Xlsx_Stream_Template() throws Exception {
+  void test_Xlsx_Stream_Template() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaInternetAddress.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -412,7 +513,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void test_Xlsx_NoStream_Template() throws Exception {
+  void test_Xlsx_NoStream_Template() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaInternetAddress.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -424,7 +525,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void test_Xls_NoTemplate() throws Exception {
+  void test_Xls_NoTemplate() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaTimestamp.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -436,7 +537,7 @@ public class ExcelWriterTransformTest {
   }
 
   @Test
-  public void test_Xls_Template() throws Exception {
+  void test_Xls_Template() throws Exception {
 
     IValueMeta vmi = mock(ValueMetaTimestamp.class, new DefaultAnswerThrowsException());
     Object vObj = new Object();
@@ -564,7 +665,7 @@ public class ExcelWriterTransformTest {
   private static class DefaultAnswerThrowsException implements Answer<Object> {
     @Override
     public Object answer(InvocationOnMock invocation) throws Throwable {
-      throw new RuntimeException(
+      throw new HopRuntimeException(
           "This method (" + invocation.getMethod() + ") shouldn't have been called.");
     }
   }

@@ -19,6 +19,8 @@ package org.apache.hop.pipeline.transforms.denormaliser;
 
 import java.util.ArrayList;
 import java.util.List;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.ICheckResult;
 import org.apache.hop.core.annotations.Transform;
@@ -43,6 +45,8 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Transform",
     keywords = "i18n::DenormaliserMeta.keyword",
     documentationUrl = "/pipeline/transforms/rowdenormaliser.html")
+@Getter
+@Setter
 public class DenormaliserMeta extends BaseTransformMeta<Denormaliser, DenormaliserData> {
   private static final Class<?> PKG = DenormaliserMeta.class;
 
@@ -63,22 +67,6 @@ public class DenormaliserMeta extends BaseTransformMeta<Denormaliser, Denormalis
   public DenormaliserMeta() {
     groupFields = new ArrayList<>();
     denormaliserTargetFields = new ArrayList<>();
-  }
-
-  public DenormaliserMeta(DenormaliserMeta m) {
-    this();
-    this.keyField = m.keyField;
-    for (DenormaliserGroupField groupField : m.groupFields) {
-      this.groupFields.add(new DenormaliserGroupField(groupField));
-    }
-    for (DenormaliserTargetField targetField : m.denormaliserTargetFields) {
-      this.denormaliserTargetFields.add(new DenormaliserTargetField(targetField));
-    }
-  }
-
-  @Override
-  public DenormaliserMeta clone() {
-    return new DenormaliserMeta(this);
   }
 
   /**

@@ -31,36 +31,8 @@ It's simply bad form to hardcode host names, user names, passwords, directories 
 Variables allow your solutions to adapt to a changing environment.
 If for example the database server is different when developing than it is when running in production, you set it as a variable.
 
-TIP: Fields, parameters, and variables implicitly are available downstream if in scope. You can pass them again any number of levels, but the "get parameters/variables" button only retrieves from one level above.
-
-== Fields
-Fields are columns in data row(s) and are viewable in some transform field textboxes and columns and you can see the fields in scope and its value when looking at transform row results after executing a workflow/pipeline (click the little grid icon on the bottom-right of a transform to see a preview of the cached results). Field values can be passed upstream for example if you use a pipeline executor and fill in the Result rows tab and use it in conjunction with a “copy rows to result” transform in the child pipeline.
-
-== Parameters
-Think of parameters as function arguments, which turn into variables with the same name. When adding parameters you are basically creating MyPipeline(parameter1, parameter2,..). Parameters (e.g. in pipeline or workflow properties) need to be declared at least once in every pipeline or workflow. 
-
-For example, if you set parameters on a pipeline executor, the pipeline that is being called must declare the same parameter names in its pipeline properties (set to NULL if you want to inherit values). Parameters can not be “sent” upstream, but you can use a Set variables transform, but they become variables in the scope they are defined in.
-
-**Explicit vs Implicit:** If you set a parameter to a default value, it becomes explicit (e.g. when editing a pipeline in pipeline properties), and it will take precedence over the same named implicit variable (a passed-in variable), but not take precedence over the same named explicit parameter. So whenever you see a transform with a column title “Parameters/Variables” that means an explicit parameter is sent to a function that will then set a variable name overriding any previous set parameter with the same name (useful if wanting to override an explicitly set param/variable in the child).
-           
-To change implicit parameter behaviour to explicit, you can also disable “pass all parameters” on the pipeline action. Parameters are simply variables which are explicitly defined in a workflow or pipeline to make them recognizable from outside those objects. They can also have a description and a default value.
-
-You cannot combine implicit variable inheritance with explicit parameter definitions. So, if you add parameters to the pipeline definition (or to a pipeline executor) and you want it set, you must add it to the parameters tab of the child pipeline action/transform even if the same variable already exists.
-
-**Advanced:** there are multiple layers in hop where you can set variables that do or do not get overwritten downstream (Java -> hop environment -> project -> run configuration -> workflow -> pipeline).
-
-== Variables
-Variables are more global and the scope can be targeted (entire Java VM, grandparent workflow, etc.) whereas fields are the data flowing between the transforms. Local variables can be set in a pipeline but should not be used in the same pipeline as they are not thread-safe and can inherit a previous value. It is better to send or return variables to another pipeline/workflow before using them.  Variables can be passed upstream if the variable was set to a larger scope. E.g.: if a variable was set in a parent with "valid in the current workflow".
-
-Think of variables in 2 scopes: runtime variables and environment/workflow variables:
-
-* Runtime variables – Runtime variables depend on pipeline information to generate, so they cannot be set beforehand, you need to declare those differently to be able to use them.
-* Environment/workflow variables or parameters – Environment variables/parameters are set once and used when needed in any downstream workflow/pipeline and there is no need to use Get Variables , you can refer to them directly like {openvar}myVariable{closevar} unless you need it in a field/data stream.
-  - E.g.: Define a parameter only once, even just in the Pipeline Executor (no need to define in receiving pipeline)
-
-A pipeline needs to start to get new variables. A running or nested pipeline can't fetch new variable values. A pipeline is considered started when a pipeline starts for every row in a pipeline executor. An alternative is to use parameters.
-
-
+Fields, parameters, and variables are related but they are not the same thing.
+For a comparison, how values flow between pipelines and workflows, and the common pitfalls, see xref:fields-parameters-variables.adoc[Fields, parameters, and variables].
 
 == How do I use a variable?
 
@@ -174,11 +146,15 @@ This also means that's important to know where variables can be set and used and
 
 == Parameters
 
-Pipeline and workflows can (optionally) accept parameters.
+Pipelines and workflows can (optionally) accept parameters.
 
-Workflow and pipeline parameters are similar, and are a special type of variable that is only available within the current workflow or pipeline.
+Parameters are a special type of variable: they are declared on the pipeline or workflow (name, optional default, optional description) so callers can pass values in.
+When the pipeline or workflow starts, each parameter is activated as a variable of the same name, available only in that execution.
 
-Workflow and pipeline parameters can have a default value and a description, and can be passed on from workflows and pipelines to other workflows and pipelines through a variety of workflow actions and pipeline transforms.
+Pass parameters from a parent through the *Parameters* tab of a xref:workflow/actions/pipeline.adoc[Pipeline] action, xref:workflow/actions/workflow.adoc[Workflow] action, xref:pipeline/transforms/pipeline-executor.adoc[Pipeline Executor], or xref:pipeline/transforms/workflow-executor.adoc[Workflow Executor].
+Declare the same names on the receiving pipeline or workflow.
+
+How parameters differ from fields and from other variables, including inheritance and override rules, is covered in xref:fields-parameters-variables.adoc[Fields, parameters, and variables].
 
 === System properties
 
@@ -205,7 +181,7 @@ CAUTION: even though you _can_ manually change the `hop-config.json` or any of t
 You can also use the hop-config command line tool to define system properties:
 
 [source,bash]
-sh hop-config.sh -s MY_SYSTEM_PROPERTY=SomeValue
+sh hop-conf.sh -s MY_SYSTEM_PROPERTY=SomeValue
 
 
 
@@ -218,7 +194,7 @@ This helps you configure folders and other things which are environment specific
 You can set those in the xref:projects/projects-environments.adoc#_create_an_environment[environment settings dialog] or using the command line:
 
 [source,bash]
-sh hop-config.sh -e MyEnvironment -em -ev VARIABLE1=value1
+sh hop-conf.sh -e MyEnvironment -em -ev VARIABLE1=value1
 
 === Run Configurations
 
@@ -250,6 +226,14 @@ Otherwise by default NULL is ignored by the MIN aggregate and MIN is set to the 
 See also the variable HOP_AGGREGATION_ALL_NULLS_ARE_ZERO.
 |HOP_ALLOW_EMPTY_FIELD_NAMES_AND_TYPES|N|Set this variable to Y to allow your pipeline to pass 'null' fields and/or empty types.
 |HOP_BATCHING_ROWSET|N|Set this variable to 'Y' if you want to test a more efficient batching row set.
+|HOP_DATABASE_CONNECTION_TIMEOUT|30|Default login/connection timeout in **seconds** applied when opening a JDBC database connection (maps to `DriverManager.setLoginTimeout`).
+Defaults to `30`; set to `0` to impose no timeout (a stalled connect can then block indefinitely).
+The setting is advisory: some JDBC drivers ignore it in favor of their own connection options.
+|HOP_DATABASE_SOCKET_TIMEOUT|0|Default network/socket timeout in **seconds** applied to a JDBC database connection after it is opened (maps to `Connection.setNetworkTimeout`).
+`0` (default) means no timeout is imposed.
+WARNING: when set, this applies to *every* request on the connection, so any single query, read or bulk operation that runs longer than the timeout is aborted and the connection is closed. Use a value large enough for your longest-running SQL.
+This bounds reads on an already-established connection; the initial handshake read still relies on the driver's own socket-timeout connection option.
+Drivers that do not support the operation are ignored.
 |HOP_DEFAULT_BIGNUMBER_FORMAT||The name of the variable containing an alternative default bignumber format
 |HOP_DEFAULT_BUFFER_POLLING_WAITTIME|20|This is the default polling frequency for the transforms input buffer (in ms)
 |HOP_DEFAULT_DATE_FORMAT||The name of the variable containing an alternative default date format
@@ -285,8 +269,11 @@ Set to 0 to keep all rows (default)
 Set to 0 to keep all rows indefinitely (default)
 |HOP_MAX_TAB_LENGTH|-|A variable to configure Tab size
 |HOP_MAX_WORKFLOW_TRACKER_SIZE|5000|The maximum age (in minutes) of a log line while being kept internally by Hop. Set to 0 to keep all rows indefinitely (default)
-|HOP_PASSWORD_ENCODER_PLUGIN|Hop|Specifies the password encoder plugin to use by ID (Hop is the default).
+|HOP_PASSWORD_ENCODER_PLUGIN|Hop|Specifies the password encoder plugin to use by ID (Hop is the default). Re-applied when a project/environment is enabled.
+|HOP_AES_ENCODER_KEY||Key string for the AES/AES2 password encoder plugins. Prefer environment variables or a secrets mount over embedding in metadata.
+|HOP_AES_ENCODER_KEY_FILE||Path to a file containing the AES/AES2 encoder key. Used when `HOP_AES_ENCODER_KEY` is empty.
 |HOP_PIPELINE_ROWSET_SIZE|-|Name of the environment variable that contains the size of the pipeline rowset size. This overwrites values that you set pipeline settings
+|HOP_QUERY_PREVIEW_TIMEOUT|0|Default JDBC statement query timeout in **seconds** for database query preview (for example the initial value in the preview settings dialog for Table Input / Get table names, and related preview flows). `0` means no default from this variable. Does not apply to normal pipeline execution for those transforms' JDBC timeouts in the same way; use the preview dialog to set the timeout for a given preview run.
 |HOP_PLUGIN_CLASSES||A comma delimited list of classes to scan for plugin annotations
 |HOP_ROWSET_GET_TIMEOUT|50|The name of the variable that optionally contains an alternative rowset get timeout (in ms).
 This only makes a difference for extremely short lived pipelines.
@@ -362,4 +349,19 @@ Additionally, the following environment variables can help you to add even more 
 |${Internal.Transform.ID} |N |The unique ID of the transform instance. Useful for tracking transform execution and debugging.
 |${Internal.Transform.BundleNr} |N |The bundle number for partitioned execution, helpful in load-balancing or distributing data across partitions.
 |${Internal.Action.ID} |N |The unique ID of the current action (entry) in a workflow. Useful for tracking specific actions within a larger workflow.
+|===
+
+=== Hop server internal variables
+
+The variables below are only set when a pipeline or workflow is executed on a Hop server. They are populated from the `hop-server.xml` configuration file at server startup and inherited by every pipeline and workflow that runs on that server, so you can reference the server's own coordinates from within your pipelines and workflows (for example to build callback URLs or to log the server that processed a request).
+
+[%header, width="90%", cols="2,1,5"]
+|===
+|Variable |Default |Description
+|${Internal.Server.Name} |N |The name of the Hop server as configured in `hop-server.xml` (the `<name>` element of the `hop-server` definition).
+|${Internal.Server.Hostname} |N |The hostname the Hop server is bound to, as configured in `hop-server.xml`. If a `network_interface` was configured, this is the resolved IP address for that interface.
+|${Internal.Server.Port} |N |The HTTP port the Hop server is listening on. This is the actual port the server bound to, which may differ from the value in `hop-server.xml` when the server was started with command-line overrides.
+|${Internal.Server.WebAppName} |N |The web application name (context path) the Hop server is exposed under, as configured in `hop-server.xml`. Empty when no web app name was set.
+|${Internal.Server.Username} |N |The username configured for the Hop server in `hop-server.xml`. Empty when authentication is not configured.
+|${Internal.Server.SslMode} |N |`true` when the Hop server is configured to use SSL/TLS, `false` otherwise.
 |===

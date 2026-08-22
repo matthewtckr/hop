@@ -26,16 +26,16 @@ import static org.mockito.Mockito.when;
 import jakarta.mail.Folder;
 import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
 
-public class BatchFolderIteratorNameTest {
+class BatchFolderIteratorNameTest {
 
   static Folder folder = null;
 
-  @BeforeClass
-  public static void setUp() throws MessagingException {
+  @BeforeAll
+  static void setUp() throws MessagingException {
     folder = mock(Folder.class);
     when(folder.getName()).thenReturn("INBOX");
     when(folder.getMessages(anyInt(), anyInt()))
@@ -43,14 +43,14 @@ public class BatchFolderIteratorNameTest {
             (Answer<Message[]>)
                 invocation -> {
                   Object[] args = invocation.getArguments();
-                  int start = ((Integer) args[0]).intValue();
-                  int end = ((Integer) args[1]).intValue();
+                  int start = (Integer) args[0];
+                  int end = (Integer) args[1];
                   return new Message[end - start + 1];
                 });
   }
 
   @Test
-  public void testBatchSize2() {
+  void testBatchSize2() {
     BatchFolderIterator bfi = new BatchFolderIterator(folder, 2, 1, 2);
     assertTrue(bfi.hasNext());
     bfi.next();
@@ -60,7 +60,7 @@ public class BatchFolderIteratorNameTest {
   }
 
   @Test
-  public void testBatchSize1x2() {
+  void testBatchSize1x2() {
     BatchFolderIterator bfi = new BatchFolderIterator(folder, 1, 1, 2);
     assertTrue(bfi.hasNext());
     bfi.next();
@@ -70,7 +70,7 @@ public class BatchFolderIteratorNameTest {
   }
 
   @Test
-  public void testBatchSize1() {
+  void testBatchSize1() {
     BatchFolderIterator bfi = new BatchFolderIterator(folder, 1, 1, 1);
     assertTrue(bfi.hasNext());
     bfi.next();
@@ -78,7 +78,7 @@ public class BatchFolderIteratorNameTest {
   }
 
   @Test
-  public void testBatchSize2x2() {
+  void testBatchSize2x2() {
     BatchFolderIterator bfi = new BatchFolderIterator(folder, 2, 1, 4);
     assertTrue(bfi.hasNext());
     bfi.next();
@@ -92,7 +92,7 @@ public class BatchFolderIteratorNameTest {
   }
 
   @Test
-  public void testBatchSize2x3() {
+  void testBatchSize2x3() {
     BatchFolderIterator bfi = new BatchFolderIterator(folder, 2, 1, 5);
     assertTrue(bfi.hasNext());
     bfi.next();

@@ -21,6 +21,7 @@ import lombok.Getter;
 import lombok.Setter;
 import org.apache.hop.metadata.api.HopMetadata;
 import org.apache.hop.metadata.api.HopMetadataBase;
+import org.apache.hop.metadata.api.HopMetadataCategory;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadata;
@@ -30,6 +31,7 @@ import org.apache.hop.metadata.api.IHopMetadata;
     name = "i18n::AzureMetadataType.Name",
     description = "i18n::AzureMetadataType.Description",
     image = "ui/images/authentication.svg",
+    category = HopMetadataCategory.FILE_STORAGE,
     documentationUrl = "/metadata-types/azure-authentication.html",
     hopMetadataPropertyType = HopMetadataPropertyType.VFS_AZURE_CONNECTION)
 @Getter
@@ -39,13 +41,39 @@ public class AzureMetadataType extends HopMetadataBase implements Serializable, 
   private static final Class<?> PKG = AzureMetadataType.class;
   @HopMetadataProperty private String description;
   @HopMetadataProperty private String storageAccountName;
+  @HopMetadataProperty private String authenticationType;
 
   @HopMetadataProperty(password = true)
   private String storageAccountKey;
 
+  @HopMetadataProperty(password = true)
+  private String sasToken;
+
   @HopMetadataProperty private String storageAccountEndpoint;
 
+  /** Cache TTL in seconds for list-result caching (same as S3/MinIO). */
+  @HopMetadataProperty private String cacheTtlSeconds;
+
   public AzureMetadataType() {
-    // Do nothing
+    this.authenticationType = "Key"; // Default to Key authentication
+    this.cacheTtlSeconds = "5";
+  }
+
+  /**
+   * Gets the shared access signature token, used when the authentication type is "SAS Token".
+   *
+   * @return the SAS token
+   */
+  public String getSasToken() {
+    return sasToken;
+  }
+
+  /**
+   * Sets the shared access signature token.
+   *
+   * @param sasToken the SAS token to set
+   */
+  public void setSasToken(String sasToken) {
+    this.sasToken = sasToken;
   }
 }

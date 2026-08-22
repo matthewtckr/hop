@@ -19,7 +19,9 @@ package org.apache.hop.ui.hopgui.file;
 
 import java.util.Map;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.search.ISearchable;
 import org.apache.hop.core.variables.IVariables;
+import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.ui.hopgui.context.IActionContextHandlersProvider;
 
 /** This describes the main file operations for a supported Hop file */
@@ -128,7 +130,7 @@ public interface IHopFileTypeHandler extends IActionContextHandlersProvider {
   void close();
 
   /**
-   * See if there anything has been changed by the user
+   * See if there is anything has been changed by the user
    *
    * @return true if there were changes worth saving, false if nothing has been changed.
    */
@@ -163,4 +165,36 @@ public interface IHopFileTypeHandler extends IActionContextHandlersProvider {
 
   /** mark the file as deleted */
   public default void markDeleted() {}
+
+  /**
+   * Whether this handler supports the given capability (e.g. Save). Defaults to the file type's
+   * capability; handlers can override to disable per-instance (e.g. raw view of a binary file).
+   *
+   * @param capability the capability constant from {@link IHopFileType}
+   * @return true if the capability is supported
+   */
+  default boolean hasCapability(String capability) {
+    return getFileType() != null && getFileType().hasCapability(capability);
+  }
+
+  /**
+   * Build a searchable for the file this handler represents (typically an open tab). Defaults to
+   * delegating to {@link IHopFileType#createSearchable} when the file type has {@link
+   * IHopFileType#CAPABILITY_SEARCH}. Handlers with in-memory content may override to search the
+   * editor buffer instead of reloading from disk.
+   *
+   * @param locationDescription a short label for where the file was found (e.g. "Open file")
+   * @param metadataProvider the metadata provider
+   * @return an {@link ISearchable}, or {@code null} if this handler is not searchable
+   * @throws HopException if building the searchable fails
+   */
+  default ISearchable createSearchable(
+      String locationDescription, IHopMetadataProvider metadataProvider) throws HopException {
+    IHopFileType type = getFileType();
+    if (type == null || !type.hasCapability(IHopFileType.CAPABILITY_SEARCH)) {
+      return null;
+    }
+    return type.createSearchable(
+        getFilename(), locationDescription, getVariables(), metadataProvider);
+  }
 }

@@ -21,7 +21,7 @@ package org.apache.hop.pipeline.transforms.execinfo;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.ICheckResult;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.row.IRowMeta;
@@ -316,7 +316,7 @@ public class ExecInfo extends BaseTransform<ExecInfoMeta, ExecInfoData> {
   }
 
   private String getValueName(IRowMeta rowMeta, Object[] row) throws HopException {
-    String nameField = resolve(meta.getIdFieldName());
+    String nameField = resolve(meta.getNameFieldName());
     String name = rowMeta.getString(row, nameField, "");
     if (StringUtils.isEmpty(name)) {
       throw new HopException(

@@ -24,6 +24,8 @@ import org.eclipse.swt.SWT;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.graphics.Rectangle;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Event;
+import org.eclipse.swt.widgets.Listener;
 import org.eclipse.swt.widgets.Monitor;
 import org.eclipse.swt.widgets.Shell;
 
@@ -119,19 +121,19 @@ public class WindowProperty {
 
   public void setStateProperties(Map<String, Object> map) {
     Boolean bMaximized = (Boolean) map.get("max");
-    maximized = bMaximized == null ? false : bMaximized.booleanValue();
+    maximized = bMaximized == null ? false : bMaximized;
 
     Integer iX = (Integer) map.get("x");
-    x = iX == null ? -1 : iX.intValue();
+    x = iX == null ? -1 : iX;
 
     Integer iY = (Integer) map.get("y");
-    y = iY == null ? -1 : iY.intValue();
+    y = iY == null ? -1 : iY;
 
     Integer iWidth = (Integer) map.get("width");
-    width = iWidth == null ? -1 : iWidth.intValue();
+    width = iWidth == null ? -1 : iWidth;
 
     Integer iHeight = (Integer) map.get("height");
-    height = iHeight == null ? -1 : iHeight.intValue();
+    height = iHeight == null ? -1 : iHeight;
   }
 
   /**
@@ -160,37 +162,36 @@ public class WindowProperty {
       shell.setSize(bounds.width, bounds.height);
     }
 
-    // Just to double check: what is the preferred size of this dialog?
-    // This computed is a minimum. If the minimum is smaller than the
-    // size of the current shell, we make it larger.
-    //
-    Point computedSize = shell.computeSize(SWT.DEFAULT, SWT.DEFAULT);
+    // Use the saved size as-is, don't try to adjust it based on computed size
     Rectangle shellSize = shell.getBounds();
-    if (shellSize.width < computedSize.x) {
-      shellSize.width = computedSize.x;
-    }
-    if (shellSize.height < computedSize.y) {
-      shellSize.height = computedSize.y;
-    }
-    shell.setBounds(shellSize);
 
     Rectangle entireClientArea = shell.getDisplay().getClientArea();
     Rectangle resizedRect =
         new Rectangle(shellSize.x, shellSize.y, shellSize.width, shellSize.height);
     constrainRectangleToContainer(resizedRect, entireClientArea);
 
+    boolean needsRepositioning = !resizedRect.equals(shellSize);
+    boolean isClipped = isClippedByUnalignedMonitors(resizedRect, shell.getDisplay());
+
     // If the persisted size/location doesn't perfectly fit
     // into the entire client area, the persisted settings
     // likely were not meant for this configuration of monitors.
-    // Relocate the shell into either the parent monitor or if
-    // there is no parent, the primary monitor then center it.
+    // Try to find which monitor the saved position belongs to, then
+    // relocate the shell to either that monitor, the parent monitor,
+    // or the primary monitor as a last resort.
     //
-    if (!resizedRect.equals(shellSize)
-        || isClippedByUnalignedMonitors(resizedRect, shell.getDisplay())) {
-      Monitor monitor = shell.getDisplay().getPrimaryMonitor();
-      if (shell.getParent() != null) {
-        monitor = shell.getParent().getMonitor();
+    if (needsRepositioning || isClipped) {
+      // First, try to find the monitor that contains the saved position
+      Monitor monitor = getMonitorForPosition(shell.getDisplay(), x, y);
+
+      // If no monitor contains the saved position, fall back to parent or primary
+      if (monitor == null) {
+        monitor = shell.getDisplay().getPrimaryMonitor();
+        if (shell.getParent() != null) {
+          monitor = shell.getParent().getMonitor();
+        }
       }
+
       Rectangle monitorClientArea = monitor.getClientArea();
       constrainRectangleToContainer(resizedRect, monitorClientArea);
 
@@ -198,6 +199,46 @@ public class WindowProperty {
       resizedRect.y = monitorClientArea.y + (monitorClientArea.height - resizedRect.height) / 2;
 
       shell.setBounds(resizedRect);
+    }
+
+    relayoutOnShow(shell);
+  }
+
+  /**
+   * Re-run the shell's layout once it is actually on screen.
+   *
+   * <p>Restoring a remembered geometry means the widgets are built - and laid out - while the shell
+   * still has its pre-open size. {@link Shell#setBounds(Rectangle)} sets the *outer* bounds, so the
+   * client area only loses the window trim (title bar) when the shell is shown. Composites whose
+   * bounds are handed to them by a parent layout that does not re-run - a {@link
+   * org.eclipse.swt.custom.SashForm} pane is the common case - then keep child positions that are
+   * off by the trim height, which shows up as a toolbar clipped against the top of the panel until
+   * the user resizes the window by hand.
+   *
+   * <p>A single recursive layout on the first show costs nothing noticeable and puts every child
+   * where the freshly-sized shell says it belongs.
+   */
+  private void relayoutOnShow(Shell shell) {
+    shell.addListener(
+        SWT.Show,
+        new Listener() {
+          @Override
+          public void handleEvent(Event event) {
+            shell.removeListener(SWT.Show, this);
+            // Asynchronous: on the first show the platform is still settling the window frame, so
+            // the client area is only final once the pending events have been handled.
+            shell.getDisplay().asyncExec(() -> layoutIfAlive(shell));
+          }
+        });
+    // A shell that is already up gets its layout straight away: no Show event is coming.
+    if (shell.isVisible()) {
+      layoutIfAlive(shell);
+    }
+  }
+
+  private static void layoutIfAlive(Shell shell) {
+    if (!shell.isDisposed()) {
+      shell.layout(true, true);
     }
   }
 
@@ -255,6 +296,32 @@ public class WindowProperty {
     }
 
     return isClipped;
+  }
+
+  /**
+   * Finds the monitor that contains the specified position. This is used to restore windows on the
+   * correct monitor in multi-monitor setups, especially on macOS where saved window positions
+   * should be restored to the same monitor they were on when closed.
+   *
+   * @param display the display containing multiple monitors
+   * @param x the x coordinate to check
+   * @param y the y coordinate to check
+   * @return the Monitor containing the position, or null if no monitor contains it
+   */
+  private Monitor getMonitorForPosition(Display display, int x, int y) {
+    Monitor[] monitors = display.getMonitors();
+
+    for (Monitor monitor : monitors) {
+      Rectangle bounds = monitor.getBounds();
+
+      // Check both the exact position and a point slightly inside (100px)
+      // to handle positions saved at the very edge of a monitor
+      if (bounds.contains(x, y) || bounds.contains(x + 100, y + 100)) {
+        return monitor;
+      }
+    }
+
+    return null;
   }
 
   /**

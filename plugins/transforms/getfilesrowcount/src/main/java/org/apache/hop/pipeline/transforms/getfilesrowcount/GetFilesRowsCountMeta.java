@@ -20,7 +20,7 @@ package org.apache.hop.pipeline.transforms.getfilesrowcount;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.ICheckResult;
@@ -102,25 +102,6 @@ public class GetFilesRowsCountMeta
   public GetFilesRowsCountMeta() {
     super();
     this.files = new ArrayList<>();
-  }
-
-  public GetFilesRowsCountMeta(GetFilesRowsCountMeta m) {
-    this();
-    this.includeFilesCount = m.includeFilesCount;
-    this.filesCountFieldName = m.filesCountFieldName;
-    this.rowsCountFieldName = m.rowsCountFieldName;
-    this.rowSeparatorFormat = m.rowSeparatorFormat;
-    this.rowSeparator = m.rowSeparator;
-    this.fileFromField = m.fileFromField;
-    this.addResultFilename = m.addResultFilename;
-    this.outputFilenameField = m.outputFilenameField;
-    this.smartCount = m.smartCount;
-    m.files.forEach(f -> this.files.add(new GCFile(f)));
-  }
-
-  @Override
-  public GetFilesRowsCountMeta clone() {
-    return new GetFilesRowsCountMeta(this);
   }
 
   @Override

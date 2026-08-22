@@ -17,6 +17,10 @@
 
 package org.apache.hop.pipeline.transforms.insertupdate;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.fail;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -24,7 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
-import org.apache.commons.lang.builder.EqualsBuilder;
+import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.database.Database;
 import org.apache.hop.core.exception.HopException;
@@ -35,7 +39,7 @@ import org.apache.hop.core.plugins.TransformPluginType;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
@@ -46,17 +50,18 @@ import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValid
 import org.apache.hop.pipeline.transforms.loadsave.validator.ListLoadSaveValidator;
 import org.apache.hop.pipeline.transforms.loadsave.validator.ObjectValidator;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.mockito.Mockito;
 
-public class InsertUpdateMetaTest {
+class InsertUpdateMetaTest {
   LoadSaveTester loadSaveTester;
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
   private IVariables variables;
   private TransformMeta transformMeta;
@@ -65,13 +70,13 @@ public class InsertUpdateMetaTest {
   private InsertUpdateMeta umi;
   private TransformMockHelper<InsertUpdateMeta, InsertUpdateData> mockHelper;
 
-  @BeforeClass
-  public static void initEnvironment() throws Exception {
+  @BeforeAll
+  static void initEnvironment() throws Exception {
     HopEnvironment.init();
   }
 
-  @Before
-  public void setUp() {
+  @BeforeEach
+  void setUp() {
     variables = new Variables();
     PipelineMeta pipelineMeta = new PipelineMeta();
     pipelineMeta.setName("delete1");
@@ -100,40 +105,40 @@ public class InsertUpdateMetaTest {
     Mockito.when(mockHelper.transformMeta.getTransform()).thenReturn(new InsertUpdateMeta());
   }
 
-  @After
-  public void cleanUp() {
+  @AfterEach
+  void cleanUp() {
     mockHelper.cleanUp();
   }
 
   @Test
-  public void testCommitCountFixed() {
+  void testCommitCountFixed() {
     umi.setCommitSize("100");
-    Assert.assertEquals(100, umi.getCommitSizeVar(upd));
+    assertEquals(100, umi.getCommitSizeVar(upd));
   }
 
   @Test
-  public void testCommitCountVar() {
+  void testCommitCountVar() {
     umi.setCommitSize("${max.sz}");
-    Assert.assertEquals(10, umi.getCommitSizeVar(upd));
+    assertEquals(10, umi.getCommitSizeVar(upd));
   }
 
   @Test
-  public void testCommitCountMissedVar() {
+  void testCommitCountMissedVar() {
     umi.setCommitSize("missed-var");
     try {
       umi.getCommitSizeVar(upd);
-      Assert.fail();
+      fail();
     } catch (Exception ex) {
     }
   }
 
-  @Before
-  public void setUpLoadSave() throws Exception {
+  @BeforeEach
+  void setUpLoadSave() throws Exception {
 
     List<String> attributes = Arrays.asList("connection", "lookup", "commit", "update_bypassed");
 
     Map<String, String> getterMap =
-        new HashMap<String, String>() {
+        new HashMap<>() {
           {
             put("connection", "getConnection");
             put("lookup", "getInsertUpdateLookupField");
@@ -142,7 +147,7 @@ public class InsertUpdateMetaTest {
           }
         };
     Map<String, String> setterMap =
-        new HashMap<String, String>() {
+        new HashMap<>() {
           {
             put("connection", "setConnection");
             put("lookup", "setInsertUpdateLookupField");
@@ -168,11 +173,11 @@ public class InsertUpdateMetaTest {
 
     validatorFactory.registerValidator(
         validatorFactory.getName(InsertUpdateLookupField.class),
-        new ObjectValidator<InsertUpdateLookupField>(
+        new ObjectValidator<>(
             validatorFactory,
             InsertUpdateLookupField.class,
             Arrays.asList("schema", "table", "key", "value"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("schema", "getSchemaName");
                 put("table", "getTableName");
@@ -180,7 +185,7 @@ public class InsertUpdateMetaTest {
                 put("value", "getValueFields");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("schema", "setSchemaName");
                 put("table", "setTableName");
@@ -191,16 +196,15 @@ public class InsertUpdateMetaTest {
 
     validatorFactory.registerValidator(
         validatorFactory.getName(List.class, InsertUpdateLookupField.class),
-        new ListLoadSaveValidator<InsertUpdateLookupField>(
-            new InsertUpdateLookupFieldLoadSaveValidator()));
+        new ListLoadSaveValidator<>(new InsertUpdateLookupFieldLoadSaveValidator()));
 
     validatorFactory.registerValidator(
         validatorFactory.getName(InsertUpdateKeyField.class),
-        new ObjectValidator<InsertUpdateKeyField>(
+        new ObjectValidator<>(
             validatorFactory,
             InsertUpdateKeyField.class,
             Arrays.asList("name", "field", "condition", "name2"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "getKeyStream");
                 put("field", "getKeyLookup");
@@ -208,7 +212,7 @@ public class InsertUpdateMetaTest {
                 put("name2", "getKeyStream2");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "setKeyStream");
                 put("field", "setKeyLookup");
@@ -219,22 +223,21 @@ public class InsertUpdateMetaTest {
 
     validatorFactory.registerValidator(
         validatorFactory.getName(List.class, InsertUpdateKeyField.class),
-        new ListLoadSaveValidator<InsertUpdateKeyField>(
-            new InsertUpdateKeyFieldLoadSaveValidator()));
+        new ListLoadSaveValidator<>(new InsertUpdateKeyFieldLoadSaveValidator()));
 
     validatorFactory.registerValidator(
         validatorFactory.getName(InsertUpdateValue.class),
-        new ObjectValidator<InsertUpdateValue>(
+        new ObjectValidator<>(
             validatorFactory,
             InsertUpdateValue.class,
             Arrays.asList("name", "rename"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "getUpdateLookup");
                 put("rename", "getUpdateStream");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("name", "setUpdateLookup");
                 put("rename", "setUpdateStream");
@@ -243,16 +246,16 @@ public class InsertUpdateMetaTest {
 
     validatorFactory.registerValidator(
         validatorFactory.getName(List.class, InsertUpdateValue.class),
-        new ListLoadSaveValidator<InsertUpdateValue>(new InsertUpdateValueLoadSaveValidator()));
+        new ListLoadSaveValidator<>(new InsertUpdateValueLoadSaveValidator()));
   }
 
   @Test
-  public void testSerialization() throws HopException {
+  void testSerialization() throws HopException {
     loadSaveTester.testSerialization();
   }
 
   @Test
-  public void testErrorProcessRow() throws HopException {
+  void testErrorProcessRow() throws HopException {
     Mockito.when(
             mockHelper.logChannelFactory.create(Mockito.any(), Mockito.any(ILoggingObject.class)))
         .thenReturn(mockHelper.iLogChannel);
@@ -279,7 +282,7 @@ public class InsertUpdateMetaTest {
         .putRow(Mockito.any(), Mockito.any());
 
     boolean result = insertUpdateTransform.processRow();
-    Assert.assertFalse(result);
+    assertFalse(result);
   }
 
   public class InsertUpdateLookupFieldLoadSaveValidator
@@ -291,8 +294,8 @@ public class InsertUpdateMetaTest {
       return new InsertUpdateLookupField(
           UUID.randomUUID().toString(),
           UUID.randomUUID().toString(),
-          new ArrayList<InsertUpdateKeyField>(),
-          new ArrayList<InsertUpdateValue>());
+          new ArrayList<>(),
+          new ArrayList<>());
     }
 
     @Override

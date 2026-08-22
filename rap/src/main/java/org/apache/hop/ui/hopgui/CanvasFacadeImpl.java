@@ -19,6 +19,8 @@ package org.apache.hop.ui.hopgui;
 
 import org.apache.hop.base.AbstractMeta;
 import org.apache.hop.core.gui.DPoint;
+import org.apache.hop.core.gui.Point;
+import org.apache.hop.core.gui.Rectangle;
 import org.apache.hop.pipeline.PipelineHopMeta;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.ui.core.PropsUi;
@@ -37,23 +39,44 @@ public class CanvasFacadeImpl extends CanvasFacade {
     setDataCommon(canvas, magnification, offset, meta);
     if (meta instanceof WorkflowMeta workflowMeta) {
       setDataWorkflow(canvas, workflowMeta);
-    } else {
-      setDataPipeline(canvas, (PipelineMeta) meta);
+    } else if (meta instanceof PipelineMeta pipelineMeta) {
+      setDataPipeline(canvas, pipelineMeta);
     }
+    // Other meta types (plugin model graphs, etc.): common props only.
+    // Callers may already have set canvas data keys such as "nodes" for client drag previews.
   }
 
   private void setDataCommon(Canvas canvas, float magnification, DPoint offset, Object meta) {
     JsonObject jsonProps = new JsonObject();
-    jsonProps.add("themeId", System.getProperty(HopWeb.HOP_WEB_THEME, "light"));
-    jsonProps.add(
-        "gridSize",
-        PropsUi.getInstance().isShowCanvasGridEnabled()
-            ? PropsUi.getInstance().getCanvasGridSize()
-            : 1);
+    jsonProps.add("themeId", PropsUi.getInstance().isDarkMode() ? "dark" : "light");
+    jsonProps.add("gridSize", PropsUi.getInstance().getCanvasGridSize());
+    jsonProps.add("showGrid", PropsUi.getInstance().isShowCanvasGridEnabled());
     jsonProps.add("iconSize", PropsUi.getInstance().getIconSize());
     jsonProps.add("magnification", (float) (magnification * PropsUi.getNativeZoomFactor()));
     jsonProps.add("offsetX", offset.x);
     jsonProps.add("offsetY", offset.y);
+
+    // Add pan data if available
+    Point panStartOffset = (Point) canvas.getData("panStartOffset");
+    Rectangle panBoundaries = (Rectangle) canvas.getData("panBoundaries");
+    if (panStartOffset != null) {
+      JsonObject jsonPanStartOffset = new JsonObject();
+      jsonPanStartOffset.add("x", panStartOffset.x);
+      jsonPanStartOffset.add("y", panStartOffset.y);
+      jsonProps.add("panStartOffset", jsonPanStartOffset);
+    }
+    if (panBoundaries != null) {
+      JsonObject jsonPanBoundaries = new JsonObject();
+      jsonPanBoundaries.add("x", panBoundaries.x);
+      jsonPanBoundaries.add("y", panBoundaries.y);
+      jsonPanBoundaries.add("width", panBoundaries.width);
+      jsonPanBoundaries.add("height", panBoundaries.height);
+      jsonProps.add("panBoundaries", jsonPanBoundaries);
+    }
+
+    addRectangle(jsonProps, "viewPort", (Rectangle) canvas.getData("viewPort"));
+    addRectangle(jsonProps, "graphPort", (Rectangle) canvas.getData("graphPort"));
+
     canvas.setData("props", jsonProps);
 
     JsonArray jsonNotes = new JsonArray();
@@ -131,5 +154,17 @@ public class CanvasFacadeImpl extends CanvasFacade {
       }
     }
     canvas.setData("hops", jsonHops);
+  }
+
+  private static void addRectangle(JsonObject parent, String key, Rectangle rect) {
+    if (rect == null) {
+      return;
+    }
+    JsonObject jsonRect = new JsonObject();
+    jsonRect.add("x", rect.x);
+    jsonRect.add("y", rect.y);
+    jsonRect.add("width", rect.width);
+    jsonRect.add("height", rect.height);
+    parent.add(key, jsonRect);
   }
 }

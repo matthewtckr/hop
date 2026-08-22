@@ -21,7 +21,7 @@ import com.google.common.annotations.VisibleForTesting;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.Database;
 import org.apache.hop.core.database.DatabaseMeta;
@@ -115,24 +115,23 @@ public class DatabaseLookup extends BaseTransform<DatabaseLookupMeta, DatabaseLo
       add = null;
     }
 
-    if (add == null) {
-      if (!(meta.isCached() && meta.isLoadingAllDataInCache())
-          || data.hasDBCondition) { // do not go to the
-        // database when all rows
-        // are in (exception LIKE
-        // operator)
-        if (isRowLevel()) {
-          logRowlevel(
-              BaseMessages.getString(PKG, "DatabaseLookup.Log.AddedValuesToLookupRow1")
-                  + meta.getLookup().getKeyFields().size()
-                  + BaseMessages.getString(PKG, "DatabaseLookup.Log.AddedValuesToLookupRow2")
-                  + data.lookupMeta.getString(lookupRow));
-        }
-
-        data.db.setValuesLookup(data.lookupMeta, lookupRow);
-        add = data.db.getLookup(meta.getLookup().isFailingOnMultipleResults());
-        cacheNow = true;
+    if (add == null
+        && (!(meta.isCached() && meta.isLoadingAllDataInCache()) || data.hasDBCondition)) {
+      // do not go to the
+      // database when all rows
+      // are in (exception LIKE
+      // operator)
+      if (isRowLevel()) {
+        logRowlevel(
+            BaseMessages.getString(PKG, "DatabaseLookup.Log.AddedValuesToLookupRow1")
+                + meta.getLookup().getKeyFields().size()
+                + BaseMessages.getString(PKG, "DatabaseLookup.Log.AddedValuesToLookupRow2")
+                + data.lookupMeta.getString(lookupRow));
       }
+
+      data.db.setValuesLookup(data.lookupMeta, lookupRow);
+      add = data.db.getLookup(meta.getLookup().isFailingOnMultipleResults());
+      cacheNow = true;
     }
 
     if (add == null) { // nothing was found, unknown code: add default values
@@ -224,6 +223,7 @@ public class DatabaseLookup extends BaseTransform<DatabaseLookupMeta, DatabaseLo
             this, meta.getSchemaName(), meta.getTableName());
 
     IRowMeta fields = data.db.getTableFields(schemaTable);
+    data.dbRowMeta = fields;
     if (fields != null) {
       // Fill in the types...
       for (int i = 0; i < keyFields.size(); i++) {
@@ -301,9 +301,9 @@ public class DatabaseLookup extends BaseTransform<DatabaseLookupMeta, DatabaseLo
 
     data.returnValueTypes = new int[returnValues.size()];
     for (int i = 0; i < returnValues.size(); i++) {
-      data.returnValueTypes[i] =
-          ValueMetaFactory.getIdForValueMeta(returnValues.get(i).getDefaultType());
       IValueMeta v = data.outputRowMeta.getValueMeta(getInputRowMeta().size() + i).clone();
+      // Use resolved output type (may be inferred from the table when default type is empty)
+      data.returnValueTypes[i] = v.getType();
       data.returnMeta.addValueMeta(v);
     }
   }
@@ -318,10 +318,6 @@ public class DatabaseLookup extends BaseTransform<DatabaseLookupMeta, DatabaseLo
 
     if (first) {
       first = false;
-
-      // create the output metadata
-      data.outputRowMeta = getInputRowMeta().clone();
-      meta.getFields(data.outputRowMeta, getTransformName(), null, null, this, metadataProvider);
 
       Lookup lookup = meta.getLookup();
       List<KeyField> keyFields = lookup.getKeyFields();
@@ -407,7 +403,18 @@ public class DatabaseLookup extends BaseTransform<DatabaseLookupMeta, DatabaseLo
         data.cache = DefaultCache.newCache(data, meta.getCacheSize());
       }
 
+      // Query table metadata once: key types + return type inference for empty default types
       determineFieldsTypesQueryingDb();
+
+      // create the output metadata (pass table fields so empty return types can be inferred)
+      data.outputRowMeta = getInputRowMeta().clone();
+      meta.getFields(
+          data.outputRowMeta,
+          getTransformName(),
+          new IRowMeta[] {data.dbRowMeta},
+          null,
+          this,
+          metadataProvider);
 
       initNullIf();
 
@@ -450,9 +457,9 @@ public class DatabaseLookup extends BaseTransform<DatabaseLookupMeta, DatabaseLo
         if (isRowLevel()) {
           logRowlevel(
               BaseMessages.getString(PKG, "DatabaseLookup.Log.WroteRowToNextTransform")
-                  + getInputRowMeta().getString(r));
+                  + data.outputRowMeta.getString(outputRow));
         }
-        if (checkFeedback(getLinesRead())) {
+        if (checkFeedback(getLinesRead()) && isBasic()) {
           logBasic("linenr " + getLinesRead());
         }
       }
@@ -499,8 +506,7 @@ public class DatabaseLookup extends BaseTransform<DatabaseLookupMeta, DatabaseLo
       // Also grab the return field...
       //
       List<ReturnValue> returnValues = lookup.getReturnValues();
-      for (int i = 0; i < returnValues.size(); i++) {
-        ReturnValue returnValue = returnValues.get(i);
+      for (ReturnValue returnValue : returnValues) {
         sql += ", " + dbMeta.quoteField(returnValue.getTableField());
       }
       // The schema/table

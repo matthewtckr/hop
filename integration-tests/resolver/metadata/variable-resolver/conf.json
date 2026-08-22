@@ -5,7 +5,7 @@
   "variable-resolver": {
     "Variable-Resolver-Pipeline": {
       "outputTransformName": "OUTPUT",
-      "filename": "${PROJECT_HOME}/0002-pipeline-get-configurations.hpl",
+      "filename": "${PROJECT_HOME}/0001-pipeline-get-configurations.hpl",
       "expressionVariableName": "TYPE",
       "runConfigurationName": "local"
     }

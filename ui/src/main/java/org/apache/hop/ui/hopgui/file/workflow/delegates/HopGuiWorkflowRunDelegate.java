@@ -22,20 +22,27 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.extension.ExtensionPointHandler;
 import org.apache.hop.core.extension.HopExtensionPoint;
 import org.apache.hop.core.logging.DefaultLogLevel;
 import org.apache.hop.core.logging.LogChannel;
+import org.apache.hop.core.security.Permission;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.pipeline.engine.EngineCompatibilityChecker;
 import org.apache.hop.server.HopServerMeta;
 import org.apache.hop.ui.core.dialog.MessageBox;
+import org.apache.hop.ui.core.security.HopSecurityUi;
+import org.apache.hop.ui.hopgui.EngineCompatibilityRunGate;
 import org.apache.hop.ui.hopgui.HopGui;
 import org.apache.hop.ui.hopgui.file.workflow.HopGuiWorkflowGraph;
 import org.apache.hop.ui.workflow.dialog.WorkflowExecutionConfigurationDialog;
 import org.apache.hop.workflow.WorkflowExecutionConfiguration;
 import org.apache.hop.workflow.WorkflowMeta;
+import org.apache.hop.workflow.config.WorkflowRunConfiguration;
+import org.apache.hop.www.RemoteHopServer;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.widgets.Shell;
 
@@ -72,6 +79,9 @@ public class HopGuiWorkflowRunDelegate {
     if (workflowMeta == null) {
       return;
     }
+    if (!HopSecurityUi.check(Permission.RUN_EXECUTE)) {
+      return;
+    }
 
     WorkflowExecutionConfiguration executionConfiguration = getWorkflowExecutionConfiguration();
 
@@ -87,7 +97,38 @@ public class HopGuiWorkflowRunDelegate {
     WorkflowExecutionConfigurationDialog dialog =
         newWorkflowExecutionConfigurationDialog(executionConfiguration, workflowMeta);
 
-    if (!workflowMeta.isShowDialog() || dialog.open()) {
+    if (dialog.open()) {
+
+      // Engine-compatibility pre-flight: refuse to start a workflow that contains actions the
+      // selected workflow engine marks UNSUPPORTED. The user can explicitly "Run anyway".
+      List<EngineCompatibilityChecker.Violation> compatViolations =
+          EngineCompatibilityRunGate.checkWorkflowForRun(
+              workflowMeta,
+              executionConfiguration.getRunConfiguration(),
+              hopGui.getMetadataProvider());
+      if (!compatViolations.isEmpty()) {
+        String compatEngineId = "";
+        try {
+          WorkflowRunConfiguration wrc =
+              hopGui
+                  .getMetadataProvider()
+                  .getSerializer(WorkflowRunConfiguration.class)
+                  .load(executionConfiguration.getRunConfiguration());
+          if (wrc != null && wrc.getEngineRunConfiguration() != null) {
+            compatEngineId = wrc.getEngineRunConfiguration().getEnginePluginId();
+          }
+        } catch (Exception ignored) {
+          // dialog still works with the empty-label fallback
+        }
+        if (!EngineCompatibilityRunGate.confirmRunAnyway(
+            hopGui.getShell(), "workflow", compatEngineId, compatViolations)) {
+          return;
+        }
+        // Run-scoped (not persisted): propagate the override into the execution variables so the
+        // engine-side deep gate in Workflow.executeFromStart and any nested child pipelines/
+        // workflows honor it.
+        executionConfiguration.getVariablesMap().put(Const.HOP_ALLOW_UNSUPPORTED, "Y");
+      }
 
       workflowGraph.workflowLogDelegate.addWorkflowLog();
 
@@ -108,25 +149,28 @@ public class HopGuiWorkflowRunDelegate {
         hopGui.getShell(), executionConfiguration, workflowMeta);
   }
 
-  private static void showSaveJobBeforeRunningDialog(Shell shell) {
+  private static void showSaveWorkflowBeforeRunningDialog(Shell shell) {
     MessageBox m = new MessageBox(shell, SWT.OK | SWT.ICON_WARNING);
     m.setText(BaseMessages.getString(PKG, "WorkflowLog.Dialog.SaveJobBeforeRunning.Title"));
     m.setMessage(BaseMessages.getString(PKG, "WorkflowLog.Dialog.SaveJobBeforeRunning.Message"));
     m.open();
   }
 
-  private void monitorRemoteJob(
+  private void monitorRemoteWorkflow(
       final WorkflowMeta workflowMeta,
       final String serverObjectId,
-      final HopServerMeta remoteHopServer) {
+      final HopServerMeta hopServerMeta) {
     // There is a workflow running in the background. When it finishes log the result on the
     // console.
+
+    RemoteHopServer server = new RemoteHopServer(hopServerMeta);
+
     // Launch in a separate thread to prevent GUI blocking...
     //
     Thread thread =
         new Thread(
             () ->
-                remoteHopServer.monitorRemoteWorkflow(
+                server.monitorRemoteWorkflow(
                     hopGui.getVariables(),
                     hopGui.getLog(),
                     serverObjectId,
@@ -135,10 +179,10 @@ public class HopGuiWorkflowRunDelegate {
     thread.setName(
         "Monitor remote workflow '"
             + workflowMeta.getName()
-            + "', carte object id="
+            + "', server object id="
             + serverObjectId
             + ", hop server: "
-            + remoteHopServer.getName());
+            + server.getName());
     thread.start();
   }
 

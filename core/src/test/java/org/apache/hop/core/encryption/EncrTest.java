@@ -17,33 +17,28 @@
 
 package org.apache.hop.core.encryption;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.apache.hop.core.HopClientEnvironment;
-import org.apache.hop.core.exception.HopValueException;
-import org.apache.hop.junit.rules.RestoreHopEnvironment;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.apache.hop.junit.rules.RestoreHopEnvironmentExtension;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * Test cases for encryption, to make sure that encrypted password remain the same between versions.
  */
-public class EncrTest {
-  @ClassRule public static RestoreHopEnvironment env = new RestoreHopEnvironment();
+@ExtendWith(RestoreHopEnvironmentExtension.class)
+class EncrTest {
 
-  @BeforeClass
-  public static void setUpBeforeClass() throws Exception {
+  @BeforeAll
+  static void setUpBeforeClass() throws Exception {
     HopClientEnvironment.init();
   }
 
-  /**
-   * Test password encryption.
-   *
-   * @throws HopValueException
-   */
+  /** Test password encryption. */
   @Test
-  public void testEncryptPassword() {
+  void testEncryptPassword() {
     String encryption;
 
     encryption = Encr.encryptPassword(null);
@@ -72,13 +67,9 @@ public class EncrTest {
     assertEquals("2be98afc86aa7c3d6f84dfb2689caf68a", encryption);
   }
 
-  /**
-   * Test password decryption.
-   *
-   * @throws HopValueException
-   */
+  /** Test password decryption. */
   @Test
-  public void testDecryptPassword() {
+  void testDecryptPassword() {
     String encryption;
     String decryption;
 
@@ -115,13 +106,9 @@ public class EncrTest {
     assertEquals("1234567890", decryption);
   }
 
-  /**
-   * Test password encryption (variable style).
-   *
-   * @throws HopValueException
-   */
+  /** Test password encryption (variable style). */
   @Test
-  public void testEncryptPasswordIfNotUsingVariables() {
+  void testEncryptPasswordIfNotUsingVariables() {
     String encryption;
 
     encryption = Encr.encryptPasswordIfNotUsingVariables(null);
@@ -139,6 +126,9 @@ public class EncrTest {
     encryption = Encr.encryptPasswordIfNotUsingVariables(" %%VAR%% String");
     assertEquals(" %%VAR%% String", encryption);
 
+    encryption = Encr.encryptPasswordIfNotUsingVariables("#{vault:hop/data/some-db:password}");
+    assertEquals("#{vault:hop/data/some-db:password}", encryption);
+
     encryption = Encr.encryptPasswordIfNotUsingVariables(" %% VAR String");
     assertEquals("Encrypted 2be988fed4f87a4a599599d64cc9ba1dd", encryption);
 
@@ -146,13 +136,9 @@ public class EncrTest {
     assertEquals("Encrypted 2be98afc86aa7f2e4ef02eb359ad6eb9e", encryption);
   }
 
-  /**
-   * Test password decryption (variable style).
-   *
-   * @throws HopValueException
-   */
+  /** Test password decryption (variable style). */
   @Test
-  public void testDecryptPasswordIfNotUsingVariables() {
+  void testDecryptPasswordIfNotUsingVariables() {
     String encryption;
     String decryption;
 
@@ -175,6 +161,10 @@ public class EncrTest {
     encryption = Encr.encryptPasswordIfNotUsingVariables(" %%VAR%% String");
     decryption = Encr.decryptPasswordOptionallyEncrypted(encryption);
     assertEquals(" %%VAR%% String", decryption);
+
+    encryption = Encr.encryptPasswordIfNotUsingVariables("#{vault:hop/data/some-db:password}");
+    decryption = Encr.decryptPasswordOptionallyEncrypted(encryption);
+    assertEquals("#{vault:hop/data/some-db:password}", decryption);
 
     encryption = Encr.encryptPasswordIfNotUsingVariables(" %% VAR String");
     decryption = Encr.decryptPasswordOptionallyEncrypted(encryption);

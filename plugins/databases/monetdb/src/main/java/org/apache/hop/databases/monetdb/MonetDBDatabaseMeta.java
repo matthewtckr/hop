@@ -21,7 +21,9 @@ import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.util.Utils;
@@ -34,6 +36,12 @@ import org.apache.hop.core.util.Utils;
     classLoaderGroup = "monetdb")
 @GuiPlugin(id = "GUI-MonetDBDatabaseMeta")
 public class MonetDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  /** MonetDB limits rows at the end of the statement. */
+  @Override
+  public String getLimitClause(int nrRows) {
+    return " LIMIT " + nrRows;
+  }
 
   public static final String CONST_BIGINT = "BIGINT";
   public static final String CONST_DOUBLE = "DOUBLE";
@@ -76,6 +84,20 @@ public class MonetDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   @Override
   public String getDriverClass() {
     return "org.monetdb.jdbc.MonetDriver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("monetdb:monetdb-jdbc")
+        .defaultVersion("12.2")
+        .licenseCategory("B")
+        .licenseName("MPL-2.0")
+        .licenseUrl("https://www.mozilla.org/en-US/MPL/2.0/")
+        .vendor("MonetDB")
+        .vendorUrl("https://www.monetdb.org/")
+        .repositoryUrl("https://clojars.org/repo/")
+        .build();
   }
 
   @Override
@@ -147,7 +169,7 @@ public class MonetDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -167,7 +189,8 @@ public class MonetDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " MODIFY "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -264,7 +287,7 @@ public class MonetDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     int precision = v.getPrecision();
 
     Boolean mode = MonetDBDatabaseMeta.safeModeLocal.get();
-    boolean safeMode = mode != null && mode.booleanValue();
+    boolean safeMode = mode != null && mode;
 
     if (addFieldName) {
       // protect the fieldname
@@ -404,5 +427,10 @@ public class MonetDBDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   public String getSqlNextSequenceValue(String sequenceName) {
     String realSequenceName = sequenceName.replace(getStartQuote(), "").replace(getEndQuote(), "");
     return String.format("SELECT next_value_for( 'sys', '%s' )", realSequenceName);
+  }
+
+  @Override
+  public void addDefaultOptions() {
+    setSupportsBooleanDataType(true);
   }
 }

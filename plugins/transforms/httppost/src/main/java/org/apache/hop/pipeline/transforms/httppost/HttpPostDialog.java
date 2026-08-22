@@ -17,7 +17,6 @@
 
 package org.apache.hop.pipeline.transforms.httppost;
 
-import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.hop.core.Const;
@@ -61,7 +60,6 @@ import org.eclipse.swt.widgets.Group;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.TableItem;
-import org.eclipse.swt.widgets.Text;
 
 public class HttpPostDialog extends BaseTransformDialog {
   private static final Class<?> PKG = HttpPostMeta.class;
@@ -117,6 +115,7 @@ public class HttpPostDialog extends BaseTransformDialog {
   private boolean gotPreviousFields = false;
 
   private ComboVar wEncoding;
+  private ComboVar wContentType;
   private Button wMultiPartUpload;
 
   private Button wPostAFile;
@@ -137,27 +136,14 @@ public class HttpPostDialog extends BaseTransformDialog {
 
   @Override
   public String open() {
-    Shell parent = getParent();
+    createShell(BaseMessages.getString(PKG, "HTTPPOSTDialog.Shell.Title"));
 
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
-    PropsUi.setLook(shell);
-    setShellImage(shell, input);
+    buildButtonBar().ok(e -> ok()).cancel(e -> cancel()).build();
 
     ModifyListener lsMod = e -> input.setChanged();
-
     changed = input.hasChanged();
 
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = PropsUi.getFormMargin();
-    formLayout.marginHeight = PropsUi.getFormMargin();
-
-    shell.setLayout(formLayout);
-    shell.setText(BaseMessages.getString(PKG, "HTTPPOSTDialog.Shell.Title"));
-
-    int margin = PropsUi.getMargin();
-
     setupButtons(margin);
-    setupTransformNameField(lsMod);
 
     CTabFolder wTabFolder = new CTabFolder(shell, SWT.BORDER);
     PropsUi.setLook(wTabFolder, Props.WIDGET_STYLE_TAB);
@@ -187,6 +173,7 @@ public class HttpPostDialog extends BaseTransformDialog {
     setupIgnoreSslLine(gSettings);
     setupUrlFieldNameLine(lsMod, gSettings);
     setupEncodingLine(lsMod, gSettings);
+    setupContentTypeLine(lsMod, gSettings);
     setupRequestEntityLine(lsMod, gSettings);
     setupMultiPartUpload(gSettings);
     setupPostFileLine(gSettings);
@@ -197,7 +184,7 @@ public class HttpPostDialog extends BaseTransformDialog {
     FormData fdSettings = new FormData();
     fdSettings.left = new FormAttachment(0, 0);
     fdSettings.right = new FormAttachment(100, 0);
-    fdSettings.top = new FormAttachment(wTransformName, margin);
+    fdSettings.top = new FormAttachment(wSpacer, margin);
     gSettings.setLayoutData(fdSettings);
 
     // END Output Settings GROUP
@@ -256,7 +243,7 @@ public class HttpPostDialog extends BaseTransformDialog {
 
     FormData fdGeneralComp = new FormData();
     fdGeneralComp.left = new FormAttachment(0, 0);
-    fdGeneralComp.top = new FormAttachment(wTransformName, margin);
+    fdGeneralComp.top = new FormAttachment(wSpacer, margin);
     fdGeneralComp.right = new FormAttachment(100, 0);
     fdGeneralComp.bottom = new FormAttachment(100, 0);
     wGeneralComp.setLayoutData(fdGeneralComp);
@@ -310,7 +297,7 @@ public class HttpPostDialog extends BaseTransformDialog {
     new Thread(runnable).start();
     FormData fdAdditionalComp = new FormData();
     fdAdditionalComp.left = new FormAttachment(0, 0);
-    fdAdditionalComp.top = new FormAttachment(wTransformName, margin);
+    fdAdditionalComp.top = new FormAttachment(wSpacer, margin);
     fdAdditionalComp.right = new FormAttachment(100, 0);
     fdAdditionalComp.bottom = new FormAttachment(100, 0);
     wAdditionalComp.setLayoutData(fdAdditionalComp);
@@ -321,9 +308,9 @@ public class HttpPostDialog extends BaseTransformDialog {
 
     FormData fdTabFolder = new FormData();
     fdTabFolder.left = new FormAttachment(0, 0);
-    fdTabFolder.top = new FormAttachment(wTransformName, margin);
+    fdTabFolder.top = new FormAttachment(wSpacer, margin);
     fdTabFolder.right = new FormAttachment(100, 0);
-    fdTabFolder.bottom = new FormAttachment(wOk, -2 * margin);
+    fdTabFolder.bottom = new FormAttachment(wOk, -margin);
     wTabFolder.setLayoutData(fdTabFolder);
 
     // Add listeners
@@ -342,7 +329,7 @@ public class HttpPostDialog extends BaseTransformDialog {
     getData();
     activeUrlInfield();
     input.setChanged(changed);
-
+    focusTransformName();
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 
     return transformName;
@@ -456,15 +443,13 @@ public class HttpPostDialog extends BaseTransformDialog {
     fdFields.left = new FormAttachment(0, 0);
     fdFields.top = new FormAttachment(wlFields, margin);
     fdFields.right = new FormAttachment(wGetBodyParam, -margin);
-    fdFields.bottom = new FormAttachment(wlFields, 200);
+    fdFields.bottom = new FormAttachment(wlFields, 300);
     wFields.setLayoutData(fdFields);
     return wGetBodyParam;
   }
 
   private void setupProxyPort(ModifyListener lsMod, Group gProxy) {
     // Proxy port
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
     Label wlProxyPort = new Label(gProxy, SWT.RIGHT);
     wlProxyPort.setText(BaseMessages.getString(PKG, "HTTPPOSTDialog.ProxyPort.Label"));
     PropsUi.setLook(wlProxyPort);
@@ -508,7 +493,7 @@ public class HttpPostDialog extends BaseTransformDialog {
   }
 
   private Group setupProxyHostGroup(Composite wGeneralComp) {
-    Group gProxy = new Group(wGeneralComp, SWT.SHADOW_ETCHED_IN);
+    Group gProxy = new Group(wGeneralComp, SWT.SHADOW_NONE);
     gProxy.setText(BaseMessages.getString(PKG, "HTTPPOSTDialog.ProxyGroup.Label"));
     FormLayout proxyLayout = new FormLayout();
     proxyLayout.marginWidth = 3;
@@ -566,7 +551,7 @@ public class HttpPostDialog extends BaseTransformDialog {
   }
 
   private Group setupHttpAuthGroup(Composite wGeneralComp) {
-    Group gHttpAuth = new Group(wGeneralComp, SWT.SHADOW_ETCHED_IN);
+    Group gHttpAuth = new Group(wGeneralComp, SWT.SHADOW_NONE);
     gHttpAuth.setText(BaseMessages.getString(PKG, "HTTPPOSTDialog.HttpAuthGroup.Label"));
     FormLayout httpAuthLayout = new FormLayout();
     httpAuthLayout.marginWidth = 3;
@@ -665,7 +650,7 @@ public class HttpPostDialog extends BaseTransformDialog {
   }
 
   private Group setupOutputFieldGroup(Composite wGeneralComp) {
-    Group gOutputFields = new Group(wGeneralComp, SWT.SHADOW_ETCHED_IN);
+    Group gOutputFields = new Group(wGeneralComp, SWT.SHADOW_NONE);
     gOutputFields.setText(BaseMessages.getString(PKG, "HTTPDialog.OutputFieldsGroup.Label"));
     FormLayout outputFieldsLayout = new FormLayout();
     outputFieldsLayout.marginWidth = 3;
@@ -804,7 +789,7 @@ public class HttpPostDialog extends BaseTransformDialog {
     FormData fdlRequestEntity = new FormData();
     fdlRequestEntity.left = new FormAttachment(0, 0);
     fdlRequestEntity.right = new FormAttachment(middle, -margin);
-    fdlRequestEntity.top = new FormAttachment(wEncoding, margin);
+    fdlRequestEntity.top = new FormAttachment(wContentType, margin);
     wlRequestEntity.setLayoutData(fdlRequestEntity);
 
     wRequestEntity = new ComboVar(variables, gSettings, SWT.BORDER | SWT.READ_ONLY);
@@ -813,7 +798,7 @@ public class HttpPostDialog extends BaseTransformDialog {
     wRequestEntity.addModifyListener(lsMod);
     FormData fdRequestEntity = new FormData();
     fdRequestEntity.left = new FormAttachment(middle, 0);
-    fdRequestEntity.top = new FormAttachment(wEncoding, margin);
+    fdRequestEntity.top = new FormAttachment(wContentType, margin);
     fdRequestEntity.right = new FormAttachment(100, -margin);
     wRequestEntity.setLayoutData(fdRequestEntity);
     wRequestEntity.addFocusListener(
@@ -869,6 +854,37 @@ public class HttpPostDialog extends BaseTransformDialog {
             shell.setCursor(null);
             busy.dispose();
           }
+        });
+  }
+
+  private void setupContentTypeLine(ModifyListener lsMod, Group gSettings) {
+    int middle = props.getMiddlePct();
+    int margin = PropsUi.getMargin();
+    Label wlContentType = new Label(gSettings, SWT.RIGHT);
+    wlContentType.setText(BaseMessages.getString(PKG, "HTTPPOSTDialog.ContentType.Label"));
+    wlContentType.setToolTipText(BaseMessages.getString(PKG, "HTTPPOSTDialog.ContentType.Tooltip"));
+    PropsUi.setLook(wlContentType);
+    FormData fdlContentType = new FormData();
+    fdlContentType.left = new FormAttachment(0, 0);
+    fdlContentType.top = new FormAttachment(wEncoding, margin);
+    fdlContentType.right = new FormAttachment(middle, -margin);
+    wlContentType.setLayoutData(fdlContentType);
+    wContentType = new ComboVar(variables, gSettings, SWT.BORDER);
+    wContentType.setToolTipText(BaseMessages.getString(PKG, "HTTPPOSTDialog.ContentType.Tooltip"));
+    PropsUi.setLook(wContentType);
+    wContentType.addModifyListener(lsMod);
+    FormData fdContentType = new FormData();
+    fdContentType.left = new FormAttachment(middle, 0);
+    fdContentType.top = new FormAttachment(wEncoding, margin);
+    fdContentType.right = new FormAttachment(100, -margin);
+    wContentType.setLayoutData(fdContentType);
+    wContentType.setItems(
+        new String[] {
+          "text/xml",
+          "application/json",
+          "application/xml",
+          "text/plain",
+          "application/x-www-form-urlencoded"
         });
   }
 
@@ -979,7 +995,7 @@ public class HttpPostDialog extends BaseTransformDialog {
     FormData fdlUrl = new FormData();
     fdlUrl.left = new FormAttachment(0, 0);
     fdlUrl.right = new FormAttachment(middle, -margin);
-    fdlUrl.top = new FormAttachment(wTransformName, margin);
+    fdlUrl.top = new FormAttachment(wSpacer, margin);
     wlUrl.setLayoutData(fdlUrl);
 
     wUrl = new TextVar(variables, gSettings, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
@@ -987,13 +1003,13 @@ public class HttpPostDialog extends BaseTransformDialog {
     wUrl.addModifyListener(lsMod);
     FormData fdUrl = new FormData();
     fdUrl.left = new FormAttachment(middle, 0);
-    fdUrl.top = new FormAttachment(wTransformName, margin);
+    fdUrl.top = new FormAttachment(wSpacer, margin);
     fdUrl.right = new FormAttachment(100, 0);
     wUrl.setLayoutData(fdUrl);
   }
 
   private Group setupSettingGroup(Composite wGeneralComp) {
-    Group gSettings = new Group(wGeneralComp, SWT.SHADOW_ETCHED_IN);
+    Group gSettings = new Group(wGeneralComp, SWT.SHADOW_NONE);
     gSettings.setText(BaseMessages.getString(PKG, "HTTPPOSTDialog.SettingsGroup.Label"));
     FormLayout settingsLayout = new FormLayout();
     settingsLayout.marginWidth = 3;
@@ -1003,38 +1019,8 @@ public class HttpPostDialog extends BaseTransformDialog {
     return gSettings;
   }
 
-  private void setupTransformNameField(ModifyListener lsMod) {
-    // TransformName line
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(BaseMessages.getString(PKG, "HTTPPOSTDialog.TransformName.Label"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    fdlTransformName.top = new FormAttachment(0, margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    wTransformName.addModifyListener(lsMod);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(middle, 0);
-    fdTransformName.top = new FormAttachment(0, margin);
-    fdTransformName.right = new FormAttachment(100, 0);
-    wTransformName.setLayoutData(fdTransformName);
-  }
-
   private void setupButtons(int margin) {
     // THE BUTTONS
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, e -> ok());
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, e -> cancel());
-    setButtonPositions(new Button[] {wOk, wCancel}, margin, null);
   }
 
   protected void setComboBoxes() {
@@ -1070,18 +1056,9 @@ public class HttpPostDialog extends BaseTransformDialog {
     if (!gotEncodings) {
       gotEncodings = true;
 
-      wEncoding.removeAll();
-      List<Charset> values = new ArrayList<>(Charset.availableCharsets().values());
-      for (Charset charSet : values) {
-        wEncoding.add(charSet.displayName());
-      }
-
-      // Now select the default!
-      String defEncoding = Const.getEnvironmentVariable("file.encoding", "UTF-8");
-      int idx = Const.indexOfString(defEncoding, wEncoding.getItems());
-      if (idx >= 0) {
-        wEncoding.select(idx);
-      }
+      String encoding = wEncoding.getText();
+      wEncoding.setItems(ConstUi.getEncodings());
+      wEncoding.setText(Const.NVL(encoding, ""));
     }
   }
 
@@ -1145,6 +1122,9 @@ public class HttpPostDialog extends BaseTransformDialog {
     if (input.getEncoding() != null) {
       wEncoding.setText(input.getEncoding());
     }
+    if (input.getContentType() != null) {
+      wContentType.setText(input.getContentType());
+    }
     wPostAFile.setSelection(input.isPostAFile());
     wMultiPartUpload.setSelection(input.isMultipartupload());
 
@@ -1170,9 +1150,6 @@ public class HttpPostDialog extends BaseTransformDialog {
 
     wFields.setRowNums();
     wFields.optWidth(true);
-
-    wTransformName.selectAll();
-    wTransformName.setFocus();
   }
 
   private void cancel() {
@@ -1236,6 +1213,7 @@ public class HttpPostDialog extends BaseTransformDialog {
     input.setResultFields(listHttpPostResultField);
 
     input.setEncoding(wEncoding.getText());
+    input.setContentType(wContentType.getText());
     input.setPostAFile(wPostAFile.getSelection());
     input.setMultipartupload(wMultiPartUpload.getSelection());
     input.setHttpLogin(wHttpLogin.getText());

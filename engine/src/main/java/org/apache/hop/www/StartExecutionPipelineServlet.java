@@ -19,13 +19,14 @@ package org.apache.hop.www;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.Serial;
 import java.net.URLEncoder;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import org.apache.commons.lang.StringEscapeUtils;
+import org.apache.commons.text.StringEscapeUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.annotations.HopServerServlet;
 import org.apache.hop.core.exception.HopException;
@@ -39,8 +40,7 @@ import org.owasp.encoder.Encode;
 @HopServerServlet(id = "startExec", name = "Start the execution of a pipeline")
 public class StartExecutionPipelineServlet extends BaseHttpServlet implements IHopServerPlugin {
   private static final Class<?> PKG = StartExecutionPipelineServlet.class;
-
-  private static final long serialVersionUID = 3634806745372015720L;
+  @Serial private static final long serialVersionUID = 3634806745372015720L;
   public static final String CONTEXT_PATH = "/hop/startExec";
   private static final String CONST_HREF = "<a href=\"";
 
@@ -56,20 +56,31 @@ public class StartExecutionPipelineServlet extends BaseHttpServlet implements IH
     if (isJettyMode() && !request.getContextPath().startsWith(CONTEXT_PATH)) {
       return;
     }
+    if (refuseIfShuttingDown(response)) {
+      return;
+    }
 
     if (log.isDebug()) {
       logDebug("Start execution of pipeline requested");
     }
     response.setStatus(HttpServletResponse.SC_OK);
 
-    String pipelineName = StringEscapeUtils.escapeHtml(request.getParameter("name"));
+    String pipelineName = StringEscapeUtils.escapeHtml4(request.getParameter("name"));
     String id = request.getParameter("id");
     boolean useXML = "Y".equalsIgnoreCase(request.getParameter("xml"));
+    boolean useJson = isJsonRequest(request);
 
-    PrintWriter out = response.getWriter();
+    PrintWriter out = getSafeWriter(response);
+    if (out == null) {
+      return;
+    }
     if (useXML) {
       response.setContentType("text/xml");
-      out.print(XmlHandler.getXmlHeader(Const.XML_ENCODING));
+      response.setCharacterEncoding(Const.UTF_8);
+      out.print(XmlHandler.getXmlHeader(Const.UTF_8));
+    } else if (useJson) {
+      response.setContentType("application/json");
+      response.setCharacterEncoding(Const.UTF_8);
     } else {
       response.setContentType("text/html;charset=UTF-8");
       out.println("<HTML>");
@@ -86,7 +97,10 @@ public class StartExecutionPipelineServlet extends BaseHttpServlet implements IH
               + URLEncoder.encode(pipelineName, UTF_8)
               + "\">");
       out.println("<META http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\">");
-      out.println("<link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/images/favicon.svg\">");
+      out.println(
+          "<link rel=\"icon\" type=\"image/svg+xml\" href=\""
+              + getStaticPath(request, CONTEXT_PATH)
+              + "/images/favicon.svg\">");
       out.println("</HEAD>");
       out.println("<BODY>");
     }
@@ -119,6 +133,8 @@ public class StartExecutionPipelineServlet extends BaseHttpServlet implements IH
 
           if (useXML) {
             out.println(WebResult.OK.getXml());
+          } else if (useJson) {
+            out.println(WebResult.OK.getJson());
           } else {
             out.println(
                 "<H1>Pipeline "
@@ -139,7 +155,9 @@ public class StartExecutionPipelineServlet extends BaseHttpServlet implements IH
                   + pipelineName
                   + "] is not ready to be started. (Was not prepared for execution)";
           if (useXML) {
-            out.println(new WebResult(WebResult.STRING_ERROR, message));
+            out.println(new WebResult(WebResult.STRING_ERROR, message).getXml());
+          } else if (useJson) {
+            out.println(new WebResult(WebResult.STRING_ERROR, message).getJson());
           } else {
             out.println("<H1>" + Encode.forHtml(message) + "</H1>");
             out.println(
@@ -151,12 +169,13 @@ public class StartExecutionPipelineServlet extends BaseHttpServlet implements IH
           }
         }
       } else {
+        String notFoundMsg =
+            BaseMessages.getString(
+                PKG, "PipelineStatusServlet.Log.CoundNotFindSpecPipeline", pipelineName);
         if (useXML) {
-          out.println(
-              new WebResult(
-                  WebResult.STRING_ERROR,
-                  BaseMessages.getString(
-                      PKG, "PipelineStatusServlet.Log.CoundNotFindSpecPipeline", pipelineName)));
+          out.println(new WebResult(WebResult.STRING_ERROR, notFoundMsg).getXml());
+        } else if (useJson) {
+          out.println(new WebResult(WebResult.STRING_ERROR, notFoundMsg).getJson());
         } else {
           out.println(
               "<H1>"
@@ -173,13 +192,14 @@ public class StartExecutionPipelineServlet extends BaseHttpServlet implements IH
         }
       }
     } catch (Exception ex) {
+      String errorMsg =
+          "Unexpected error during pipeline execution preparation:"
+              + Const.CR
+              + Const.getStackTracker(ex);
       if (useXML) {
-        out.println(
-            new WebResult(
-                WebResult.STRING_ERROR,
-                "Unexpected error during pipeline execution preparation:"
-                    + Const.CR
-                    + Const.getStackTracker(ex)));
+        out.println(new WebResult(WebResult.STRING_ERROR, errorMsg).getXml());
+      } else if (useJson) {
+        out.println(new WebResult(WebResult.STRING_ERROR, errorMsg).getJson());
       } else {
         out.println("<p>");
         out.println("<pre>");
@@ -188,7 +208,7 @@ public class StartExecutionPipelineServlet extends BaseHttpServlet implements IH
       }
     }
 
-    if (!useXML) {
+    if (!useXML && !useJson) {
       out.println("<p>");
       out.println("</BODY>");
       out.println("</HTML>");

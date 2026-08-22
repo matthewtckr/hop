@@ -21,7 +21,9 @@ import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 
@@ -30,9 +32,16 @@ import org.apache.hop.core.row.IValueMeta;
     type = "IRIS",
     typeDescription = "InterSystems Iris",
     image = "intersystems.svg",
-    documentationUrl = "/database/databases/iris.html")
+    documentationUrl = "/database/databases/iris.html",
+    classLoaderGroup = "iris-db")
 @GuiPlugin(id = "GUI-IrisDatabaseMeta")
 public class IrisDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  /** IRIS limits rows with TOP, between SELECT and the column list. */
+  @Override
+  public String getLimitClausePrefix(int nrRows) {
+    return " TOP " + nrRows;
+  }
 
   public static final String CONST_ALTER_TABLE = "ALTER TABLE ";
 
@@ -78,6 +87,21 @@ public class IrisDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   }
 
   @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("com.intersystems:intersystems-jdbc")
+        .defaultVersion("3.11.0")
+        .licenseCategory("X")
+        .licenseName("InterSystems IRIS JDBC Driver License")
+        .licenseUrl(
+            "https://www.intersystems.com/support-learning/support/browse-support/license-agreements/")
+        .vendor("InterSystems")
+        .vendorUrl("https://www.intersystems.com/")
+        .notes("JDBC driver for InterSystems Iris database")
+        .build();
+  }
+
+  @Override
   public String getURL(String hostname, String port, String databaseName) {
     return "jdbc:IRIS://" + hostname + ":" + port + "/" + databaseName;
   }
@@ -99,7 +123,7 @@ public class IrisDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return CONST_ALTER_TABLE
         + tableName
         + " ADD COLUMN ( "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false)
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN)
         + " ) ";
   }
 
@@ -137,7 +161,8 @@ public class IrisDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return CONST_ALTER_TABLE
         + tableName
         + " ALTER COLUMN "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override

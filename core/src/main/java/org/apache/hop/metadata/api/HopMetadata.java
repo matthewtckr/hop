@@ -43,6 +43,15 @@ public @interface HopMetadata {
 
   String image() default "ui/images/folder.svg";
 
+  /**
+   * The category this metadata type belongs to. Used purely for presentation (e.g. grouping types
+   * under a common heading in the metadata perspective). Use one of the stable ids defined in
+   * {@link HopMetadataCategory}. An empty value (the default) groups the type under "Other".
+   *
+   * @return the category id for this metadata type
+   */
+  String category() default "";
+
   String documentationUrl() default "";
 
   /**
@@ -51,4 +60,12 @@ public @interface HopMetadata {
    * @return the type of metadata this property represents.
    */
   HopMetadataPropertyType hopMetadataPropertyType() default HopMetadataPropertyType.NONE;
+
+  /**
+   * Set this to identify if this metadata object supports replacing values in Workflows and
+   * Pipelines
+   *
+   * @return true if global replace is supported
+   */
+  boolean supportsGlobalReplace() default false;
 }

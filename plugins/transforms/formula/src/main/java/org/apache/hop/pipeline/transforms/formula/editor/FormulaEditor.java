@@ -24,6 +24,7 @@ import org.apache.hop.pipeline.transforms.formula.FormulaMeta;
 import org.apache.hop.pipeline.transforms.formula.function.FunctionDescription;
 import org.apache.hop.pipeline.transforms.formula.function.FunctionLib;
 import org.apache.hop.ui.core.widget.StyledTextComp;
+import org.apache.hop.ui.core.widget.TextComposite;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.browser.Browser;
 import org.eclipse.swt.custom.SashForm;
@@ -31,8 +32,6 @@ import org.eclipse.swt.events.KeyEvent;
 import org.eclipse.swt.events.KeyListener;
 import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
-import org.eclipse.swt.events.ShellAdapter;
-import org.eclipse.swt.events.ShellEvent;
 import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.layout.FillLayout;
 import org.eclipse.swt.layout.FormAttachment;
@@ -151,8 +150,7 @@ public class FormulaEditor extends Dialog implements KeyListener {
       fieldItem.setText(inputField);
     }
 
-    for (int i = 0; i < categories.length; i++) {
-      String category = categories[i];
+    for (String category : categories) {
       String i18nCategory = category;
       // Look up the category in i18n if needed.
       if (category.startsWith("%")) {
@@ -213,25 +211,8 @@ public class FormulaEditor extends Dialog implements KeyListener {
                         : functionLib.getFunctionDescription(item.getText()).getSyntax();
               }
 
-              String oldFormula = expressionEditor.getText();
-              int caretPosition = expressionEditor.getCaretPosition();
-              int textLength = expressionEditor.getText().length();
-              int selectionsize = expressionEditor.getSelectionCount();
-
-              // No text in editor yet, just add text
-              if (textLength == 0) {
-                expressionEditor.setText(partToInsert);
-              } else if (textLength == caretPosition) {
-                // we are at the end of the text, append new text
-                expressionEditor.setText(oldFormula + partToInsert);
-              } else {
-                // Adding text somewhere between other text
-                // if selectionsize is > 0 then we are writing over other text
-                expressionEditor.setText(
-                    oldFormula.substring(0, caretPosition)
-                        + partToInsert
-                        + oldFormula.substring(caretPosition + selectionsize));
-              }
+              // insert() replaces selection regardless of caret direction (fixes #5321)
+              expressionEditor.insert(partToInsert);
             }
           }
         });
@@ -242,7 +223,10 @@ public class FormulaEditor extends Dialog implements KeyListener {
     //
     expressionEditor =
         new StyledTextComp(
-            variables, rightSash, SWT.MULTI | SWT.LEFT | SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL);
+            variables,
+            rightSash,
+            SWT.MULTI | SWT.LEFT | SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL,
+            TextComposite.STYLE_TYPE_FORMULA);
     expressionEditor.setText(this.formula);
     expressionEditor.addModifyListener(event -> setStyles());
     expressionEditor.addKeyListener(this);
@@ -284,15 +268,6 @@ public class FormulaEditor extends Dialog implements KeyListener {
   public String open() {
     shell.layout();
     shell.open();
-
-    // Detect X or ALT-F4 or something that kills this window...
-    shell.addShellListener(
-        new ShellAdapter() {
-          @Override
-          public void shellClosed(ShellEvent e) {
-            cancel();
-          }
-        });
 
     while (!shell.isDisposed()) {
       if (!shell.getDisplay().readAndDispatch()) {

@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Map;
 import lombok.Getter;
 import lombok.Setter;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.base.AbstractMeta;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Result;
@@ -146,11 +146,6 @@ public class Repeat extends ActionBase implements IAction, Cloneable {
   }
 
   @Override
-  public Repeat clone() {
-    return (Repeat) super.clone();
-  }
-
-  @Override
   public Result execute(Result prevResult, int nr) throws HopException {
 
     // So now we execute the transformation or workflow and continue until the variable has a
@@ -192,7 +187,7 @@ public class Repeat extends ActionBase implements IAction, Cloneable {
       repetitionNr++;
       executionResult = executePipelineOrWorkflow(realFilename, nr, executionResult, repetitionNr);
       Result result = executionResult.result;
-      if (!result.getResult() || result.getNrErrors() > 0 || result.isStopped()) {
+      if (!result.isResult() || result.getNrErrors() > 0 || result.isStopped()) {
         logError("The repeating work encountered and error or was stopped. This ends the loop.");
 
         // On an false result, stop the loop
@@ -405,7 +400,7 @@ public class Repeat extends ActionBase implements IAction, Cloneable {
       Result result = workflow.startExecution();
 
       boolean flagSet = workflow.getExtensionDataMap().get(REPEAT_END_LOOP) != null;
-      if (flagSet) {
+      if (flagSet && isBasic()) {
         logBasic("End loop flag found, stopping loop.");
       }
 
@@ -608,5 +603,10 @@ public class Repeat extends ActionBase implements IAction, Cloneable {
   @Override
   public String getFilename() {
     return filename;
+  }
+
+  @Override
+  public boolean supportsDrillDown() {
+    return true;
   }
 }

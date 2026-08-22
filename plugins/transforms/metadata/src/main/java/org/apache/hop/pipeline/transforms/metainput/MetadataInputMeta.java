@@ -20,7 +20,7 @@ package org.apache.hop.pipeline.transforms.metainput;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.annotations.Transform;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.RowMetaBuilder;
@@ -34,6 +34,7 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     id = "MetadataInput",
     name = "i18n::MetadataInput.Transform.Name",
     description = "i18n::MetadataInput.Transform.Description",
+    keywords = "metadata,schema,introspect,catalog,describe",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Input",
     image = "metadata.svg",
     documentationUrl = "/pipeline/transforms/metadata-input.html")
@@ -57,22 +58,6 @@ public class MetadataInputMeta extends BaseTransformMeta<MetadataInput, Metadata
     this.nameFieldName = "name";
     this.jsonFieldName = "json";
     this.typeKeyFilters = new ArrayList<>();
-  }
-
-  public MetadataInputMeta(MetadataInputMeta meta) {
-    this.providerFieldName = meta.providerFieldName;
-    this.typeKeyFieldName = meta.typeKeyFieldName;
-    this.typeNameFieldName = meta.typeNameFieldName;
-    this.typeDescriptionFieldName = meta.typeDescriptionFieldName;
-    this.typeClassFieldName = meta.typeClassFieldName;
-    this.nameFieldName = meta.nameFieldName;
-    this.jsonFieldName = meta.jsonFieldName;
-    this.typeKeyFilters = new ArrayList<>(meta.typeKeyFilters);
-  }
-
-  @Override
-  public MetadataInputMeta clone() {
-    return new MetadataInputMeta(this);
   }
 
   @Override

@@ -38,6 +38,7 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     image = "google-sheets-output.svg",
     name = "i18n::GoogleSheetsOutput.transform.Name",
     description = "i18n::GoogleSheetsOutput.transform.Name",
+    keywords = "google,sheets,spreadsheet,gsheet,write",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Output",
     documentationUrl = "/pipeline/transforms/google-sheets-output.html")
 public class GoogleSheetsOutputMeta
@@ -72,6 +73,12 @@ public class GoogleSheetsOutputMeta
   @HopMetadataProperty(key = "timeout", injectionGroupKey = "SHEET")
   private String timeout;
 
+  @HopMetadataProperty(key = "retryAttempts", injectionGroupKey = "SHEET")
+  private String retryAttempts;
+
+  @HopMetadataProperty(key = "retryDelayMs", injectionGroupKey = "SHEET")
+  private String retryDelayMs;
+
   @HopMetadataProperty(key = "impersonation", injectionGroupKey = "SHEET")
   private String impersonation;
 
@@ -87,7 +94,7 @@ public class GoogleSheetsOutputMeta
 
   @Override
   public void setDefault() {
-    this.jsonCredentialPath = "" + "client_secret.json";
+    this.jsonCredentialPath = "client_secret.json";
     this.spreadsheetKey = "";
     this.worksheetId = "";
     this.shareDomain = "";
@@ -98,19 +105,8 @@ public class GoogleSheetsOutputMeta
     this.impersonation = "";
     this.appName = "";
     this.timeout = "5";
-  }
-
-  @Override
-  public Object clone() {
-    GoogleSheetsOutputMeta retval = (GoogleSheetsOutputMeta) super.clone();
-    retval.setJsonCredentialPath(this.jsonCredentialPath);
-    retval.setSpreadsheetKey(this.spreadsheetKey);
-    retval.setWorksheetId(this.worksheetId);
-    retval.setCreate(this.create);
-    retval.setAppend(this.append);
-    retval.setShareEmail(this.shareEmail);
-    retval.setShareDomain(this.shareDomain);
-    return retval;
+    this.retryAttempts = "3";
+    this.retryDelayMs = "2";
   }
 
   @Override

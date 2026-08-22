@@ -18,11 +18,10 @@
 
 package org.apache.hop.beam.transforms.kinesis;
 
-import com.amazonaws.regions.Regions;
 import java.util.List;
 import java.util.Map;
 import org.apache.beam.sdk.values.PCollection;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.beam.core.HopRow;
 import org.apache.hop.beam.engines.IBeamPipelineEngineRunConfiguration;
 import org.apache.hop.beam.pipeline.IBeamPipelineTransformHandler;
@@ -53,7 +52,8 @@ import org.apache.hop.pipeline.transforms.dummy.DummyData;
     image = "beam-kinesis-consume.svg",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.BigData",
     keywords = "i18n::BeamKinesisConsumeMeta.keyword",
-    documentationUrl = "/pipeline/transforms/beamkinesisconsume.html")
+    documentationUrl = "/pipeline/transforms/beamkinesisconsume.html",
+    supportedEngines = {"Beam*"})
 public class BeamKinesisConsumeMeta extends BaseTransformMeta<BeamKinesisConsume, DummyData>
     implements IBeamPipelineTransformHandler {
 
@@ -256,7 +256,7 @@ public class BeamKinesisConsumeMeta extends BaseTransformMeta<BeamKinesisConsume
             transformMeta.getName(),
             variables.resolve(accessKey),
             variables.resolve(secretKey),
-            Regions.DEFAULT_REGION, // TODO : make configurable
+            "us-east-1", // TODO : make configurable
             JsonRowMeta.toJson(outputRowMeta),
             variables.resolve(streamName),
             variables.resolve(uniqueIdField),

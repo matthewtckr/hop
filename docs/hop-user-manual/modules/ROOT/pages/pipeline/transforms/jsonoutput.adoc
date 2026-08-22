@@ -34,9 +34,11 @@ Output JSON will be available as a javascript array or a javascript object depen
 [%noheader,cols="2,1a",frame=none, role="table-supported-engines"]
 !===
 !Hop Engine! image:check_mark.svg[Supported, 24]
-!Spark! image:check_mark.svg[Supported, 24]
-!Flink! image:check_mark.svg[Supported, 24]
-!Dataflow! image:check_mark.svg[Supported, 24]
+!Single Threaded! image:check_mark.svg[Supported, 24]
+!Native Spark! image:check_mark.svg[Supported, 24]
+!Beam Spark! image:check_mark.svg[Supported, 24]
+!Beam Flink! image:check_mark.svg[Supported, 24]
+!Beam Dataflow! image:check_mark.svg[Supported, 24]
 !===
 |===
 
@@ -83,7 +85,6 @@ file and parent folder will be created only after transform will get any first i
 |Extension|Output file extension.
 Default value is 'json'
 |Encoding|Output file encoding
-|Pass output to servlet|Enable this option to return the data via a web service instead writing into a file.
 |Include date in filename?|If checked - output file name will contains File name value + current date.
 This may help to generate unique output files.
 |Include time in filename|If checked - output file name will contains file creation time.

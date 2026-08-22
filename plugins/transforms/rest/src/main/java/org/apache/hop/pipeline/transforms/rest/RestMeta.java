@@ -19,33 +19,41 @@ package org.apache.hop.pipeline.transforms.rest;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.ICheckResult;
 import org.apache.hop.core.annotations.Transform;
-import org.apache.hop.core.exception.HopTransformException;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.IValueMeta;
+import org.apache.hop.core.row.value.ValueMetaBinary;
 import org.apache.hop.core.row.value.ValueMetaInteger;
 import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.metadata.api.HopMetadataProperty;
+import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.BaseTransformMeta;
 import org.apache.hop.pipeline.transform.TransformMeta;
+import org.apache.hop.pipeline.transforms.rest.common.RestConst;
 import org.apache.hop.pipeline.transforms.rest.fields.HeaderField;
 import org.apache.hop.pipeline.transforms.rest.fields.MatrixParameterField;
 import org.apache.hop.pipeline.transforms.rest.fields.ParameterField;
 import org.apache.hop.pipeline.transforms.rest.fields.ResultField;
 
+@Setter
+@Getter
 @Transform(
     id = "Rest",
     image = "rest.svg",
     name = "i18n::Rest.Name",
     description = "i18n::Rest.Description",
-    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Lookup",
+    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Utility",
     keywords = "i18n::RestMeta.keyword",
     documentationUrl = "/pipeline/transforms/rest.html")
 public class RestMeta extends BaseTransformMeta<Rest, RestData> {
@@ -80,10 +88,6 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
         APPLICATION_TYPE_SVG_XML,
         APPLICATION_TYPE_TEXT_XML
       };
-  public static final String CONST_RESULT = "result";
-  public static final String CONST_SPACES_LONG = "        ";
-  public static final String CONST_SPACES = "      ";
-  public static final String CONST_FIELD = "field";
 
   @HopMetadataProperty(key = "applicationType", injectionKey = "APPLICATION_TYPE")
   private String applicationType;
@@ -99,16 +103,32 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
         HTTP_METHOD_PATCH
       };
 
+  /**
+   * Well-known methods that never carry a request body. Any other method — including a custom verb
+   * such as LIST or PURGE (issue #4770) — is allowed to send one.
+   */
+  private static final Set<String> BODY_LESS_METHODS =
+      Set.of(HTTP_METHOD_GET, HTTP_METHOD_HEAD, HTTP_METHOD_OPTIONS);
+
+  /** Well-known methods that take no query or matrix parameters. */
+  private static final Set<String> PARAMETER_LESS_METHODS =
+      Set.of(HTTP_METHOD_HEAD, HTTP_METHOD_OPTIONS);
+
+  /** A valid HTTP method token, per RFC 9110 §5.6.2 (a {@code token} production). */
+  private static final Pattern HTTP_METHOD_TOKEN = Pattern.compile("[!#$%&'*+\\-.^_`|~0-9A-Za-z]+");
+
   /** The default timeout until a connection is established (milliseconds) */
   public static final int DEFAULT_CONNECTION_TIMEOUT = 10000;
 
   /** The default timeout for waiting for reading data (milliseconds) */
   public static final int DEFAULT_READ_TIMEOUT = 10000;
 
-  @HopMetadataProperty(key = "connection_name", injectionKey = "CONNECTION_NAME")
+  @HopMetadataProperty(
+      key = "connection_name",
+      injectionKey = "CONNECTION_NAME",
+      hopMetadataPropertyType = HopMetadataPropertyType.REST_CONNECTION)
   private String connectionName;
 
-  /** URL / service to be called */
   @HopMetadataProperty(key = "url", injectionKey = "URL")
   private String url;
 
@@ -118,7 +138,6 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
   @HopMetadataProperty(key = "urlField", injectionKey = "URL_IN_FIELD")
   private String urlField;
 
-  /** proxy */
   @HopMetadataProperty(key = "proxyHost", injectionKey = "PROXY_HOST")
   private String proxyHost;
 
@@ -128,17 +147,29 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
   @HopMetadataProperty(key = "httpLogin", injectionKey = "HTTP_LOGIN")
   private String httpLogin;
 
-  @HopMetadataProperty(key = "httpPassword", injectionKey = "HTTP_PASSWORD")
+  @HopMetadataProperty(key = "httpPassword", injectionKey = "HTTP_PASSWORD", password = true)
   private String httpPassword;
 
-  @HopMetadataProperty(key = "preemptive", injectionKey = "PREEMPTIVE")
-  private boolean preemptive;
+  /**
+   * Stored inverted, so that "not stored" means preemptive. Issue #4196: the old {@code preemptive}
+   * key was serialized and had a checkbox, but nothing ever read it — the credentials always went
+   * out on the first request. Every pipeline ever saved therefore carries {@code
+   * <preemptive>N</preemptive>}, the default of a control that did nothing, rather than a choice
+   * anyone made. Reading that key now would flip all of them to challenge-response and break every
+   * server that answers an unauthenticated request with something other than a 401.
+   *
+   * <p>So the old key is gone rather than repurposed: an existing pipeline loses a value that never
+   * meant anything and keeps the behaviour it has always had. Read this through {@link
+   * #isPreemptive()}.
+   */
+  @HopMetadataProperty(
+      key = "non_preemptive_basic_auth",
+      injectionKey = "NON_PREEMPTIVE_BASIC_AUTH")
+  private boolean nonPreemptiveBasicAuth;
 
-  /** Body fieldname */
   @HopMetadataProperty(key = "bodyField", injectionKey = "BODY_FIELD")
   private String bodyField;
 
-  /** HTTP Method */
   @HopMetadataProperty(key = "method", injectionKey = "METHOD")
   private String method;
 
@@ -148,7 +179,6 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
   @HopMetadataProperty(key = "methodFieldName", injectionKey = "METHOD_FIELD_NAME")
   private String methodFieldName;
 
-  /** Trust store */
   @HopMetadataProperty(key = "trustStoreFile", injectionKey = "TRUSTSTORE_FILE")
   private String trustStoreFile;
 
@@ -167,7 +197,6 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
   @HopMetadataProperty(key = "ignoreSsl", injectionKey = "IGNORE_SSL")
   private boolean ignoreSsl;
 
-  /** headers name */
   @HopMetadataProperty(
       key = "header",
       groupKey = "headers",
@@ -192,172 +221,82 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
   @HopMetadataProperty(key = "result", injectionKey = "RESULT")
   private ResultField resultField;
 
+  /**
+   * retry config retryTimes=0 retryDelayMs=500ms retryStatusCode=[429, 500, 502, 503, 504]
+   * retryMethods=[post,get,delete,put,head,option,patch]
+   */
+  /*--------------------------------------------------------------------
+  | retry config(retryTimes=0,retryDelayMs=500ms)
+  | retryStatusCode=[429, 500, 502, 503, 504]
+  | retryMethods=[get,delete,put]
+  --------------------------------------------------------------------- */
+  @HopMetadataProperty(key = "retryTimes", injectionKey = "RETRY_TIMES")
+  private Integer retryTimes;
+
+  @HopMetadataProperty(key = "retryDelayMs", injectionKey = "RETRY_DELAY_MS")
+  private Long retryDelayMs;
+
+  @HopMetadataProperty(
+      key = "retryStatusCode",
+      injectionKey = "RETRY_STATUS_CODE",
+      groupKey = "retryStatusCodes",
+      injectionGroupKey = "RETRY_STATUS_CODES")
+  private List<String> retryStatusCodes;
+
+  @HopMetadataProperty(
+      key = "retryMethod",
+      injectionKey = "RETRY_METHOD",
+      groupKey = "retryMethods",
+      injectionGroupKey = "RETRY_METHODS")
+  private List<String> retryMethods;
+
+  @HopMetadataProperty(key = "paginationEnabled", injectionKey = "PAGINATION_ENABLED")
+  private boolean paginationEnabled;
+
+  @HopMetadataProperty(key = "maxPagesLoops", injectionKey = "MAX_PAGES_LOOPS")
+  private int maxPagesLoops;
+
+  /**
+   * Optional JsonPath ({@link #APPLICATION_TYPE_JSON}) or XPath ({@link #APPLICATION_TYPE_XML})
+   * that selects an array or node-set; each matched element becomes one outgoing row instead of
+   * buffering whole responses.
+   */
+  @HopMetadataProperty(key = "resultSplitPath", injectionKey = "RESULT_SPLIT_PATH")
+  private String resultSplitPath;
+
+  /**
+   * Emit a row per record as the response arrives, instead of reading the whole body first (issue
+   * #2746). For a response that is very large, or one that never ends, buffering it is either
+   * wasteful or fatal.
+   */
+  @HopMetadataProperty(key = "streamingEnabled", injectionKey = "STREAMING_ENABLED")
+  private boolean streamingEnabled;
+
+  @HopMetadataProperty(key = "streamingFormat", injectionKey = "STREAMING_FORMAT")
+  private RestStreamingFormat streamingFormat = RestStreamingFormat.NDJSON;
+
+  /**
+   * Optional output field for the SSE {@code event:} type. Named like every other optional output
+   * on this transform: leave it empty and the column is not added at all. The record itself stays
+   * in the result field rather than being wrapped in an envelope, so a payload that is already JSON
+   * can go straight into a JSON Input transform without being unwrapped first.
+   */
+  @HopMetadataProperty(key = "streamingEventNameField", injectionKey = "STREAMING_EVENT_NAME_FIELD")
+  private String streamingEventNameField;
+
+  /** Optional output field for the SSE {@code id:} of each event. */
+  @HopMetadataProperty(key = "streamingEventIdField", injectionKey = "STREAMING_EVENT_ID_FIELD")
+  private String streamingEventIdField;
+
   public RestMeta() {
     super(); // allocate BaseTransformMeta
     headerFields = new ArrayList<>();
     parameterFields = new ArrayList<>();
     matrixParameterFields = new ArrayList<>();
     resultField = new ResultField();
-  }
 
-  /**
-   * @return Returns the method.
-   */
-  public String getMethod() {
-    return method;
-  }
-
-  /**
-   * @param value The method to set.
-   */
-  public void setMethod(String value) {
-    this.method = value;
-  }
-
-  /**
-   * @return Returns the bodyField.
-   */
-  public String getBodyField() {
-    return bodyField;
-  }
-
-  /**
-   * @param value The bodyField to set.
-   */
-  public void setBodyField(String value) {
-    this.bodyField = value;
-  }
-
-  /**
-   * @return Returns the parameterField.
-   */
-  public List<ParameterField> getParameterFields() {
-    return parameterFields;
-  }
-
-  public void setParameterFields(List<ParameterField> value) {
-    this.parameterFields = value;
-  }
-
-  public List<MatrixParameterField> getMatrixParameterFields() {
-    return matrixParameterFields;
-  }
-
-  public void setMatrixParameterFields(List<MatrixParameterField> value) {
-    this.matrixParameterFields = value;
-  }
-
-  /**
-   * @return Returns the headerField.
-   */
-  public List<HeaderField> getHeaderFields() {
-    return headerFields;
-  }
-
-  /**
-   * @param value The headerField to set.
-   */
-  public void setHeaderFields(List<HeaderField> value) {
-    this.headerFields = value;
-  }
-
-  /**
-   * @return Returns the procedure.
-   */
-  public String getUrl() {
-    return url;
-  }
-
-  /**
-   * @param procedure The procedure to set.
-   */
-  public void setUrl(String procedure) {
-    this.url = procedure;
-  }
-
-  /**
-   * @return Is the url coded in a field?
-   */
-  public boolean isUrlInField() {
-    return urlInField;
-  }
-
-  /**
-   * @param urlInField Is the url coded in a field?
-   */
-  public void setUrlInField(boolean urlInField) {
-    this.urlInField = urlInField;
-  }
-
-  /**
-   * @return Is preemptive?
-   */
-  public boolean isPreemptive() {
-    return preemptive;
-  }
-
-  /**
-   * @param preemptive Ispreemptive?
-   */
-  public void setPreemptive(boolean preemptive) {
-    this.preemptive = preemptive;
-  }
-
-  /**
-   * @return Is the method defined in a field?
-   */
-  public boolean isDynamicMethod() {
-    return dynamicMethod;
-  }
-
-  /**
-   * @param dynamicMethod If the method is defined in a field?
-   */
-  public void setDynamicMethod(boolean dynamicMethod) {
-    this.dynamicMethod = dynamicMethod;
-  }
-
-  /**
-   * @return methodFieldName
-   */
-  public String getMethodFieldName() {
-    return methodFieldName;
-  }
-
-  /**
-   * @param methodFieldName
-   */
-  public void setMethodFieldName(String methodFieldName) {
-    this.methodFieldName = methodFieldName;
-  }
-
-  /**
-   * @return The field name that contains the url.
-   */
-  public String getUrlField() {
-    return urlField;
-  }
-
-  /**
-   * @param urlField name of the field that contains the url
-   */
-  public void setUrlField(String urlField) {
-    this.urlField = urlField;
-  }
-
-  public boolean isIgnoreSsl() {
-    return ignoreSsl;
-  }
-
-  public void setIgnoreSsl(boolean ignoreSsl) {
-    this.ignoreSsl = ignoreSsl;
-  }
-
-  @Override
-  public Object clone() {
-    RestMeta retval = (RestMeta) super.clone();
-
-    return retval;
+    this.retryStatusCodes = new ArrayList<>();
+    this.retryMethods = new ArrayList<>();
   }
 
   @Override
@@ -370,12 +309,25 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
     this.method = HTTP_METHOD_GET;
     this.dynamicMethod = false;
     this.methodFieldName = null;
-    this.preemptive = false;
+    // A new transform authenticates preemptively, which is what this transform has always done.
+    this.nonPreemptiveBasicAuth = false;
     this.trustStoreFile = null;
     this.trustStorePassword = null;
     this.applicationType = APPLICATION_TYPE_TEXT_PLAIN;
     this.readTimeout = String.valueOf(DEFAULT_READ_TIMEOUT);
     this.connectionTimeout = String.valueOf(DEFAULT_CONNECTION_TIMEOUT);
+
+    // retry config.
+    this.retryTimes = RestConst.DEFAULT_RETRY_TIMES;
+    this.retryDelayMs = RestConst.DEFAULT_RETRY_DELAY_MS;
+    this.retryStatusCodes.addAll(RestConst.retryStatusCodes());
+    this.retryMethods.addAll(RestConst.retryMethods());
+
+    this.paginationEnabled = false;
+    this.maxPagesLoops = RestConst.DEFAULT_MAX_PAGES_LOOPS;
+    this.resultSplitPath = null;
+    this.streamingEnabled = false;
+    this.streamingFormat = RestStreamingFormat.NDJSON;
   }
 
   @Override
@@ -385,10 +337,14 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
       IRowMeta[] info,
       TransformMeta nextTransform,
       IVariables variables,
-      IHopMetadataProvider metadataProvider)
-      throws HopTransformException {
+      IHopMetadataProvider metadataProvider) {
     if (!Utils.isEmpty(resultField.getFieldName())) {
-      IValueMeta v = new ValueMetaString(variables.resolve(resultField.getFieldName()));
+      // A binary result carries the response bytes verbatim; decoding them to a String would
+      // corrupt any non-text payload (issue #3746).
+      IValueMeta v =
+          resultField.isBinary()
+              ? new ValueMetaBinary(variables.resolve(resultField.getFieldName()))
+              : new ValueMetaString(variables.resolve(resultField.getFieldName()));
       v.setOrigin(name);
       inputRowMeta.addValueMeta(v);
     }
@@ -408,6 +364,22 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
       IValueMeta v = new ValueMetaString(headerFieldName);
       v.setOrigin(name);
       inputRowMeta.addValueMeta(v);
+    }
+
+    // Only when streaming: without it these would be columns that are always null.
+    if (streamingEnabled) {
+      String eventNameField = variables.resolve(streamingEventNameField);
+      if (!Utils.isEmpty(eventNameField)) {
+        IValueMeta v = new ValueMetaString(eventNameField);
+        v.setOrigin(name);
+        inputRowMeta.addValueMeta(v);
+      }
+      String eventIdField = variables.resolve(streamingEventIdField);
+      if (!Utils.isEmpty(eventIdField)) {
+        IValueMeta v = new ValueMetaString(eventIdField);
+        v.setOrigin(name);
+        inputRowMeta.addValueMeta(v);
+      }
     }
   }
 
@@ -513,194 +485,62 @@ public class RestMeta extends BaseTransformMeta<Rest, RestData> {
   }
 
   /**
-   * Setter
-   *
-   * @param proxyHost
+   * Whether Basic credentials go out on the first request rather than waiting for a 401 challenge.
+   * This is the form the dialog and the transform work in; the metadata stores its opposite, see
+   * {@link #nonPreemptiveBasicAuth}.
    */
-  public void setProxyHost(String proxyHost) {
-    this.proxyHost = proxyHost;
+  public boolean isPreemptive() {
+    return !nonPreemptiveBasicAuth;
   }
 
-  /**
-   * Getter
-   *
-   * @return
-   */
-  public String getProxyHost() {
-    return proxyHost;
-  }
-
-  /**
-   * Setter
-   *
-   * @param proxyPort
-   */
-  public void setProxyPort(String proxyPort) {
-    this.proxyPort = proxyPort;
-  }
-
-  /**
-   * Getter
-   *
-   * @return
-   */
-  public String getProxyPort() {
-    return this.proxyPort;
-  }
-
-  /**
-   * Setter
-   *
-   * @param applicationType
-   */
-  public void setApplicationType(String applicationType) {
-    this.applicationType = applicationType;
-  }
-
-  /**
-   * Getter
-   *
-   * @return
-   */
-  public String getApplicationType() {
-    return applicationType;
-  }
-
-  /**
-   * Setter
-   *
-   * @param httpLogin
-   */
-  public void setHttpLogin(String httpLogin) {
-    this.httpLogin = httpLogin;
-  }
-
-  /**
-   * Getter
-   *
-   * @return
-   */
-  public String getHttpLogin() {
-    return httpLogin;
-  }
-
-  /**
-   * Setter
-   *
-   * @param httpPassword
-   */
-  public void setHttpPassword(String httpPassword) {
-    this.httpPassword = httpPassword;
-  }
-
-  /**
-   * @return
-   */
-  public String getHttpPassword() {
-    return httpPassword;
-  }
-
-  /**
-   * Setter
-   *
-   * @param trustStoreFile
-   */
-  public void setTrustStoreFile(String trustStoreFile) {
-    this.trustStoreFile = trustStoreFile;
-  }
-
-  /**
-   * @return trustStoreFile
-   */
-  public String getTrustStoreFile() {
-    return trustStoreFile;
-  }
-
-  /**
-   * Setter
-   *
-   * @param trustStorePassword
-   */
-  public void setTrustStorePassword(String trustStorePassword) {
-    this.trustStorePassword = trustStorePassword;
-  }
-
-  /**
-   * @return trustStorePassword
-   */
-  public String getTrustStorePassword() {
-    return trustStorePassword;
-  }
-
-  public ResultField getResultField() {
-    return resultField;
-  }
-
-  public void setResultField(ResultField resultField) {
-    this.resultField = resultField;
+  public void setPreemptive(boolean preemptive) {
+    this.nonPreemptiveBasicAuth = !preemptive;
   }
 
   public static boolean isActiveBody(String method) {
     if (Utils.isEmpty(method)) {
       return false;
     }
-    return (method.equals(HTTP_METHOD_POST)
-        || method.equals(HTTP_METHOD_PUT)
-        || method.equals(HTTP_METHOD_PATCH));
+    return !BODY_LESS_METHODS.contains(method);
   }
 
   public static boolean isActiveParameters(String method) {
     if (Utils.isEmpty(method)) {
       return false;
     }
-    return (method.equals(HTTP_METHOD_GET)
-        || method.equals(HTTP_METHOD_POST)
-        || method.equals(HTTP_METHOD_PUT)
-        || method.equals(HTTP_METHOD_PATCH)
-        || method.equals(HTTP_METHOD_DELETE));
+    return !PARAMETER_LESS_METHODS.contains(method);
   }
 
   /**
-   * Returns the connection timeout until a connection is established (milliseconds).
+   * Canonicalizes a method for use on the wire: trims it, and upper-cases it only when it names one
+   * of the well-known verbs. HTTP method tokens are case-sensitive, so a custom verb is passed
+   * through exactly as the user typed it.
    *
-   * @return
+   * @param method the raw method, possibly null
+   * @return the canonicalized method, or null if the input was null
    */
-  public String getConnectionTimeout() {
-    return connectionTimeout;
+  public static String normalizeMethod(String method) {
+    if (method == null) {
+      return null;
+    }
+    String trimmed = method.trim();
+    for (String known : HTTP_METHODS) {
+      if (known.equalsIgnoreCase(trimmed)) {
+        return known;
+      }
+    }
+    return trimmed;
   }
 
   /**
-   * Define the connection timeout until a connection is established (milliseconds).
+   * Checks that a method is a valid HTTP method token as defined by RFC 9110 §5.6.2. This is
+   * enforced because the method can come straight from an input field: a value containing spaces or
+   * CR/LF would otherwise be spliced into the request line.
    *
-   * @param timeout The connection timeout to set.
+   * @param method the method to validate
+   * @return true if the method is a usable HTTP method token
    */
-  public void setConnectionTimeout(String timeout) {
-    this.connectionTimeout = timeout;
-  }
-
-  /**
-   * Returns the timeout for waiting for reading data (milliseconds).
-   *
-   * @return
-   */
-  public String getReadTimeout() {
-    return readTimeout;
-  }
-
-  /**
-   * Define the timeout for waiting for reading data (milliseconds).
-   *
-   * @param timeout The read timeout to set.
-   */
-  public void setReadTimeout(String timeout) {
-    this.readTimeout = timeout;
-  }
-
-  public String getConnectionName() {
-    return connectionName;
-  }
-
-  public void setConnectionName(String connectionName) {
-    this.connectionName = connectionName;
+  public static boolean isValidMethodToken(String method) {
+    return method != null && HTTP_METHOD_TOKEN.matcher(method).matches();
   }
 }

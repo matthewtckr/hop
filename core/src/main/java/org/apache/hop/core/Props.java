@@ -19,9 +19,10 @@ package org.apache.hop.core;
 
 import java.util.Iterator;
 import java.util.Map;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.config.HopConfig;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.logging.ILogChannel;
 import org.apache.hop.core.logging.LogChannel;
 
@@ -77,6 +78,7 @@ public class Props implements Cloneable {
 
   public static final String STRING_HIDE_VIEWPORT = "HideViewport";
   public static final String STRING_SHOW_TABLE_VIEW_TOOLBAR = "ShowTableViewToolbar";
+  public static final String STRING_SHOW_TEXT_COMPOSITE_TOOLBAR = "ShowTextCompositeToolbar";
   public static final String STRING_SHOW_EXIT_WARNING = "ShowExitWarning";
 
   public static final String STRING_CUSTOM_PARAMETER = "CustomParameter";
@@ -95,6 +97,7 @@ public class Props implements Cloneable {
   public static final int WIDGET_STYLE_TOOLBAR = 5;
   public static final int WIDGET_STYLE_PUSH_BUTTON = 6;
   public static final int WIDGET_STYLE_TREE = 7;
+  public static final int WIDGET_STYLE_EXPANDBAR = 8;
 
   public Props() {
     log = new LogChannel(STRING_USER_PREFERENCES);
@@ -116,7 +119,7 @@ public class Props implements Cloneable {
       HopConfig.setGuiProperty(key, value);
       HopConfig.getInstance().saveToFile();
     } catch (Exception e) {
-      throw new RuntimeException(
+      throw new HopRuntimeException(
           "Error saving hop config option key '" + key + "', value '" + value + "'", e);
     }
   }

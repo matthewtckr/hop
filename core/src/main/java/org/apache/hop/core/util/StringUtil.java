@@ -20,13 +20,13 @@ package org.apache.hop.core.util;
 import java.text.DateFormat;
 import java.text.Normalizer;
 import java.text.SimpleDateFormat;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import org.apache.hop.core.Const;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.exception.HopValueException;
 import org.apache.hop.core.row.IRowMeta;
 
@@ -151,12 +151,16 @@ public class StringUtil {
       return null;
     }
 
-    StringBuilder buffer = new StringBuilder();
+    // search for opening string
+    int i = aString.indexOf(open);
+    if (i < 0) // no match, no need to instantiate the string builder
+    {
+      return aString;
+    }
 
     String rest = aString;
 
-    // search for opening string
-    int i = rest.indexOf(open);
+    StringBuilder buffer = new StringBuilder();
     while (i > -1) {
       int j = rest.indexOf(close, i + open.length());
       // search for closing string
@@ -175,7 +179,7 @@ public class StringUtil {
             // for safety: avoid recursive
             if (recursion > 50) {
               // endless loops with stack overflow
-              throw new RuntimeException(
+              throw new HopRuntimeException(
                   "Endless loop detected for substitution of variable: " + value);
             }
             value = substitute((String) value, variablesValues, open, close, ++recursion);
@@ -224,9 +228,9 @@ public class StringUtil {
         String[] hexStringArray = hexString.split(",");
         int hexInt;
         byte[] hexByte = new byte[1];
-        for (int pos = 0; pos < hexStringArray.length; pos++) {
+        for (String s : hexStringArray) {
           try {
-            hexInt = Integer.parseInt(hexStringArray[pos], 16);
+            hexInt = Integer.parseInt(s, 16);
           } catch (NumberFormatException e) {
             hexInt = 0; // in case we get an invalid hex value, ignore: we can not log here
           }
@@ -251,20 +255,17 @@ public class StringUtil {
    * properties
    *
    * @param aString the string on which to apply the substitution.
-   * @param systemProperties the system properties to use
+   * @param systemProperties the system properties to use (ensure read is thread safe in calling
+   *     context)
    * @return the string with the substitution applied.
    */
   public static final synchronized String environmentSubstitute(
       String aString, Map<String, String> systemProperties) {
-    Map<String, String> sysMap = new HashMap<>();
-    synchronized (sysMap) {
-      sysMap.putAll(Collections.synchronizedMap(systemProperties));
-
-      aString = substituteWindows(aString, sysMap);
-      aString = substituteUnix(aString, sysMap);
-      aString = substituteHex(aString);
-      return aString;
-    }
+    // system properties are thread safe normally in our usages
+    aString = substituteWindows(aString, systemProperties);
+    aString = substituteUnix(aString, systemProperties);
+    aString = substituteHex(aString);
+    return aString;
   }
 
   /**
@@ -368,8 +369,31 @@ public class StringUtil {
 
   public static void getUsedVariables(
       String aString, List<String> list, boolean includeSystemVariables) {
+    // Include variable resolvers by default. This is what the encryption code relies on: a value
+    // like #{vault:hop/data/some-db:password} must be recognized as "contains variables" so it is
+    // not encrypted (see #7293).
+    getUsedVariables(aString, list, includeSystemVariables, true);
+  }
+
+  /**
+   * Collect the variables used in the given string.
+   *
+   * @param aString the string to scan
+   * @param list the list to add the used variable names to
+   * @param includeSystemVariables whether to include already-set system variables
+   * @param includeResolvers whether to also collect variable resolver references (the {@code
+   *     #{name:arguments}} syntax). These are not plain, user-settable variables, so callers that
+   *     build a list of variables to present to the user (e.g. the run options dialog) should pass
+   *     {@code false} to avoid polluting the list with resolver names and secret paths. Real {@code
+   *     ${...}} variables nested inside resolver arguments are still collected by the UNIX scan.
+   */
+  public static void getUsedVariables(
+      String aString, List<String> list, boolean includeSystemVariables, boolean includeResolvers) {
     getUsedVariables(aString, UNIX_OPEN, UNIX_CLOSE, list, includeSystemVariables);
     getUsedVariables(aString, WINDOWS_OPEN, WINDOWS_CLOSE, list, includeSystemVariables);
+    if (includeResolvers) {
+      getUsedVariables(aString, RESOLVER_OPEN, RESOLVER_CLOSE, list, includeSystemVariables);
+    }
   }
 
   public static String generateRandomString(
@@ -601,12 +625,11 @@ public class StringUtil {
    * @return a new string with all instances of the specified character removed from the end
    */
   public static String trimEnd(final String source, char c) {
-    if (source == null) {
-      return null;
+    if (source == null || source.isEmpty()) {
+      return source;
     }
 
     int index = source.length();
-
     while (index > 0 && source.charAt(index - 1) == c) {
       index--;
     }

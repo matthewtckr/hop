@@ -17,9 +17,11 @@
 
 package org.apache.hop.workflow.actions.evaluatetablecontent;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -37,29 +39,31 @@ import org.apache.hop.core.plugins.IPlugin;
 import org.apache.hop.core.plugins.IPluginType;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.row.IValueMeta;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
+import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.action.ActionMeta;
 import org.apache.hop.workflow.engine.IWorkflowEngine;
 import org.apache.hop.workflow.engines.local.LocalWorkflowEngine;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.mockito.stubbing.Answer;
 
 /*
  * Action: Evaluate rows number in a table:
  * Apache Hop Server logs with error from Quartz even though the workflow finishes successfully.
  */
-public class WorkflowActionEvalTableContentTest {
+class WorkflowActionEvalTableContentTest {
   private static final Map<Class<?>, String> dbMap = new HashMap<>();
   private ActionEvalTableContent action;
   private static IPlugin mockDbPlugin;
 
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
   public static class DBMockIface extends BaseDatabaseMeta {
 
@@ -122,8 +126,8 @@ public class WorkflowActionEvalTableContentTest {
     }
   }
 
-  @BeforeClass
-  public static void setUpBeforeClass() throws Exception {
+  @BeforeAll
+  static void setUpBeforeClass() throws Exception {
     HopClientEnvironment.init();
     dbMap.put(IDatabase.class, DBMockIface.class.getName());
 
@@ -144,13 +148,13 @@ public class WorkflowActionEvalTableContentTest {
     preg.registerPlugin(DatabasePluginType.class, mockDbPlugin);
   }
 
-  @AfterClass
-  public static void tearDownAfterClass() {
+  @AfterAll
+  static void tearDownAfterClass() {
     HopClientEnvironment.reset();
   }
 
-  @Before
-  public void setUp() throws Exception {
+  @BeforeEach
+  void setUp() throws Exception {
     MockDriver.registerInstance();
     IWorkflowEngine<WorkflowMeta> workflow = new LocalWorkflowEngine(new WorkflowMeta());
     action = new ActionEvalTableContent();
@@ -166,13 +170,13 @@ public class WorkflowActionEvalTableContentTest {
     action.setDatabaseMeta(dbMeta);
   }
 
-  @After
-  public void tearDown() throws Exception {
+  @AfterEach
+  void tearDown() throws Exception {
     MockDriver.deregeisterInstances();
   }
 
   @Test
-  public void testNrErrorsFailure() {
+  void testNrErrorsFailure() {
     action.setLimit("1");
     action.setSuccessCondition(
         ActionEvalTableContent.getSuccessConditionCode(
@@ -181,15 +185,15 @@ public class WorkflowActionEvalTableContentTest {
 
     Result res = action.execute(new Result(), 0);
 
-    assertFalse("Eval number of rows should fail", res.getResult());
+    assertFalse(res.isResult(), "Eval number of rows should fail");
     assertEquals(
-        "No errors should be reported in result object accoding to the new behavior",
         0,
-        res.getNrErrors());
+        res.getNrErrors(),
+        "No errors should be reported in result object accoding to the new behavior");
   }
 
   @Test
-  public void testNrErrorsSuccess() {
+  void testNrErrorsSuccess() {
     action.setLimit("5");
     action.setSuccessCondition(
         ActionEvalTableContent.getSuccessConditionCode(
@@ -198,12 +202,12 @@ public class WorkflowActionEvalTableContentTest {
 
     Result res = action.execute(new Result(), 0);
 
-    assertTrue("Eval number of rows should be suceeded", res.getResult());
-    assertEquals("Apparently there should no error", 0, res.getNrErrors());
+    assertTrue(res.isResult(), "Eval number of rows should be suceeded");
+    assertEquals(0, res.getNrErrors(), "Apparently there should no error");
   }
 
   @Test
-  public void testNrErrorsNoCustomSql() {
+  void testNrErrorsNoCustomSql() {
     action.setLimit("5");
     action.setSuccessCondition(
         ActionEvalTableContent.getSuccessConditionCode(
@@ -213,7 +217,51 @@ public class WorkflowActionEvalTableContentTest {
 
     Result res = action.execute(new Result(), 0);
 
-    assertFalse("Eval number of rows should fail", res.getResult());
-    assertEquals("Apparently there should be an error", 1, res.getNrErrors());
+    assertFalse(res.isResult(), "Eval number of rows should fail");
+    assertEquals(1, res.getNrErrors(), "Apparently there should be an error");
+  }
+
+  @Test
+  void testConnectionNameIsKept() {
+    // The connection name is the persisted property: it has to survive without a metadata
+    // provider being available to resolve it into a DatabaseMeta.
+    String connectionName = "my-connection";
+    action.setDatabaseMeta(null);
+    action.setConnection(connectionName);
+
+    assertEquals(connectionName, action.getConnection());
+    assertNull(action.getDatabase(), "Without a metadata provider nothing can be resolved");
+    assertEquals(
+        connectionName, action.getConnection(), "Resolving must not clear the connection name");
+  }
+
+  /**
+   * A workflow may hand the connection name in as a parameter, which is how one set of tests runs
+   * against two servers. Every other action and transform that names a connection resolves it.
+   */
+  @Test
+  void testConnectionNameIsResolved() throws Exception {
+    MemoryMetadataProvider provider = new MemoryMetadataProvider();
+    DatabaseMeta named = new DatabaseMeta();
+    named.setName("mssql-2025");
+    named.setDatabaseType("mock-db");
+    provider.getSerializer(DatabaseMeta.class).save(named);
+
+    action.setMetadataProvider(provider);
+    action.setVariable("MSSQL_CONNECTION", "mssql-2025");
+    action.setDatabaseMeta(null);
+    action.setConnection("${MSSQL_CONNECTION}");
+
+    assertNotNull(action.getDatabase(), "The variable has to be resolved to find the connection");
+    assertEquals("mssql-2025", action.getDatabase().getName());
+  }
+
+  @Test
+  void testSetConnectionInvalidatesResolvedDatabase() {
+    assertNotNull(action.getDatabase());
+
+    action.setConnection("another-connection");
+
+    assertNull(action.getDatabase(), "The previously resolved connection has to be discarded");
   }
 }

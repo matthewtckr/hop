@@ -17,16 +17,22 @@
 
 package org.apache.hop.pipeline.transforms.formula;
 
+import static org.apache.hop.pipeline.transforms.formula.util.FormulaFieldsExtractor.getFormulaFieldList;
+
 import java.io.IOException;
 import java.sql.Timestamp;
-import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
+import java.util.stream.IntStream;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.exception.HopTransformException;
+import org.apache.hop.core.exception.HopValueException;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.row.RowDataUtil;
 import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.core.util.Utils;
+import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.BaseTransform;
@@ -35,36 +41,40 @@ import org.apache.hop.pipeline.transforms.formula.util.FormulaParser;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.CellValue;
 import org.apache.poi.ss.usermodel.DateUtil;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.xssf.usermodel.XSSFSheet;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.ss.usermodel.FormulaError;
 
 public class Formula extends BaseTransform<FormulaMeta, FormulaData> {
+  private static final Class<?> PKG = Formula.class; // for i18n purposes
 
-  private XSSFWorkbook workBook;
-  private XSSFSheet workSheet;
-  private Row sheetRow;
-  private HashMap<String, String> replaceMap;
+  private FormulaPoi[] poi;
+  private List<String>[] formulaFieldLists;
+  private final HashMap<String, String> replaceMap = new HashMap<>();
 
   @Override
   public boolean init() {
-
-    workBook = new XSSFWorkbook();
-    workSheet = workBook.createSheet();
-    sheetRow = workSheet.createRow(0);
-    replaceMap = new HashMap<>();
-
     return true;
   }
 
   @Override
   public void dispose() {
-    try {
-      workBook.close();
-    } catch (IOException e) {
-      logError("Unable to close temporary workbook", e);
+    if (poi != null) {
+      for (final var it : poi) {
+        try {
+          it.destroy();
+        } catch (IOException e) {
+          logError("Unable to close temporary workbook", e);
+        }
+      }
     }
     super.dispose();
+  }
+
+  @Override
+  public void batchComplete() throws HopException {
+    super.batchComplete();
+    for (final var it : poi) {
+      it.reset();
+    }
   }
 
   @Override
@@ -83,7 +93,7 @@ public class Formula extends BaseTransform<FormulaMeta, FormulaData> {
         data.outputRowMeta = getInputRowMeta().clone();
         meta.getFields(data.outputRowMeta, getTransformName(), null, null, this, metadataProvider);
       } catch (HopTransformException e) {
-        throw new RuntimeException(e);
+        throw new HopRuntimeException(e);
       }
 
       data.returnType = new int[meta.getFormulas().size()];
@@ -112,28 +122,39 @@ public class Formula extends BaseTransform<FormulaMeta, FormulaData> {
           data.replaceIndex[j] = -1;
         }
       }
+
+      // create one backing row per formula
+      poi =
+          IntStream.range(0, meta.getFormulas().size())
+              .mapToObj(it -> new FormulaPoi(this::logDebug))
+              .toArray(FormulaPoi[]::new);
+      // compute only once for all rows the default field list
+      formulaFieldLists =
+          meta.getFormulas().stream()
+              .map(FormulaMetaFunction::getFormula)
+              .map(f -> getFormulaFieldList(resolve(f)))
+              .toArray(List[]::new);
     }
 
     int tempIndex = getInputRowMeta().size();
 
     if (isRowLevel()) {
-      logRowlevel("Read row #" + getLinesRead() + " : " + Arrays.toString(r));
+      logRowlevel("Read row #" + getLinesRead() + " : " + getInputRowMeta().getString(r));
     }
-
-    if (sheetRow != null) {
-      workSheet.removeRow(sheetRow);
-    }
-    sheetRow = workSheet.createRow(0);
 
     Object[] outputRowData = RowDataUtil.resizeArray(r, data.outputRowMeta.size());
-    Object outputValue = null;
-
     for (int i = 0; i < meta.getFormulas().size(); i++) {
-
+      Object outputValue = null;
       FormulaMetaFunction formula = meta.getFormulas().get(i);
       FormulaParser parser =
           new FormulaParser(
-              formula, data.outputRowMeta, outputRowData, sheetRow, variables, replaceMap);
+              formula,
+              data.outputRowMeta,
+              outputRowData,
+              poi[i],
+              variables,
+              replaceMap,
+              formulaFieldLists[i]);
       try {
         CellValue cellValue = parser.getFormulaValue();
         CellType cellType = cellValue.getCellType();
@@ -184,6 +205,9 @@ public class Formula extends BaseTransform<FormulaMeta, FormulaData> {
             data.returnType[i] = FormulaData.RETURN_TYPE_STRING;
             formula.setNeedDataConversion(outputValueType != IValueMeta.TYPE_STRING);
             break;
+          case ERROR:
+            outputValue = getErrorValue(cellValue, formula);
+            break;
           default:
             break;
         }
@@ -193,17 +217,19 @@ public class Formula extends BaseTransform<FormulaMeta, FormulaData> {
         outputRowData[realIndex] =
             getReturnValue(outputValue, data.returnType[i], realIndex, formula);
       } catch (Exception e) {
-        throw new HopException(
-            "Formula '" + formula.getFormula() + "' could not not be parsed ", e);
+        // The row can not be calculated: divert it to the error stream if the user asked for it,
+        // stop the pipeline otherwise.
+        return handleFormulaError(r, formula, e);
       }
     }
 
     putRow(data.outputRowMeta, outputRowData);
 
     if (isRowLevel()) {
-      logRowlevel("Wrote row #" + getLinesWritten() + " : " + Arrays.toString(r));
+      logRowlevel(
+          "Wrote row #" + getLinesWritten() + " : " + data.outputRowMeta.getString(outputRowData));
     }
-    if (checkFeedback(getLinesRead())) {
+    if (checkFeedback(getLinesRead()) && isBasic()) {
       logBasic("Linenr " + getLinesRead());
     }
 
@@ -215,7 +241,7 @@ public class Formula extends BaseTransform<FormulaMeta, FormulaData> {
    * class to implement your own transforms.
    *
    * @param transformMeta The TransformMeta object to run.
-   * @param meta
+   * @param meta Formula Meta of the transform
    * @param data the data object to store temporary data, database connections, caches, result sets,
    *     hashtables etc.
    * @param copyNr The copynumber for this transform.
@@ -230,6 +256,61 @@ public class Formula extends BaseTransform<FormulaMeta, FormulaData> {
       PipelineMeta pipelineMeta,
       Pipeline pipeline) {
     super(transformMeta, meta, data, copyNr, pipelineMeta, pipeline);
+  }
+
+  /**
+   * Excel reports a failed calculation as an error value rather than by throwing. Only {@code #N/A}
+   * means "no value available" - the transform produces it on purpose through the "Set Null to
+   * #N/A" option - so it maps back to null. Every other error code ({@code #DIV/0!}, {@code
+   * #VALUE!}, {@code #NUM!}, ...) is a genuine calculation failure and has to be reported instead
+   * of silently turning the field blank.
+   *
+   * @param cellValue the evaluated cell holding the error
+   * @param formula the formula that produced it
+   * @return null for {@code #N/A}
+   * @throws HopValueException for any other error value
+   */
+  private Object getErrorValue(CellValue cellValue, FormulaMetaFunction formula)
+      throws HopValueException {
+    byte errorCode = cellValue.getErrorValue();
+    if (FormulaError.isValidCode(errorCode) && FormulaError.forInt(errorCode) == FormulaError.NA) {
+      return null;
+    }
+    String errorText =
+        FormulaError.isValidCode(errorCode)
+            ? FormulaError.forInt(errorCode).getString()
+            : Byte.toString(errorCode);
+    throw new HopValueException(
+        BaseMessages.getString(
+            PKG, "Formula.Exception.FormulaError", formula.getFieldName(), errorText));
+  }
+
+  /**
+   * A formula could not be calculated for the current row. Send the row to the error stream when
+   * error handling is configured, stop the pipeline otherwise.
+   *
+   * @param row the input row that could not be calculated
+   * @param formula the formula that failed
+   * @param e the cause of the failure
+   * @return true when the row was diverted and processing can continue, false to end this transform
+   * @throws HopTransformException when the row could not be written to the error stream
+   */
+  private boolean handleFormulaError(Object[] row, FormulaMetaFunction formula, Exception e)
+      throws HopTransformException {
+    String message =
+        BaseMessages.getString(
+            PKG, "Formula.Exception.CouldNotBeEvaluated", formula.getFormula(), e.getMessage());
+
+    if (getTransformMeta().isDoingErrorHandling()) {
+      putError(getInputRowMeta(), row, 1, message, formula.getFieldName(), "Formula001");
+      return true;
+    }
+
+    logError(message, e);
+    setErrors(1);
+    stopAll();
+    setOutputDone();
+    return false;
   }
 
   protected Object getReturnValue(
@@ -254,46 +335,21 @@ public class Formula extends BaseTransform<FormulaMeta, FormulaData> {
           value = ((Number) formulaResult).doubleValue();
         }
         break;
-      case FormulaData.RETURN_TYPE_INTEGER:
+      case FormulaData.RETURN_TYPE_INTEGER,
+          FormulaData.RETURN_TYPE_LONG,
+          FormulaData.RETURN_TYPE_DATE,
+          FormulaData.RETURN_TYPE_BIGDECIMAL,
+          FormulaData.RETURN_TYPE_TIMESTAMP:
         if (fn.isNeedDataConversion()) {
           value = convertDataToTargetValueMeta(realIndex, formulaResult);
         } else {
           value = formulaResult;
         }
         break;
-      case FormulaData.RETURN_TYPE_LONG:
-        if (fn.isNeedDataConversion()) {
-          value = convertDataToTargetValueMeta(realIndex, formulaResult);
-        } else {
-          value = formulaResult;
-        }
-        break;
-      case FormulaData.RETURN_TYPE_DATE:
-        if (fn.isNeedDataConversion()) {
-          value = convertDataToTargetValueMeta(realIndex, formulaResult);
-        } else {
-          value = formulaResult;
-        }
-        break;
-      case FormulaData.RETURN_TYPE_BIGDECIMAL:
-        if (fn.isNeedDataConversion()) {
-          value = convertDataToTargetValueMeta(realIndex, formulaResult);
-        } else {
-          value = formulaResult;
-        }
-        break;
-      case FormulaData.RETURN_TYPE_BYTE_ARRAY:
+      case FormulaData.RETURN_TYPE_BYTE_ARRAY, FormulaData.RETURN_TYPE_BOOLEAN:
         value = formulaResult;
         break;
-      case FormulaData.RETURN_TYPE_BOOLEAN:
-        value = formulaResult;
-        break;
-      case FormulaData.RETURN_TYPE_TIMESTAMP:
-        if (fn.isNeedDataConversion()) {
-          value = convertDataToTargetValueMeta(realIndex, formulaResult);
-        } else {
-          value = formulaResult;
-        }
+      default:
         break;
     } // if none case is caught - null is returned.
     return value;

@@ -29,10 +29,11 @@ The Script transform allows you to write code in any language supported by the h
 
 By default, the Hop project ships with the following language support:
 
+* https://developer.mozilla.org/en-US/docs/Web/JavaScript[ECMAScript] (JavaScript via https://www.graalvm.org/javascript/[GraalVM JavaScript], JSR 223)
 * https://groovy-lang.org/[Groovy]
 * https://www.python.org/[Python] (https://www.jython.org/[Jython])
 
-WARNING: ECMAScript (JavaScript as part of the JVM) was removed from the JVM with Java 17. You can still add it in Apache Hop 2.10 and later as documented in the <<_adding_scripting_languages, Adding Scripting Languages>> section.
+On Java 17 and later, the JVM no longer includes an ECMAScript engine; Hop bundles GraalVM JavaScript so that the Script transform works without extra setup.
 
 
 |
@@ -40,9 +41,11 @@ WARNING: ECMAScript (JavaScript as part of the JVM) was removed from the JVM wit
 [%noheader,cols="2,1a",frame=none, role="table-supported-engines"]
 !===
 !Hop Engine! image:check_mark.svg[Supported, 24]
-!Spark! image:question_mark.svg[Maybe Supported, 24]
-!Flink! image:question_mark.svg[Maybe Supported, 24]
-!Dataflow! image:question_mark.svg[Maybe Supported, 24]
+!Single Threaded! image:check_mark.svg[Supported, 24]
+!Native Spark! image:check_mark.svg[Supported, 24]
+!Beam Spark! image:question_mark.svg[Maybe Supported, 24]
+!Beam Flink! image:question_mark.svg[Maybe Supported, 24]
+!Beam Dataflow! image:question_mark.svg[Maybe Supported, 24]
 !===
 |===
 
@@ -66,9 +69,59 @@ WARNING: ECMAScript (JavaScript as part of the JVM) was removed from the JVM wit
 `End`: The script will be executed after the last row was read
 
 |Fields
-|Here you can specify the fields to retrieve from the context of the transform script after every row.
+|Fields to retrieve from the transform-script context after every row.
+See <<fields-table>>.
 
 |===
+
+[[fields-table]]
+== Fields table
+
+Each row describes one output field.
+
+[options="header"]
+|===
+|Column|Description
+|Fieldname|Name of the script variable to read after each row.
+|Rename to|Output field name if it should differ from *Fieldname*.
+Leave empty to keep the variable name.
+|Type|Hop data type of the output field.
+See xref:concepts.adoc#data-types[Data types].
+|Length|See xref:pipeline/formatting-values.adoc[Formatting numbers and dates].
+|Precision|See xref:pipeline/formatting-values.adoc[Formatting numbers and dates].
+|Replace value 'Fieldname' or 'Rename to'|`Y` overwrites an incoming field of that name.
+`N` (default) appends a new field.
+|Script result?|`Y`: fill this field with the *return value of the last expression* in the transform script, not with a named variable.
+`N` (default): read the script binding named in *Fieldname*.
+Mark at most one field as `Y`.
+|===
+
+=== Script result?
+
+After the transform script runs, Hop evaluates each Fields row:
+
+* *Script result? = N* — the field value is `bindings.get(Fieldname)`, the script variable of that name.
+* *Script result? = Y* — the field value is the value returned by the script engine (`eval`).
+  In ECMAScript, Groovy and Python that is the value of the last expression in the script.
+
+Use *Script result?* when the interesting value is an expression, not a named variable.
+
+.ECMAScript — named variable (Script result? = N)
+[source,javascript]
+----
+var total = price * quantity;
+----
+
+Define a field `total` with *Script result?* = `N`.
+
+.ECMAScript — last expression (Script result? = Y)
+[source,javascript]
+----
+price * quantity
+----
+
+Define any field name (for example `total`) with *Script result?* = `Y`.
+The field is filled with the product, even though the script never assigned a variable called `total`.
 
 == Variable bindings
 
@@ -252,9 +305,4 @@ For example, to add support for the Ruby scripting language you need to add the 
 * `jruby-stdlib-<version>.jar`
 * `jruby-core-<version>.jar`
 
-To add Javascript support, download the https://repo1.maven.org/maven2/org/openjdk/nashorn/nashorn-core/[Nashorn Core jar]
-
-* `nashorn-core-15.4.jar`
-
-
-After restarting the Apache Hop GUI you'll notice that there's a `ruby` or `Javascript` entry in the `Scripting Engine` dropdown box.
+After restarting the Apache Hop GUI you'll notice that there's a `ruby` entry in the `Scripting Engine` dropdown box.

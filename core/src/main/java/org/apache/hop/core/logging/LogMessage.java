@@ -20,7 +20,7 @@ package org.apache.hop.core.logging;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.config.HopConfig;
 import org.apache.hop.core.util.StringUtil;
@@ -33,6 +33,8 @@ public class LogMessage implements ILogMessage {
   private LogLevel level;
   private String copy;
   private boolean simplified;
+  private Throwable throwable;
+  private String stackTrace;
 
   /** Backward compatibility : no registry used, just log the subject as part of the message */
   public LogMessage(String subject, LogLevel level) {
@@ -70,7 +72,7 @@ public class LogMessage implements ILogMessage {
     ILoggingObject loggingObject = LoggingRegistry.getInstance().getLoggingObject(logChannelId);
 
     boolean detailedLogTurnOn =
-        "Y".equals(HopConfig.readStringVariable(Const.HOP_LOG_MARK_MAPPINGS, "N")) ? true : false;
+        "Y".equals(HopConfig.readStringVariable(Const.HOP_LOG_MARK_MAPPINGS, "N"));
     if (loggingObject != null) {
       if (!detailedLogTurnOn) {
         subject = loggingObject.getObjectName();
@@ -142,7 +144,8 @@ public class LogMessage implements ILogMessage {
   @Override
   public String getMessage() {
     String formatted = message;
-    if (arguments != null) {
+    // Skip MessageFormat when there are no substitution arguments
+    if (arguments != null && arguments.length > 0) {
       // get all "tokens" enclosed by curly brackets within the message
       final List<String> tokens = new ArrayList<>();
       StringUtil.getUsedVariables(formatted, "{", "}", tokens, true);
@@ -213,5 +216,38 @@ public class LogMessage implements ILogMessage {
    */
   public void setSimplified(boolean simplified) {
     this.simplified = simplified;
+  }
+
+  @Override
+  public Throwable getThrowable() {
+    return throwable;
+  }
+
+  public void setThrowable(Throwable throwable) {
+    this.throwable = throwable;
+  }
+
+  /**
+   * Returns the pre-rendered trace if set, else renders it from the throwable, else {@code null}.
+   */
+  public String getStackTrace() {
+    if (stackTrace != null) {
+      return stackTrace;
+    }
+    if (throwable != null) {
+      return Const.getStackTracker(throwable);
+    }
+    return null;
+  }
+
+  public void setStackTrace(String stackTrace) {
+    this.stackTrace = stackTrace;
+  }
+
+  /**
+   * @param level the log level to set
+   */
+  public void setLevel(LogLevel level) {
+    this.level = level;
   }
 }

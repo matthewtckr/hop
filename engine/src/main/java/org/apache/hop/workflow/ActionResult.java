@@ -19,7 +19,13 @@ package org.apache.hop.workflow;
 
 import java.util.Comparator;
 import java.util.Date;
+import lombok.Getter;
+import lombok.Setter;
+import org.apache.hop.core.Const;
 import org.apache.hop.core.Result;
+import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.xml.XmlHandler;
+import org.w3c.dom.Node;
 
 /**
  * This class holds the result of a action after it was executed. Things we want to keep track of
@@ -28,10 +34,22 @@ import org.apache.hop.core.Result;
  * <p>--> result of the execution (Result)
  *
  * <p>--> ...
- *
- * <p>
  */
+@Getter
+@Setter
 public class ActionResult implements Cloneable, Comparator<ActionResult>, Comparable<ActionResult> {
+  public static final String XML_TAG = "action_result";
+
+  private static final String TAG_ACTION_NAME = "action_name";
+  private static final String TAG_COMMENT = "comment";
+  private static final String TAG_REASON = "reason";
+  private static final String TAG_LOG_DATE = "log_date";
+  private static final String TAG_ACTION_FILENAME = "action_filename";
+  private static final String TAG_LOG_CHANNEL_ID = "log_channel_id";
+  private static final String TAG_CHECKPOINT = "checkpoint";
+  private static final String TAG_BYTES_READ = "bytes_read";
+  private static final String TAG_BYTES_WRITTEN = "bytes_written";
+
   private Result result;
   private String actionName;
 
@@ -43,6 +61,12 @@ public class ActionResult implements Cloneable, Comparator<ActionResult>, Compar
   private String logChannelId;
 
   private boolean checkpoint;
+
+  /** Bytes read by this action (per-action, not cumulative). */
+  private long bytesRead;
+
+  /** Bytes written by this action (per-action, not cumulative). */
+  private long bytesWritten;
 
   /** Creates a new empty action result... */
   public ActionResult() {
@@ -57,6 +81,24 @@ public class ActionResult implements Cloneable, Comparator<ActionResult>, Compar
       String reason,
       String actionName,
       String actionFilename) {
+    this(result, logChannelId, comment, reason, actionName, actionFilename, 0L, 0L);
+  }
+
+  /**
+   * Creates a new action result with per-action bytes read/written.
+   *
+   * @param bytesRead bytes read by this action only
+   * @param bytesWritten bytes written by this action only
+   */
+  public ActionResult(
+      Result result,
+      String logChannelId,
+      String comment,
+      String reason,
+      String actionName,
+      String actionFilename,
+      long bytesRead,
+      long bytesWritten) {
     this();
     if (result != null) {
       // lightClone doesn't bother cloning all the rows.
@@ -70,6 +112,55 @@ public class ActionResult implements Cloneable, Comparator<ActionResult>, Compar
     this.reason = reason;
     this.actionName = actionName;
     this.actionFilename = actionFilename;
+    this.bytesRead = bytesRead;
+    this.bytesWritten = bytesWritten;
+  }
+
+  /**
+   * Reads an action result back from the XML written by {@link #getXml()}.
+   *
+   * @param node the {@link #XML_TAG} node to read
+   */
+  public ActionResult(Node node) throws HopException {
+    actionName = XmlHandler.getTagValue(node, TAG_ACTION_NAME);
+    comment = XmlHandler.getTagValue(node, TAG_COMMENT);
+    reason = XmlHandler.getTagValue(node, TAG_REASON);
+    logDate = XmlHandler.stringToDate(XmlHandler.getTagValue(node, TAG_LOG_DATE));
+    actionFilename = XmlHandler.getTagValue(node, TAG_ACTION_FILENAME);
+    logChannelId = XmlHandler.getTagValue(node, TAG_LOG_CHANNEL_ID);
+    checkpoint = "Y".equalsIgnoreCase(XmlHandler.getTagValue(node, TAG_CHECKPOINT));
+    bytesRead = Const.toLong(XmlHandler.getTagValue(node, TAG_BYTES_READ), 0L);
+    bytesWritten = Const.toLong(XmlHandler.getTagValue(node, TAG_BYTES_WRITTEN), 0L);
+
+    // A result is only present once the action finished: the "start of action" entries carry none.
+    //
+    Node resultNode = XmlHandler.getSubNode(node, Result.XML_TAG);
+    if (resultNode != null) {
+      result = new Result(resultNode);
+    }
+  }
+
+  /**
+   * Serializes this action result, including the fields the workflow metrics view displays. The
+   * result itself is left out when the action has not finished yet.
+   */
+  public String getXml() {
+    StringBuilder xml = new StringBuilder();
+    xml.append(XmlHandler.openTag(XML_TAG));
+    xml.append(XmlHandler.addTagValue(TAG_ACTION_NAME, actionName));
+    xml.append(XmlHandler.addTagValue(TAG_COMMENT, comment));
+    xml.append(XmlHandler.addTagValue(TAG_REASON, reason));
+    xml.append(XmlHandler.addTagValue(TAG_LOG_DATE, XmlHandler.date2string(logDate)));
+    xml.append(XmlHandler.addTagValue(TAG_ACTION_FILENAME, actionFilename));
+    xml.append(XmlHandler.addTagValue(TAG_LOG_CHANNEL_ID, logChannelId));
+    xml.append(XmlHandler.addTagValue(TAG_CHECKPOINT, checkpoint));
+    xml.append(XmlHandler.addTagValue(TAG_BYTES_READ, bytesRead));
+    xml.append(XmlHandler.addTagValue(TAG_BYTES_WRITTEN, bytesWritten));
+    if (result != null) {
+      xml.append(result.getBasicXml());
+    }
+    xml.append(XmlHandler.closeTag(XML_TAG));
+    return xml.toString();
   }
 
   @Override
@@ -85,90 +176,6 @@ public class ActionResult implements Cloneable, Comparator<ActionResult>, Compar
     } catch (CloneNotSupportedException e) {
       return null;
     }
-  }
-
-  /**
-   * @param result The result to set.
-   */
-  public void setResult(Result result) {
-    this.result = result;
-  }
-
-  /**
-   * @return Returns the result.
-   */
-  public Result getResult() {
-    return result;
-  }
-
-  /**
-   * @return Returns the comment.
-   */
-  public String getComment() {
-    return comment;
-  }
-
-  /**
-   * @param comment The comment to set.
-   */
-  public void setComment(String comment) {
-    this.comment = comment;
-  }
-
-  /**
-   * @return Returns the reason.
-   */
-  public String getReason() {
-    return reason;
-  }
-
-  /**
-   * @param reason The reason to set.
-   */
-  public void setReason(String reason) {
-    this.reason = reason;
-  }
-
-  /**
-   * @return Returns the logDate.
-   */
-  public Date getLogDate() {
-    return logDate;
-  }
-
-  /**
-   * @param logDate The logDate to set.
-   */
-  public void setLogDate(Date logDate) {
-    this.logDate = logDate;
-  }
-
-  /**
-   * @return the actionName
-   */
-  public String getActionName() {
-    return actionName;
-  }
-
-  /**
-   * @param actionName the actionName to set
-   */
-  public void setActionName(String actionName) {
-    this.actionName = actionName;
-  }
-
-  /**
-   * @return the actionFilename
-   */
-  public String getActionFilename() {
-    return actionFilename;
-  }
-
-  /**
-   * @param actionFilename the actionFilename to set
-   */
-  public void setActionFilename(String actionFilename) {
-    this.actionFilename = actionFilename;
   }
 
   @Override
@@ -200,21 +207,39 @@ public class ActionResult implements Cloneable, Comparator<ActionResult>, Compar
     return compare(this, two);
   }
 
-  public String getLogChannelId() {
-    return logChannelId;
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
+    ActionResult that = (ActionResult) o;
+    return checkpoint == that.checkpoint
+        && bytesRead == that.bytesRead
+        && bytesWritten == that.bytesWritten
+        && java.util.Objects.equals(result, that.result)
+        && java.util.Objects.equals(actionName, that.actionName)
+        && java.util.Objects.equals(comment, that.comment)
+        && java.util.Objects.equals(reason, that.reason)
+        && java.util.Objects.equals(logDate, that.logDate)
+        && java.util.Objects.equals(actionFilename, that.actionFilename)
+        && java.util.Objects.equals(logChannelId, that.logChannelId);
   }
 
-  /**
-   * @return the checkpoint
-   */
-  public boolean isCheckpoint() {
-    return checkpoint;
-  }
-
-  /**
-   * @param checkpoint the checkpoint to set
-   */
-  public void setCheckpoint(boolean checkpoint) {
-    this.checkpoint = checkpoint;
+  @Override
+  public int hashCode() {
+    return java.util.Objects.hash(
+        result,
+        actionName,
+        comment,
+        reason,
+        logDate,
+        actionFilename,
+        logChannelId,
+        checkpoint,
+        bytesRead,
+        bytesWritten);
   }
 }

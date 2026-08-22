@@ -204,12 +204,34 @@ public class HopServerConfig implements IXml {
     }
   }
 
-  public HopServerConfig(String hostname, int port, int shutdownPort, boolean joining) {
+  public HopServerConfig(String hostname, int port, boolean joining) {
     this();
     this.joining = joining;
-    this.hopServer =
-        new HopServerMeta(
-            hostname + ":" + port, hostname, "" + port, "" + shutdownPort, null, null);
+    this.hopServer = new HopServerMeta(hostname + ":" + port, hostname, "" + port, null, null);
+  }
+
+  /**
+   * Expose the configured Hop server details (hop-server.xml) as Internal.Server.* variables on the
+   * given variable space, so pipelines and workflows running on this server can reference them.
+   *
+   * @param variables the variable space to populate
+   * @param resolvedPort the actual HTTP port the server is bound to
+   */
+  public void setInternalHopServerVariables(IVariables variables, int resolvedPort) {
+    if (variables == null || hopServer == null) {
+      return;
+    }
+    variables.setVariable(
+        Const.INTERNAL_VARIABLE_HOP_SERVER_NAME, Const.NVL(hopServer.getName(), ""));
+    variables.setVariable(
+        Const.INTERNAL_VARIABLE_HOP_SERVER_HOSTNAME, Const.NVL(hopServer.getHostname(), ""));
+    variables.setVariable(Const.INTERNAL_VARIABLE_HOP_SERVER_PORT, Integer.toString(resolvedPort));
+    variables.setVariable(
+        Const.INTERNAL_VARIABLE_HOP_SERVER_WEB_APP_NAME, Const.NVL(hopServer.getWebAppName(), ""));
+    variables.setVariable(
+        Const.INTERNAL_VARIABLE_HOP_SERVER_USERNAME, Const.NVL(hopServer.getUsername(), ""));
+    variables.setVariable(
+        Const.INTERNAL_VARIABLE_HOP_SERVER_SSL_MODE, Boolean.toString(hopServer.isSslMode()));
   }
 
   /**

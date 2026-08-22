@@ -21,11 +21,23 @@ setlocal
 REM switch to script directory
 cd /D %~dp0
 
+REM Optional user-level env written by `hop setup` (does not override already-set variables)
+if exist "%USERPROFILE%\.hop\hop-env.cmd" call "%USERPROFILE%\.hop\hop-env.cmd"
+
 REM Option to change the Characterset of the Windows Shell to show foreign caracters
 if not "%HOP_WINDOWS_SHELL_ENCODING%"=="" chcp %HOP_WINDOWS_SHELL_ENCODING%
 
-set LIBSPATH=lib\core;lib\beam
-set CLASSPATH=lib\core\*;lib\beam\*;lib\swt\win64\*
+set LIBSPATH=lib\core
+set CLASSPATH=lib\core\*;lib\spark-client\*;lib\swt\win64\*
+
+REM Optional versioned Spark client pack
+if defined HOP_SPARK_CLIENT_VERSION if exist "lib\spark-clients\%HOP_SPARK_CLIENT_VERSION%\" (
+  set CLASSPATH=%CLASSPATH%;lib\spark-clients\%HOP_SPARK_CLIENT_VERSION%\*
+)
+
+
+
+
 
 set _temphelp=0
 if [%1]==[help] set _temphelp=1
@@ -34,6 +46,9 @@ if %_temphelp%==1 (GOTO Help) ELSE (GOTO NormalStart)
 
 :Help
 echo ===[Hop Help - hop-gui.bat]===============================================
+echo Starts Hop GUI and keeps this console window open so you can see log output.
+echo To start without a console window, use hop-gui-nolog.bat instead.
+echo.
 echo Normally, no parameters are required to start Hop.  There is a debug mode
 echo that you can start by passing in DEBUG as the first parameter after hop-gui.bat
 echo.
@@ -63,8 +78,8 @@ REM
 REM If the user passes in DEBUG as the first parameter, it starts Hop in debugger mode and opens port 5005
 REM to allow attaching a debugger to step code.
 if [%1]==[DEBUG] (
-REM # optional line for attaching a debugger
-set HOP_OPTIONS=%HOP_OPTIONS% -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005)
+REM # optional line for attaching a debugger + turning on GUI debug logging
+set HOP_OPTIONS=%HOP_OPTIONS% -Xdebug -Xnoagent -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005 -DHOP_LOG_LEVEL=Debug)
 
 REM Pass HOP variables if they're set.
 if not "%HOP_AUDIT_FOLDER%"=="" (
@@ -87,6 +102,9 @@ if not "%HOP_PASSWORD_ENCODER_PLUGIN%"=="" (
 if not "%HOP_AES_ENCODER_KEY%"=="" (
   set HOP_OPTIONS=%HOP_OPTIONS% -DHOP_AES_ENCODER_KEY=%HOP_AES_ENCODER_KEY%
 )
+if not "%HOP_AES_ENCODER_KEY_FILE%"=="" (
+  set HOP_OPTIONS=%HOP_OPTIONS% -DHOP_AES_ENCODER_KEY_FILE=%HOP_AES_ENCODER_KEY_FILE%
+)
 
 set HOP_OPTIONS=%HOP_OPTIONS% -DHOP_PLATFORM_OS=Windows
 set HOP_OPTIONS=%HOP_OPTIONS% -DHOP_PLATFORM_RUNTIME=GUI
@@ -104,5 +122,10 @@ echo %_HOP_JAVA% -classpath %CLASSPATH% -Djava.library.path=%LIBSPATH% %HOP_OPTI
 echo.
 echo ===[Starting Hop]=========================================================
 
-%_HOP_JAVA% -classpath %CLASSPATH% -Dswt.autoScale=false -Djava.library.path=%LIBSPATH% %HOP_OPTIONS% org.apache.hop.ui.hopgui.HopGui
+REM SWT 3.134+ enables monitor-specific scaling by default on Windows; only
+REM "quarter" and "exact" are compatible. Do not set -Dswt.autoScale=false.
+%_HOP_JAVA% -classpath %CLASSPATH% -Djava.library.path=%LIBSPATH% %HOP_OPTIONS% org.apache.hop.ui.hopgui.HopGui
 if ERRORLEVEL 1 (pause)
+
+:End
+endlocal

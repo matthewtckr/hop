@@ -35,17 +35,17 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     name = "i18n::SQSReaderTransform.Name",
     description = "i18n::SQSReaderTransform.TooltipDesc",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Input",
-    keywords = "",
+    keywords = "aws,sqs,queue,message,read",
     documentationUrl = "/pipeline/transforms/aws-sqs-reader.html")
 public class SqsReaderMeta extends BaseTransformMeta<SqsReader, SqsReaderData> {
 
   @HopMetadataProperty(key = "AwsCredChain", injectionKey = "AWS_CRED_CHAIN")
   private String awsCredChain;
 
-  @HopMetadataProperty(key = "aws_key", injectionKey = "AWS_KEY")
+  @HopMetadataProperty(key = "aws_key", injectionKey = "AWS_KEY", password = true)
   private String awsKey;
 
-  @HopMetadataProperty(key = "aws_key_secret", injectionKey = "AWS_KEY_SECRET")
+  @HopMetadataProperty(key = "aws_key_secret", injectionKey = "AWS_KEY_SECRET", password = true)
   private String awsKeySecret;
 
   @HopMetadataProperty(key = "aws_region", injectionKey = "AWS_REGION")
@@ -185,22 +185,6 @@ public class SqsReaderMeta extends BaseTransformMeta<SqsReader, SqsReaderData> {
 
   public void setTFldMaxMessages(String tFldMaxMessages) {
     this.tFldMaxMessages = tFldMaxMessages;
-  }
-
-  /**
-   * This method is used when a transform is duplicated in Hop Gui. It needs to return a deep copy
-   * of this transform meta object. Be sure to create proper deep copies if the transform
-   * configuration is stored in modifiable objects.
-   *
-   * <p>See org.apache.hop.pipeline.transforms.rowgenerator.RowGeneratorMeta.clone() for an example
-   * on creating a deep copy.
-   *
-   * @return a deep copy of this
-   */
-  @Override
-  public Object clone() {
-    Object retval = super.clone();
-    return retval;
   }
 
   /**

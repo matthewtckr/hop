@@ -17,18 +17,29 @@
 
 package org.apache.hop.ui.hopgui.perspective.explorer.file.types.text;
 
+import java.io.InputStream;
+import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.Properties;
+import org.apache.commons.io.IOUtils;
+import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.search.ISearchable;
 import org.apache.hop.core.variables.IVariables;
+import org.apache.hop.core.vfs.HopVfs;
+import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.ui.hopgui.HopGui;
+import org.apache.hop.ui.hopgui.file.IHopFileType;
 import org.apache.hop.ui.hopgui.file.IHopFileTypeHandler;
 import org.apache.hop.ui.hopgui.perspective.explorer.ExplorerFile;
 import org.apache.hop.ui.hopgui.perspective.explorer.ExplorerPerspective;
-import org.apache.hop.ui.hopgui.perspective.explorer.file.IExplorerFileType;
 import org.apache.hop.ui.hopgui.perspective.explorer.file.types.base.BaseExplorerFileType;
+import org.apache.hop.ui.hopgui.search.HopGuiTextFileSearchable;
+import org.apache.hop.ui.hopgui.search.TextFileContent;
+import org.apache.hop.ui.hopgui.search.config.SearchLimits;
 
 public abstract class BaseTextExplorerFileType<T extends BaseTextExplorerFileTypeHandler>
-    extends BaseExplorerFileType<T> implements IExplorerFileType<T> {
+    extends BaseExplorerFileType<T> {
 
   public BaseTextExplorerFileType() {}
 
@@ -39,6 +50,9 @@ public abstract class BaseTextExplorerFileType<T extends BaseTextExplorerFileTyp
       String[] filterNames,
       Properties capabilities) {
     super(name, defaultFileExtension, filterExtensions, filterNames, capabilities);
+    if (capabilities != null) {
+      capabilities.setProperty(IHopFileType.CAPABILITY_SEARCH, "true");
+    }
   }
 
   public abstract T createFileTypeHandler(
@@ -47,4 +61,38 @@ public abstract class BaseTextExplorerFileType<T extends BaseTextExplorerFileTyp
   @Override
   public abstract IHopFileTypeHandler newFile(HopGui hopGui, IVariables parentVariableSpace)
       throws HopException;
+
+  @Override
+  public ISearchable createSearchable(
+      String filename,
+      String locationDescription,
+      IVariables variables,
+      IHopMetadataProvider metadataProvider)
+      throws HopException {
+    try {
+      FileObject fileObject = HopVfs.getFileObject(filename, variables);
+      if (!fileObject.exists()) {
+        throw new HopException("File '" + filename + "' doesn't exist");
+      }
+      // Never load very large data files into GUI search (million-row CSV/JSON, …).
+      // Users should use dedicated tools for those. Limit is configurable under Search options.
+      long fileSize = fileObject.getContent().getSize();
+      long maxBytes = SearchLimits.fromConfig().getMaxTextFileSizeBytes();
+      if (maxBytes > 0 && fileSize > maxBytes) {
+        return null;
+      }
+      String text;
+      try (InputStream inputStream = HopVfs.getInputStream(fileObject)) {
+        StringWriter writer = new StringWriter();
+        IOUtils.copy(inputStream, writer, StandardCharsets.UTF_8);
+        text = writer.toString();
+      }
+      TextFileContent content = new TextFileContent(filename, text);
+      return new HopGuiTextFileSearchable(locationDescription, getName(), content);
+    } catch (HopException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new HopException("Error loading text file for search: " + filename, e);
+    }
+  }
 }

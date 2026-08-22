@@ -19,7 +19,7 @@ package org.apache.hop.pipeline.transforms.input;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
@@ -58,18 +58,6 @@ public class MappingInputMeta extends BaseTransformMeta<MappingInput, MappingInp
   public MappingInputMeta() {
     super();
     this.fields = new ArrayList<>();
-  }
-
-  public MappingInputMeta(MappingInputMeta m) {
-    this();
-    for (InputField field : m.fields) {
-      fields.add(new InputField(field));
-    }
-  }
-
-  @Override
-  public MappingInputMeta clone() {
-    return new MappingInputMeta(this);
   }
 
   @Override

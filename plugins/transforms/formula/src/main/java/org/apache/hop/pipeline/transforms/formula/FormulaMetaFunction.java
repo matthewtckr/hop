@@ -22,6 +22,7 @@ import lombok.Getter;
 import lombok.Setter;
 import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.metadata.api.HopMetadataProperty;
+import org.apache.hop.pipeline.transforms.formula.util.StringToTypeConverter;
 
 @Getter
 @Setter
@@ -40,7 +41,8 @@ public class FormulaMetaFunction {
 
   @HopMetadataProperty(
       key = "value_type",
-      injectionKeyDescription = "FormulaMeta.Injection.ValueType")
+      injectionKeyDescription = "FormulaMeta.Injection.ValueType",
+      injectionConverter = StringToTypeConverter.class)
   private int valueType;
 
   @HopMetadataProperty(
@@ -66,12 +68,12 @@ public class FormulaMetaFunction {
   private transient boolean needDataConversion = false;
 
   /**
-   * @param fieldName
-   * @param formula
-   * @param valueType
-   * @param valueLength
-   * @param valuePrecision
-   * @param replaceField
+   * @param fieldName Output field name
+   * @param formula Formula
+   * @param valueType The value type of the return value
+   * @param valueLength Lenght of valueMeta
+   * @param valuePrecision Precision of valueMeta
+   * @param replaceField Should the source field be replaced
    */
   public FormulaMetaFunction(
       String fieldName,
@@ -97,19 +99,36 @@ public class FormulaMetaFunction {
     valuePrecision = -1;
   }
 
+  public FormulaMetaFunction(FormulaMetaFunction f) {
+    this.fieldName = f.fieldName;
+    this.formula = f.formula;
+    this.valueType = f.valueType;
+    this.valueLength = f.valueLength;
+    this.valuePrecision = f.valuePrecision;
+    this.replaceField = f.replaceField;
+    this.setNa = f.setNa;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (!(o instanceof FormulaMetaFunction that)) {
+      return false;
+    }
+    return valueType == that.valueType
+        && valueLength == that.valueLength
+        && valuePrecision == that.valuePrecision
+        && setNa == that.setNa
+        && Objects.equals(fieldName, that.fieldName)
+        && Objects.equals(formula, that.formula)
+        && Objects.equals(replaceField, that.replaceField);
+  }
+
   @Override
   public int hashCode() {
     return Objects.hash(
         fieldName, formula, valueType, valueLength, valuePrecision, replaceField, setNa);
-  }
-
-  @Override
-  public Object clone() {
-    try {
-      FormulaMetaFunction retval = (FormulaMetaFunction) super.clone();
-      return retval;
-    } catch (CloneNotSupportedException e) {
-      return null;
-    }
   }
 }

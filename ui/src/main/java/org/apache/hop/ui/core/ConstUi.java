@@ -17,7 +17,10 @@
 
 package org.apache.hop.ui.core;
 
+import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.util.Utils;
@@ -52,6 +55,12 @@ public class ConstUi {
 
   /** The minimal size of a note on a graphical view (width &amp; height) */
   public static final int NOTE_MIN_SIZE = 20;
+
+  /**
+   * Default logical width for a new note (before multiplying by {@code
+   * PropsUi.getNativeZoomFactor()}).
+   */
+  public static final int NOTE_DEFAULT_WIDTH = 300;
 
   /** Offset between pointer and tooltip position. */
   public static final int TOOLTIP_OFFSET = 5;
@@ -210,8 +219,8 @@ public class ConstUi {
     }
 
     TreeItem[] ti = parent.getItems();
-    for (int i = 0; i < ti.length; i++) {
-      TreeItem child = findTreeItem(parent, ti[i], parentName, name);
+    for (TreeItem treeItem : ti) {
+      TreeItem child = findTreeItem(parent, treeItem, parentName, name);
       if (child != null) {
         return child;
       }
@@ -250,5 +259,21 @@ public class ConstUi {
       Arrays.sort(names);
     }
     return names;
+  }
+
+  /**
+   * Get the available character set encodings to show in a drop down. The first entry is empty so
+   * that a previously selected encoding can be cleared again, falling back to the default encoding.
+   *
+   * @return the available encodings, preceded by an empty entry
+   */
+  public static String[] getEncodings() {
+    Collection<Charset> charsets = Charset.availableCharsets().values();
+    List<String> encodings = new ArrayList<>(charsets.size() + 1);
+    encodings.add("");
+    for (Charset charset : charsets) {
+      encodings.add(charset.displayName());
+    }
+    return encodings.toArray(new String[0]);
   }
 }

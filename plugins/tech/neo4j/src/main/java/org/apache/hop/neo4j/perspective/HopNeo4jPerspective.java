@@ -18,11 +18,10 @@
 package org.apache.hop.neo4j.perspective;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Props;
 import org.apache.hop.core.exception.HopConfigException;
@@ -47,15 +46,11 @@ import org.apache.hop.ui.core.widget.TableView;
 import org.apache.hop.ui.core.widget.TreeMemory;
 import org.apache.hop.ui.hopgui.HopGui;
 import org.apache.hop.ui.hopgui.context.IGuiContextHandler;
-import org.apache.hop.ui.hopgui.file.IHopFileType;
 import org.apache.hop.ui.hopgui.file.IHopFileTypeHandler;
-import org.apache.hop.ui.hopgui.file.empty.EmptyHopFileTypeHandler;
 import org.apache.hop.ui.hopgui.file.pipeline.HopGuiPipelineGraph;
 import org.apache.hop.ui.hopgui.file.workflow.HopGuiWorkflowGraph;
 import org.apache.hop.ui.hopgui.perspective.HopPerspectivePlugin;
 import org.apache.hop.ui.hopgui.perspective.IHopPerspective;
-import org.apache.hop.ui.hopgui.perspective.TabItemHandler;
-import org.apache.hop.ui.hopgui.perspective.dataorch.HopDataOrchestrationPerspective;
 import org.apache.hop.ui.util.SwtSvgImageUtil;
 import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.action.ActionMeta;
@@ -75,6 +70,7 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Label;
+import org.eclipse.swt.widgets.MessageBox;
 import org.eclipse.swt.widgets.TableItem;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.widgets.Tree;
@@ -94,7 +90,7 @@ import org.neo4j.driver.types.Path;
     description = "Neo4j Perspective",
     image = "neo4j_logo.svg",
     documentationUrl = "/hop-gui/perspective-neo4j.html")
-@GuiPlugin
+@GuiPlugin(name = "Neo4j")
 public class HopNeo4jPerspective implements IHopPerspective {
 
   public static final Class<?> PKG = HopNeo4jPerspective.class;
@@ -143,21 +139,6 @@ public class HopNeo4jPerspective implements IHopPerspective {
     // Auto-refresh the list
     //
     refreshResults();
-  }
-
-  @Override
-  public IHopFileTypeHandler getActiveFileTypeHandler() {
-    return new EmptyHopFileTypeHandler(); // Not handling anything really
-  }
-
-  @Override
-  public void setActiveFileTypeHandler(IHopFileTypeHandler activeFileTypeHandler) {
-    // Do nothing
-  }
-
-  @Override
-  public List<IHopFileType> getSupportedHopFileTypes() {
-    return Collections.emptyList();
   }
 
   @Override
@@ -541,14 +522,19 @@ public class HopNeo4jPerspective implements IHopPerspective {
     loggingCypher.append("AND   e.type = $type ");
     loggingCypher.append("RETURN e.loggingText ");
 
-    session.readTransaction(
+    session.executeRead(
         tx -> {
           Result result = tx.run(loggingCypher.toString(), loggingParameters);
           while (result.hasNext()) {
             Record record = result.next();
-            Value value = record.get(0);
-            String loggingText = value.asString();
-            wLogging.setText(Const.NVL(loggingText, "<no logging found>"));
+            // Not via Value.asString(): that returns the literal text "null" for a missing
+            // property, which then slips past the Const.NVL() below.
+            //
+            String loggingText = LoggingCore.getStringValue(record, 0);
+            wLogging.setText(
+                Const.NVL(
+                    loggingText,
+                    BaseMessages.getString(PKG, "Neo4jPerspectiveDialog.NoLoggingFound.Message")));
           }
           return null;
         });
@@ -581,20 +567,11 @@ public class HopNeo4jPerspective implements IHopPerspective {
       errorPathParams.put(CONST_SUBJECT_TYPE, type);
       errorPathParams.put(CONST_SUBJECT_ID, id);
 
-      StringBuilder errorPathCypher = new StringBuilder();
-      errorPathCypher.append(
-          "MATCH(top:Execution { name : $subjectName, type : $subjectType, id : $subjectId })-[rel:EXECUTES*]-(err:Execution) ");
-      errorPathCypher.append("   , p=shortestpath((top)-[:EXECUTES*]-(err)) ");
-      errorPathCypher.append("WHERE top.registrationDate IS NOT NULL ");
-      errorPathCypher.append("  AND err.errors > 0 ");
-      errorPathCypher.append("  AND size((err)-[:EXECUTES]->())=0 ");
-      errorPathCypher.append("RETURN p ");
-      errorPathCypher.append("ORDER BY size(RELATIONSHIPS(p)) DESC ");
-      errorPathCypher.append("LIMIT 10");
+      String errorPathCypher = getErrorPathCypher();
 
-      session.readTransaction(
+      session.executeRead(
           tx -> {
-            Result pathResult = tx.run(errorPathCypher.toString(), errorPathParams);
+            Result pathResult = tx.run(errorPathCypher, errorPathParams);
 
             while (pathResult.hasNext()) {
               Record pathRecord = pathResult.next();
@@ -663,6 +640,28 @@ public class HopNeo4jPerspective implements IHopPerspective {
           });
     }
     return shortestPaths;
+  }
+
+  /**
+   * The Cypher which looks up the shortest paths from an execution to the executions which reported
+   * errors.
+   *
+   * <p>An error node only qualifies when it is a leaf: it did not execute anything itself. That
+   * condition used to be expressed as <code>size((err)-[:EXECUTES]-&gt;())=0</code>, but Neo4j 5
+   * removed <code>size()</code> on a pattern expression. A pattern predicate is the equivalent and
+   * is supported by both Neo4j 4 and 5.
+   *
+   * @return the parameterized Cypher statement
+   */
+  static String getErrorPathCypher() {
+    return "MATCH(top:Execution { name : $subjectName, type : $subjectType, id : $subjectId })-[rel:EXECUTES*]-(err:Execution) "
+        + "   , p=shortestpath((top)-[:EXECUTES*]-(err)) "
+        + "WHERE top.registrationDate IS NOT NULL "
+        + "  AND err.errors > 0 "
+        + "  AND NOT (err)-[:EXECUTES]->() "
+        + "RETURN p "
+        + "ORDER BY size(RELATIONSHIPS(p)) DESC "
+        + "LIMIT 10";
   }
 
   private void analyzeCypherStatements(
@@ -824,38 +823,34 @@ public class HopNeo4jPerspective implements IHopPerspective {
       try (Driver driver = connection.getDriver(log, hopGui.getVariables())) {
         try (Session session = connection.getSession(log, driver, hopGui.getVariables())) {
 
-          session.readTransaction(
+          session.executeRead(
               tx -> {
                 Result result = tx.run(resultsCypher.toString(), resultsParameters);
                 while (result.hasNext()) {
                   Record record = result.next();
                   TableItem item = new TableItem(wResults.table, SWT.NONE);
-                  int pos = 0;
-                  Value vId = record.get(pos++);
-                  item.setText(pos, Const.NVL(vId.asString(), ""));
-                  Value vName = record.get(pos++);
-                  item.setText(pos, Const.NVL(vName.asString(), ""));
-                  Value vType = record.get(pos++);
-                  item.setText(pos, Const.NVL(vType.asString(), ""));
-                  Value vLinesRead = record.get(pos++);
-                  item.setText(pos, Long.toString(vLinesRead.asLong(0)));
-                  Value vLinesWritten = record.get(pos++);
-                  item.setText(pos, Long.toString(vLinesWritten.asLong(0)));
-                  Value vLinesInput = record.get(pos++);
-                  item.setText(pos, Long.toString(vLinesInput.asLong(0)));
-                  Value vLinesOutput = record.get(pos++);
-                  item.setText(pos, Long.toString(vLinesOutput.asLong(0)));
-                  Value vLinesRejected = record.get(pos++);
-                  item.setText(pos, Long.toString(vLinesRejected.asLong(0)));
-                  Value vErrors = record.get(pos++);
-                  long errors = vErrors.asLong(0);
-                  item.setText(pos, Long.toString(vErrors.asLong(0)));
-                  Value vExecutionStart = record.get(pos++);
-                  item.setText(pos, Const.NVL(vExecutionStart.asString(), "").replace("T", " "));
-                  Value vDurationMs = record.get(pos++);
-                  String durationHMS =
-                      LoggingCore.getFancyDurationFromMs(Long.valueOf(vDurationMs.asLong(0)));
-                  item.setText(pos, durationHMS);
+
+                  // Column 0 of the table holds the row number, the values start at column 1.
+                  // The strings are read with LoggingCore and not with Value.asString(): the
+                  // latter returns the literal text "null" for a property which isn't set,
+                  // which then slips past Const.NVL().
+                  //
+                  int column = 1;
+                  item.setText(column++, Const.NVL(LoggingCore.getStringValue(record, 0), ""));
+                  item.setText(column++, Const.NVL(LoggingCore.getStringValue(record, 1), ""));
+                  item.setText(column++, Const.NVL(LoggingCore.getStringValue(record, 2), ""));
+                  item.setText(column++, Long.toString(record.get(3).asLong(0)));
+                  item.setText(column++, Long.toString(record.get(4).asLong(0)));
+                  item.setText(column++, Long.toString(record.get(5).asLong(0)));
+                  item.setText(column++, Long.toString(record.get(6).asLong(0)));
+                  item.setText(column++, Long.toString(record.get(7).asLong(0)));
+                  long errors = record.get(8).asLong(0);
+                  item.setText(column++, Long.toString(errors));
+                  item.setText(
+                      column++,
+                      Const.NVL(LoggingCore.getStringValue(record, 9), "").replace("T", " "));
+                  item.setText(
+                      column, LoggingCore.getFancyDurationFromMs(record.get(10).asLong(0)));
 
                   if (errors != 0) {
                     item.setBackground(errorLineBackground);
@@ -873,7 +868,7 @@ public class HopNeo4jPerspective implements IHopPerspective {
           //
           String execCypher =
               "match(e:Execution) where e.type in ['PIPELINE', 'WORKFLOW'] return distinct e.name order by e.name";
-          session.readTransaction(
+          session.executeRead(
               tx -> {
                 List<String> list = new ArrayList<>();
                 Result result = tx.run(execCypher);
@@ -935,20 +930,39 @@ public class HopNeo4jPerspective implements IHopPerspective {
       try (Session session =
           connection.getSession(hopGui.getLog(), driver, hopGui.getVariables())) {
 
+        boolean opened;
         if ("PIPELINE".equals(type)) {
-          openPipelineOrWorkflow(session, name, type, id, "Pipeline", "EXECUTION_OF_PIPELINE");
+          opened =
+              openPipelineOrWorkflow(session, name, type, id, "Pipeline", "EXECUTION_OF_PIPELINE");
         } else if ("WORKFLOW".equals(type)) {
-          openPipelineOrWorkflow(session, name, type, id, "Workflow", "EXECUTION_OF_WORKFLOW");
+          opened =
+              openPipelineOrWorkflow(session, name, type, id, "Workflow", "EXECUTION_OF_WORKFLOW");
         } else if ("TRANSFORM".equals(type)) {
-          openTransform(session, name, type, id);
+          opened = openTransform(session, name, type, id);
         } else if ("ACTION".equals(type)) {
-          openAction(session, name, type, id);
+          opened = openAction(session, name, type, id);
+        } else {
+          opened = false;
+        }
+
+        if (!opened) {
+          // The execution is in the graph but the file behind it isn't. That happens when the
+          // execution was logged by an execution information location: only the Neo4j logging
+          // in NEO4J_LOGGING_CONNECTION stores the metadata this needs. Say so instead of
+          // leaving the button without any effect.
+          //
+          MessageBox box = new MessageBox(hopGui.getShell(), SWT.ICON_INFORMATION | SWT.OK);
+          box.setText(BaseMessages.getString(PKG, "Neo4jPerspectiveDialog.NoFileFound.Header"));
+          box.setMessage(
+              BaseMessages.getString(
+                  PKG, "Neo4jPerspectiveDialog.NoFileFound.Message", name, type));
+          box.open();
         }
       }
     }
   }
 
-  private void openTransform(Session session, String name, String type, String id) {
+  private boolean openTransform(Session session, String name, String type, String id) {
 
     LogChannel.UI.logDetailed("Open transform : " + id + ", name : " + name + ", type: " + type);
 
@@ -966,7 +980,7 @@ public class HopNeo4jPerspective implements IHopPerspective {
     cypher.append("RETURN p.filename, t.name ");
 
     String[] names =
-        session.readTransaction(
+        session.executeRead(
             tx -> {
               Result statementResult = tx.run(cypher.toString(), params);
               if (!statementResult.hasNext()) {
@@ -983,33 +997,31 @@ public class HopNeo4jPerspective implements IHopPerspective {
             });
 
     if (names == null) {
-      return;
+      return false;
     }
 
     String filename = names[0];
     String transformName = names[1];
 
     if (StringUtils.isEmpty(filename)) {
-      return;
+      return false;
     }
 
     try {
       hopGui.fileDelegate.fileOpen(filename);
 
       if (StringUtils.isEmpty(transformName)) {
-        return;
+        return true;
       }
 
-      HopDataOrchestrationPerspective perspective = HopGui.getDataOrchestrationPerspective();
-      IHopFileTypeHandler typeHandler = perspective.getActiveFileTypeHandler();
-      if (typeHandler == null || !(typeHandler instanceof HopGuiPipelineGraph)) {
-        return;
+      IHopFileTypeHandler typeHandler = hopGui.getActiveFileTypeHandler();
+      if (!(typeHandler instanceof HopGuiPipelineGraph graph)) {
+        return true;
       }
-      HopGuiPipelineGraph graph = (HopGuiPipelineGraph) typeHandler;
       PipelineMeta pipelineMeta = graph.getPipelineMeta();
       TransformMeta transformMeta = pipelineMeta.findTransform(transformName);
       if (transformMeta == null) {
-        return;
+        return true;
       }
       pipelineMeta.unselectAll();
       transformMeta.setSelected(true);
@@ -1021,9 +1033,10 @@ public class HopNeo4jPerspective implements IHopPerspective {
           BaseMessages.getString(PKG, "Neo4jPerspectiveDialog.OpeningTransform.Dialog.Message"),
           e);
     }
+    return true;
   }
 
-  private void openAction(Session session, String name, String type, String id) {
+  private boolean openAction(Session session, String name, String type, String id) {
 
     LogChannel.UI.logDetailed("Open action : " + id + ", name : " + name + ", type: " + type);
 
@@ -1040,7 +1053,7 @@ public class HopNeo4jPerspective implements IHopPerspective {
     cypher.append("RETURN w.filename, a.name ");
 
     String[] names =
-        session.readTransaction(
+        session.executeRead(
             tx -> {
               Result statementResult = tx.run(cypher.toString(), params);
               if (!statementResult.hasNext()) {
@@ -1056,25 +1069,23 @@ public class HopNeo4jPerspective implements IHopPerspective {
               };
             });
     if (names == null) {
-      return;
+      return false;
     }
 
     String filename = names[0];
     String actionName = names[1];
 
     if (StringUtils.isEmpty(filename)) {
-      return;
+      return false;
     }
 
     try {
       hopGui.fileDelegate.fileOpen(filename);
       if (StringUtils.isNotEmpty(actionName)) {
-        IHopFileTypeHandler typeHandler =
-            HopGui.getDataOrchestrationPerspective().getActiveFileTypeHandler();
-        if (typeHandler == null || !(typeHandler instanceof HopGuiWorkflowGraph)) {
-          return;
+        IHopFileTypeHandler typeHandler = HopGui.getInstance().getActiveFileTypeHandler();
+        if (!(typeHandler instanceof HopGuiWorkflowGraph graph)) {
+          return true;
         }
-        HopGuiWorkflowGraph graph = (HopGuiWorkflowGraph) typeHandler;
         WorkflowMeta workflowMeta = graph.getWorkflowMeta();
         ActionMeta actionMeta = workflowMeta.findAction(actionName);
         if (actionMeta != null) {
@@ -1090,9 +1101,10 @@ public class HopNeo4jPerspective implements IHopPerspective {
           BaseMessages.getString(PKG, "Neo4jPerspectiveDialog.OpeningAction.Dialog.Message"),
           e);
     }
+    return true;
   }
 
-  private void openPipelineOrWorkflow(
+  private boolean openPipelineOrWorkflow(
       Session session, String name, String type, String id, String nodeLabel, String relationship) {
     Map<String, Object> params = new HashMap<>();
     params.put(CONST_SUBJECT_NAME, name);
@@ -1107,7 +1119,7 @@ public class HopNeo4jPerspective implements IHopPerspective {
     cypher.append("RETURN tr.filename ");
 
     String filename =
-        session.readTransaction(
+        session.executeRead(
             tx -> {
               Result statementResult = tx.run(cypher.toString(), params);
               if (!statementResult.hasNext()) {
@@ -1121,48 +1133,20 @@ public class HopNeo4jPerspective implements IHopPerspective {
               return LoggingCore.getStringValue(record, 0);
             });
 
-    if (StringUtils.isNotEmpty(filename)) {
-      try {
-        hopGui.fileDelegate.fileOpen(filename);
-      } catch (Exception e) {
-        new ErrorDialog(
-            hopGui.getShell(),
-            BaseMessages.getString(PKG, "Neo4jPerspectiveDialog.OpeningFile.Dialog.Header"),
-            BaseMessages.getString(
-                PKG, "Neo4jPerspectiveDialog.OpeningFile.Dialog.Message", filename),
-            e);
-      }
+    if (StringUtils.isEmpty(filename)) {
+      return false;
     }
-  }
-
-  @Override
-  public boolean remove(IHopFileTypeHandler typeHandler) {
-    return false; // Nothing to do here
-  }
-
-  @Override
-  public List<TabItemHandler> getItems() {
-    return null;
-  }
-
-  @Override
-  public void navigateToPreviousFile() {
-    // Do nothing
-  }
-
-  @Override
-  public void navigateToNextFile() {
-    // Do nothing
-  }
-
-  @Override
-  public boolean hasNavigationPreviousFile() {
-    return false;
-  }
-
-  @Override
-  public boolean hasNavigationNextFile() {
-    return false;
+    try {
+      hopGui.fileDelegate.fileOpen(filename);
+    } catch (Exception e) {
+      new ErrorDialog(
+          hopGui.getShell(),
+          BaseMessages.getString(PKG, "Neo4jPerspectiveDialog.OpeningFile.Dialog.Header"),
+          BaseMessages.getString(
+              PKG, "Neo4jPerspectiveDialog.OpeningFile.Dialog.Message", filename),
+          e);
+    }
+    return true;
   }
 
   /**

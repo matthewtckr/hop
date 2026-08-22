@@ -17,9 +17,9 @@
 
 package org.apache.hop.databases.cratedb;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
@@ -35,7 +35,7 @@ import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabasePluginType;
@@ -52,16 +52,17 @@ import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.core.row.value.ValueMetaPluginType;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
-import org.apache.hop.junit.rules.RestoreHopEnvironment;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.mockito.Spy;
 
-public class CrateDBValueMetaBaseTest {
-  @ClassRule public static RestoreHopEnvironment env = new RestoreHopEnvironment();
+class CrateDBValueMetaBaseTest {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
   private static final String TEST_NAME = "TEST_NAME";
   private static final String LOG_FIELD = "LOG_FIELD";
@@ -78,16 +79,16 @@ public class CrateDBValueMetaBaseTest {
   private IValueMeta valueMetaBase;
   private IVariables variables;
 
-  @BeforeClass
-  public static void setUpBeforeClass() throws HopException {
+  @BeforeAll
+  static void setUpBeforeClass() throws HopException {
     PluginRegistry.addPluginType(ValueMetaPluginType.getInstance());
     PluginRegistry.addPluginType(DatabasePluginType.getInstance());
     PluginRegistry.init();
     HopLogStore.init();
   }
 
-  @Before
-  public void setUp() throws HopPluginException {
+  @BeforeEach
+  void setUp() throws HopPluginException {
     listener = new StoreLoggingEventListener();
     HopLogStore.getAppender().addLoggingEventListener(listener);
 
@@ -98,8 +99,8 @@ public class CrateDBValueMetaBaseTest {
     variables = spy(new Variables());
   }
 
-  @After
-  public void tearDown() {
+  @AfterEach
+  void tearDown() {
     HopLogStore.getAppender().removeLoggingEventListener(listener);
     listener = new StoreLoggingEventListener();
   }
@@ -123,7 +124,7 @@ public class CrateDBValueMetaBaseTest {
    * length.
    */
   @Test
-  public void test_PDI_17126_Postgres() throws Exception {
+  void test_PDI_17126_Postgres() throws Exception {
     String data = StringUtils.repeat("*", 10);
     initValueMeta(new CrateDBDatabaseMeta(), 20, data);
 
@@ -135,7 +136,7 @@ public class CrateDBValueMetaBaseTest {
    * field length.
    */
   @Test
-  public void test_Pdi_17126_postgres_DataLongerThanMetaLength() throws Exception {
+  void test_Pdi_17126_postgres_DataLongerThanMetaLength() throws Exception {
     String data = StringUtils.repeat("*", 20);
     initValueMeta(new CrateDBDatabaseMeta(), 10, data);
 
@@ -147,7 +148,7 @@ public class CrateDBValueMetaBaseTest {
    * mocking it at 1KB instead of the real value which is 2GB for PostgreSQL
    */
   @Test
-  public void test_Pdi_17126_postgres_truncate() throws Exception {
+  void test_Pdi_17126_postgres_truncate() throws Exception {
     List<HopLoggingEvent> events = listener.getEvents();
     assertEquals(0, events.size());
 
@@ -157,7 +158,8 @@ public class CrateDBValueMetaBaseTest {
 
     String data = StringUtils.repeat("*", 2048);
 
-    ValueMetaBase valueMetaString = new ValueMetaBase(LOG_FIELD, IValueMeta.TYPE_STRING, 2048, 0);
+    IValueMeta valueMetaString =
+        ValueMetaFactory.createValueMeta(LOG_FIELD, IValueMeta.TYPE_STRING, 2048, 0);
     valueMetaString.setPreparedStatementValue(databaseMetaSpy, preparedStatementMock, 0, data);
 
     verify(preparedStatementMock, never()).setString(0, data);
@@ -166,19 +168,19 @@ public class CrateDBValueMetaBaseTest {
     // check that truncated string was logged
     assertEquals(1, events.size());
     assertEquals(
-        "ValueMetaBase - Truncating 1024 symbols of original message in 'LOG_FIELD' field",
+        "General - Truncating 1024 symbols of original message in 'LOG_FIELD' field",
         events.get(0).getMessage().toString());
   }
 
-  private void initValueMeta(BaseDatabaseMeta dbMeta, int length, Object data)
-      throws HopDatabaseException {
-    ValueMetaBase valueMetaString = new ValueMetaBase(LOG_FIELD, IValueMeta.TYPE_STRING, length, 0);
+  private void initValueMeta(BaseDatabaseMeta dbMeta, int length, Object data) throws HopException {
+    IValueMeta valueMetaString =
+        ValueMetaFactory.createValueMeta(LOG_FIELD, IValueMeta.TYPE_STRING, length, 0);
     databaseMetaSpy.setIDatabase(dbMeta);
     valueMetaString.setPreparedStatementValue(databaseMetaSpy, preparedStatementMock, 0, data);
   }
 
   @Test
-  public void testMetdataPreviewSqlNumericWithUndefinedSizeUsingPostgesSql()
+  void testMetdataPreviewSqlNumericWithUndefinedSizeUsingPostgesSql()
       throws SQLException, HopDatabaseException {
     doReturn(Types.NUMERIC).when(resultSet).getInt("DATA_TYPE");
     doReturn(0).when(resultSet).getInt("COLUMN_SIZE");
@@ -192,7 +194,7 @@ public class CrateDBValueMetaBaseTest {
   }
 
   @Test
-  public void testMetdataPreviewSqlBinaryToHopBinary() throws SQLException, HopDatabaseException {
+  void testMetdataPreviewSqlBinaryToHopBinary() throws SQLException, HopDatabaseException {
     doReturn(Types.BINARY).when(resultSet).getInt("DATA_TYPE");
     doReturn(mock(CrateDBDatabaseMeta.class)).when(dbMeta).getIDatabase();
     IValueMeta valueMeta = valueMetaBase.getMetadataPreview(variables, dbMeta, resultSet);
@@ -200,7 +202,7 @@ public class CrateDBValueMetaBaseTest {
   }
 
   @Test
-  public void testMetdataPreviewSqlBlobToHopBinary() throws SQLException, HopDatabaseException {
+  void testMetdataPreviewSqlBlobToHopBinary() throws SQLException, HopDatabaseException {
     doReturn(Types.BLOB).when(resultSet).getInt("DATA_TYPE");
     doReturn(mock(CrateDBDatabaseMeta.class)).when(dbMeta).getIDatabase();
     IValueMeta valueMeta = valueMetaBase.getMetadataPreview(variables, dbMeta, resultSet);
@@ -209,8 +211,7 @@ public class CrateDBValueMetaBaseTest {
   }
 
   @Test
-  public void testMetdataPreviewSqlVarBinaryToHopBinary()
-      throws SQLException, HopDatabaseException {
+  void testMetdataPreviewSqlVarBinaryToHopBinary() throws SQLException, HopDatabaseException {
     doReturn(Types.VARBINARY).when(resultSet).getInt("DATA_TYPE");
     doReturn(mock(CrateDBDatabaseMeta.class)).when(dbMeta).getIDatabase();
     IValueMeta valueMeta = valueMetaBase.getMetadataPreview(variables, dbMeta, resultSet);
@@ -218,8 +219,7 @@ public class CrateDBValueMetaBaseTest {
   }
 
   @Test
-  public void testMetdataPreviewSqlLongVarBinaryToHopBinary()
-      throws SQLException, HopDatabaseException {
+  void testMetdataPreviewSqlLongVarBinaryToHopBinary() throws SQLException, HopDatabaseException {
     doReturn(Types.LONGVARBINARY).when(resultSet).getInt("DATA_TYPE");
     doReturn(mock(CrateDBDatabaseMeta.class)).when(dbMeta).getIDatabase();
     IValueMeta valueMeta = valueMetaBase.getMetadataPreview(variables, dbMeta, resultSet);

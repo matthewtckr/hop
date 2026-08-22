@@ -26,6 +26,7 @@ import org.apache.hop.core.ResultFile;
 import org.apache.hop.core.exception.HopEofException;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopFileException;
+import org.apache.hop.core.io.CountingInputStream;
 import org.apache.hop.core.row.RowMeta;
 import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.i18n.BaseMessages;
@@ -55,7 +56,7 @@ public class CubeInput extends BaseTransform<CubeInputMeta, CubeInputData> {
 
     if (first) {
       first = false;
-      realRowLimit = Const.toInt(resolve(meta.getRowLimit()), 0);
+      realRowLimit = Const.toIntExpanded(resolve(meta.getRowLimit()), 0);
     }
 
     try {
@@ -101,6 +102,7 @@ public class CubeInput extends BaseTransform<CubeInputMeta, CubeInputData> {
         }
 
         data.fis = HopVfs.getInputStream(filename, variables);
+        data.fis = new CountingInputStream(data.fis);
         data.zip = new GZIPInputStream(data.fis);
         data.dis = new DataInputStream(data.zip);
 
@@ -130,6 +132,9 @@ public class CubeInput extends BaseTransform<CubeInputMeta, CubeInputData> {
         data.zip = null;
       }
       if (data.fis != null) {
+        if (data.fis instanceof CountingInputStream cis) {
+          dataVolumeIn = (dataVolumeIn != null ? dataVolumeIn : 0L) + cis.getCount();
+        }
         data.fis.close();
         data.fis = null;
       }

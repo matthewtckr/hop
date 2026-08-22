@@ -23,8 +23,8 @@ import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.IValueMeta;
+import org.apache.hop.core.row.value.ValueMetaBase;
 import org.apache.hop.core.row.value.ValueMetaFactory;
-import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
@@ -38,15 +38,15 @@ import org.apache.hop.ui.core.widget.TextVar;
 import org.apache.hop.ui.pipeline.transform.BaseTransformDialog;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CCombo;
+import org.eclipse.swt.events.SelectionAdapter;
+import org.eclipse.swt.events.SelectionEvent;
 import org.eclipse.swt.graphics.Cursor;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
-import org.eclipse.swt.layout.FormLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.TableItem;
-import org.eclipse.swt.widgets.Text;
 
 public class FieldSplitterDialog extends BaseTransformDialog {
   private static final Class<?> PKG = FieldSplitterMeta.class;
@@ -58,6 +58,8 @@ public class FieldSplitterDialog extends BaseTransformDialog {
   private TextVar wEnclosure;
 
   private TextVar wEscapeString;
+
+  private Button wKeepSplitField;
 
   private TableView wFields;
 
@@ -76,39 +78,9 @@ public class FieldSplitterDialog extends BaseTransformDialog {
 
   @Override
   public String open() {
-    Shell parent = getParent();
+    createShell(BaseMessages.getString(PKG, "FieldSplitterDialog.Shell.Title"));
 
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN);
-    PropsUi.setLook(shell);
-    setShellImage(shell, input);
-
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = PropsUi.getFormMargin();
-    formLayout.marginHeight = PropsUi.getFormMargin();
-
-    shell.setLayout(formLayout);
-    shell.setText(BaseMessages.getString(PKG, "FieldSplitterDialog.Shell.Title"));
-
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
-
-    // TransformName line
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(BaseMessages.getString(PKG, "FieldSplitterDialog.TransformName.Label"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    fdlTransformName.top = new FormAttachment(0, margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(middle, 0);
-    fdTransformName.top = new FormAttachment(0, margin);
-    fdTransformName.right = new FormAttachment(100, 0);
-    wTransformName.setLayoutData(fdTransformName);
+    buildButtonBar().ok(e -> ok()).cancel(e -> cancel()).build();
 
     // Typefield line
     Label wlSplitField = new Label(shell, SWT.RIGHT);
@@ -117,14 +89,14 @@ public class FieldSplitterDialog extends BaseTransformDialog {
     FormData fdlSplitField = new FormData();
     fdlSplitField.left = new FormAttachment(0, 0);
     fdlSplitField.right = new FormAttachment(middle, -margin);
-    fdlSplitField.top = new FormAttachment(wTransformName, margin);
+    fdlSplitField.top = new FormAttachment(wSpacer, margin);
     wlSplitField.setLayoutData(fdlSplitField);
     wSplitField = new CCombo(shell, SWT.BORDER | SWT.READ_ONLY);
     wSplitField.setText("");
     PropsUi.setLook(wSplitField);
     FormData fdSplitField = new FormData();
     fdSplitField.left = new FormAttachment(middle, 0);
-    fdSplitField.top = new FormAttachment(wTransformName, margin);
+    fdSplitField.top = new FormAttachment(wSpacer, margin);
     fdSplitField.right = new FormAttachment(100, 0);
     wSplitField.setLayoutData(fdSplitField);
     wSplitField.addListener(
@@ -193,20 +165,40 @@ public class FieldSplitterDialog extends BaseTransformDialog {
     fdEscapeString.right = new FormAttachment(100, 0);
     wEscapeString.setLayoutData(fdEscapeString);
 
+    // Keep the field to split
+    Label wlKeepSplitField = new Label(shell, SWT.RIGHT);
+    wlKeepSplitField.setText(
+        BaseMessages.getString(PKG, "FieldSplitterDialog.KeepSplitField.Label"));
+    PropsUi.setLook(wlKeepSplitField);
+    FormData fdlKeepSplitField = new FormData();
+    fdlKeepSplitField.top = new FormAttachment(wEscapeString, margin);
+    fdlKeepSplitField.left = new FormAttachment(0, 0);
+    fdlKeepSplitField.right = new FormAttachment(middle, -margin);
+    wlKeepSplitField.setLayoutData(fdlKeepSplitField);
+    wKeepSplitField = new Button(shell, SWT.CHECK);
+    wKeepSplitField.setToolTipText(
+        BaseMessages.getString(PKG, "FieldSplitterDialog.KeepSplitField.Tooltip"));
+    PropsUi.setLook(wKeepSplitField);
+    FormData fdKeepSplitField = new FormData();
+    fdKeepSplitField.top = new FormAttachment(wlKeepSplitField, 0, SWT.CENTER);
+    fdKeepSplitField.left = new FormAttachment(middle, 0);
+    fdKeepSplitField.right = new FormAttachment(100, 0);
+    wKeepSplitField.setLayoutData(fdKeepSplitField);
+    wKeepSplitField.addSelectionListener(
+        new SelectionAdapter() {
+          @Override
+          public void widgetSelected(SelectionEvent e) {
+            input.setChanged();
+          }
+        });
+
     Label wlFields = new Label(shell, SWT.RIGHT);
     wlFields.setText(BaseMessages.getString(PKG, "FieldSplitterDialog.Fields.Label"));
     PropsUi.setLook(wlFields);
     FormData fdlFields = new FormData();
     fdlFields.left = new FormAttachment(0, 0);
-    fdlFields.top = new FormAttachment(wEscapeString, margin);
+    fdlFields.top = new FormAttachment(wKeepSplitField, margin);
     wlFields.setLayoutData(fdlFields);
-
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-
-    setButtonPositions(new Button[] {wOk, wCancel}, margin, null);
 
     final int fieldsRows = input.getFields().size();
 
@@ -223,7 +215,8 @@ public class FieldSplitterDialog extends BaseTransformDialog {
           new ColumnInfo(
               BaseMessages.getString(PKG, "FieldSplitterDialog.ColumnInfo.RemoveID"),
               ColumnInfo.COLUMN_TYPE_CCOMBO,
-              new String[] {"Y", "N"}),
+              "Y",
+              "N"),
           new ColumnInfo(
               BaseMessages.getString(PKG, "FieldSplitterDialog.ColumnInfo.Type"),
               ColumnInfo.COLUMN_TYPE_CCOMBO,
@@ -263,7 +256,7 @@ public class FieldSplitterDialog extends BaseTransformDialog {
           new ColumnInfo(
               BaseMessages.getString(PKG, "FieldSplitterDialog.ColumnInfo.TrimType"),
               ColumnInfo.COLUMN_TYPE_CCOMBO,
-              ValueMetaString.trimTypeDesc,
+              ValueMetaBase.trimTypeDesc,
               true),
         };
     wFields =
@@ -280,15 +273,11 @@ public class FieldSplitterDialog extends BaseTransformDialog {
     fdFields.left = new FormAttachment(0, 0);
     fdFields.top = new FormAttachment(wlFields, margin);
     fdFields.right = new FormAttachment(100, 0);
-    fdFields.bottom = new FormAttachment(wOk, -2 * margin);
+    fdFields.bottom = new FormAttachment(wOk, -margin);
     wFields.setLayoutData(fdFields);
 
-    // Add listeners
-    wOk.addListener(SWT.Selection, e -> ok());
-    wCancel.addListener(SWT.Selection, e -> cancel());
-
     getData();
-
+    focusTransformName();
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 
     return transformName;
@@ -321,6 +310,7 @@ public class FieldSplitterDialog extends BaseTransformDialog {
     wDelimiter.setText(Const.NVL(input.getDelimiter(), ""));
     wEnclosure.setText(Const.NVL(input.getEnclosure(), ""));
     wEscapeString.setText(Const.NVL(input.getEscapeString(), ""));
+    wKeepSplitField.setSelection(input.isKeepSplitField());
 
     for (int i = 0; i < input.getFields().size(); i++) {
       FSField field = input.getFields().get(i);
@@ -345,9 +335,6 @@ public class FieldSplitterDialog extends BaseTransformDialog {
     }
     wFields.setRowNums();
     wFields.optWidth(true);
-
-    wTransformName.selectAll();
-    wTransformName.setFocus();
   }
 
   private void cancel() {
@@ -366,6 +353,7 @@ public class FieldSplitterDialog extends BaseTransformDialog {
     input.setDelimiter(wDelimiter.getText());
     input.setEnclosure(wEnclosure.getText());
     input.setEscapeString(wEscapeString.getText());
+    input.setKeepSplitField(wKeepSplitField.getSelection());
 
     input.getFields().clear();
     for (TableItem ti : wFields.getNonEmptyItems()) {

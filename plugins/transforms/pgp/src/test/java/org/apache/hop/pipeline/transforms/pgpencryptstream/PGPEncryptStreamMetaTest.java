@@ -16,52 +16,29 @@
  */
 package org.apache.hop.pipeline.transforms.pgpencryptstream;
 
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import org.apache.hop.core.HopEnvironment;
-import org.apache.hop.core.exception.HopException;
-import org.apache.hop.core.plugins.PluginRegistry;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
-import org.apache.hop.pipeline.transforms.loadsave.LoadSaveTester;
-import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidator;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.apache.hop.core.HopClientEnvironment;
+import org.apache.hop.pipeline.transform.TransformSerializationTestUtil;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-public class PGPEncryptStreamMetaTest {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
-
-  LoadSaveTester loadSaveTester;
-  Class<PGPEncryptStreamMeta> testMetaClass = PGPEncryptStreamMeta.class;
-
-  @Before
-  public void setUpLoadSave() throws Exception {
-    HopEnvironment.init();
-    PluginRegistry.init();
-    List<String> attributes =
-        Arrays.asList(
-            "gPGLocation",
-            "keynameFieldName",
-            "streamField",
-            "resultFieldName",
-            "keynameInField",
-            "keynameFieldName");
-
-    Map<String, String> getterMap = new HashMap<>();
-    Map<String, String> setterMap = new HashMap<>();
-
-    Map<String, IFieldLoadSaveValidator<?>> attrValidatorMap = new HashMap<>();
-    Map<String, IFieldLoadSaveValidator<?>> typeValidatorMap = new HashMap<>();
-
-    loadSaveTester =
-        new LoadSaveTester(
-            testMetaClass, attributes, getterMap, setterMap, attrValidatorMap, typeValidatorMap);
+class PGPEncryptStreamMetaTest {
+  @BeforeEach
+  void setUp() throws Exception {
+    HopClientEnvironment.init();
   }
 
   @Test
-  public void testSerialization() throws HopException {
-    loadSaveTester.testSerialization();
+  void testSerializationRoundTrip() throws Exception {
+    PGPEncryptStreamMeta meta =
+        TransformSerializationTestUtil.testSerialization(
+            "/pgp-encrypt.xml", PGPEncryptStreamMeta.class);
+
+    Assertions.assertEquals("/usr/bin/gpg", meta.getGpgLocation());
+    Assertions.assertEquals("key-name", meta.getKeyName());
+    Assertions.assertTrue(meta.isKeyNameInField());
+    Assertions.assertEquals("keyNameField", meta.getKeyNameFieldName());
+    Assertions.assertEquals("streamField", meta.getStreamField());
+    Assertions.assertEquals("result", meta.getResultFieldName());
   }
 }

@@ -21,7 +21,9 @@ import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 
@@ -30,9 +32,17 @@ import org.apache.hop.core.row.IValueMeta;
     type = "AS/400",
     typeDescription = "AS/400",
     image = "db2.svg",
-    documentationUrl = "/database/databases/as400.html")
+    documentationUrl = "/database/databases/as400.html",
+    classLoaderGroup = "as400-db")
 @GuiPlugin(id = "GUI-AS400DatabaseMeta")
 public class AS400DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  /** DB2 for i limits rows at the end of the statement. */
+  @Override
+  public String getLimitClause(int nrRows) {
+    return " FETCH FIRST " + nrRows + " ROWS ONLY";
+  }
+
   @Override
   public int[] getAccessTypeList() {
     return new int[] {DatabaseMeta.TYPE_ACCESS_NATIVE};
@@ -41,6 +51,19 @@ public class AS400DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
   @Override
   public String getDriverClass() {
     return "com.ibm.as400.access.AS400JDBCDriver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("net.sf.jt400:jt400")
+        .defaultVersion("21.0.7")
+        .licenseCategory("B")
+        .licenseName("IBM Public License 1.0")
+        .licenseUrl("https://github.com/IBM/JTOpen/blob/main/LICENSE.md")
+        .vendor("IBM JTOpen (jt400)")
+        .vendorUrl("https://github.com/IBM/JTOpen")
+        .build();
   }
 
   /**
@@ -85,7 +108,7 @@ public class AS400DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -107,7 +130,8 @@ public class AS400DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
         + " ALTER COLUMN "
         + v.getName()
         + " SET "
-        + getFieldDefinition(v, tk, pk, useAutoinc, false, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, false, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -132,29 +156,30 @@ public class AS400DatabaseMeta extends BaseDatabaseMeta implements IDatabase {
         retval += "CHAR(1)";
         break;
       case IValueMeta.TYPE_NUMBER, IValueMeta.TYPE_INTEGER, IValueMeta.TYPE_BIGNUMBER:
-        if (type == IValueMeta.TYPE_INTEGER) {
-          // Integer values...
-          if (length < 10) {
-            retval += "INT";
-          } else {
-            retval += "DECIMAL(" + length + ")";
+        switch (type) {
+          case IValueMeta.TYPE_INTEGER -> {
+            // Integer values...
+            if (length < 10) {
+              retval += "INT";
+            } else {
+              retval += "DECIMAL(" + length + ")";
+            }
           }
-        } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-          // Fixed point value...
-          if (length
-              < 1) { // user configured no value for length. Use 16 digits, which is comparable to
-            // mantissa 2^53 of IEEE 754 binary64 "double".
-            length = 16;
+          case IValueMeta.TYPE_BIGNUMBER -> {
+            // user configured no value for length. Use 16 digits, which is comparable to mantissa
+            // 2^53 of IEEE 754 binary64 "double".
+            if (length < 1) {
+              length = 16;
+            }
+            // user configured no value for precision. Use 16 digits, which is comparable to IEEE
+            // 754 binary64 "double".
+            if (precision < 1) {
+              precision = 16;
+            }
+            retval += "DECIMAL(" + length + "," + precision + ")";
           }
-          if (precision
-              < 1) { // user configured no value for precision. Use 16 digits, which is comparable
-            // to IEEE 754 binary64 "double".
-            precision = 16;
-          }
-          retval += "DECIMAL(" + length + "," + precision + ")";
-        } else {
-          // Floating point value with double precision...
-          retval += "DOUBLE";
+            // Floating point value with double precision...
+          default -> retval += "DOUBLE";
         }
         break;
       case IValueMeta.TYPE_STRING:

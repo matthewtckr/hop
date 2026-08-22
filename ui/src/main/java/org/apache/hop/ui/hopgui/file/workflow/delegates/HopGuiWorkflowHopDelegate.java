@@ -17,9 +17,11 @@
 
 package org.apache.hop.ui.hopgui.file.workflow.delegates;
 
+import org.apache.hop.core.security.Permission;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.MessageBox;
+import org.apache.hop.ui.core.security.HopSecurityUi;
 import org.apache.hop.ui.hopgui.HopGui;
 import org.apache.hop.ui.hopgui.file.workflow.HopGuiWorkflowGraph;
 import org.apache.hop.workflow.WorkflowHopMeta;
@@ -29,7 +31,7 @@ import org.eclipse.swt.SWT;
 
 public class HopGuiWorkflowHopDelegate {
 
-  private static final Class<?> PKG = HopGui.class;
+  private static final Class<?> PKG = HopGuiWorkflowGraph.class;
 
   private HopGui hopGui;
   private HopGuiWorkflowGraph workflowGraph;
@@ -42,8 +44,8 @@ public class HopGuiWorkflowHopDelegate {
   }
 
   public void newHop(WorkflowMeta workflowMeta, ActionMeta fr, ActionMeta to) {
-    WorkflowHopMeta hi = new WorkflowHopMeta(fr, to);
-    newHop(workflowMeta, hi);
+    WorkflowHopMeta hop = new WorkflowHopMeta(fr, to);
+    newHop(workflowMeta, hop);
   }
 
   public void newHop(WorkflowMeta workflowMeta, WorkflowHopMeta hopMeta) {
@@ -78,8 +80,8 @@ public class HopGuiWorkflowHopDelegate {
       MessageBox mb = new MessageBox(hopGui.getShell(), SWT.OK | SWT.ICON_ERROR);
       mb.setMessage(
           BaseMessages.getString(
-              PKG, "HopGui.Dialog.HopExists.Message")); // "This hop already exists!"
-      mb.setText(BaseMessages.getString(PKG, "HopGui.Dialog.HopExists.Title")); // Error!
+              PKG, "WorkflowGraph.Dialog.HopExists.Message")); // "This hop already exists!"
+      mb.setText(BaseMessages.getString(PKG, "WorkflowGraph.Dialog.HopExists.Title")); // Error!
       mb.open();
       ok = false;
     }
@@ -107,6 +109,9 @@ public class HopGuiWorkflowHopDelegate {
   }
 
   public void delHop(WorkflowMeta workflowMeta, WorkflowHopMeta hopMeta) {
+    if (!HopSecurityUi.check(Permission.FILE_EDIT)) {
+      return;
+    }
     int index = workflowMeta.indexOfWorkflowHop(hopMeta);
 
     hopGui.undoDelegate.addUndoDelete(

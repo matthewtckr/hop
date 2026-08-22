@@ -21,12 +21,22 @@ import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParserFactory;
+import javax.xml.validation.SchemaFactory;
 import org.apache.hop.core.Const;
+import org.apache.hop.core.logging.LogChannel;
 import org.apache.hop.core.util.EnvUtil;
 import org.xml.sax.SAXNotRecognizedException;
 import org.xml.sax.SAXNotSupportedException;
 
 public class XmlParserFactoryProducer {
+
+  /**
+   * Value for {@link XMLConstants#ACCESS_EXTERNAL_SCHEMA} that keeps schema resolution on the local
+   * file system. {@code xs:include} and {@code xs:import} of a local schema document still resolve,
+   * while a fetch over http, https or ftp is refused.
+   */
+  private static final String LOCAL_FILE_ACCESS_ONLY = "file";
+
   private XmlParserFactoryProducer() {
     // Static class
   }
@@ -47,6 +57,41 @@ public class XmlParserFactoryProducer {
         "http://apache.org/xml/features/disallow-doctype-decl",
         "N".equals(EnvUtil.getSystemProperty(Const.XML_ALLOW_DOCTYPE_DECL)));
 
+    String[] featuresToDisable = {
+      // Xerces 1 - http://xerces.apache.org/xerces-j/features.html#external-general-entities
+      // Xerces 2 - http://xerces.apache.org/xerces2-j/features.html#external-general-entities
+      // JDK7+ - http://xml.org/sax/features/external-general-entities
+      // This feature has to be used together with the following one, otherwise it will not protect
+      // you from XXE for sure
+      "http://xml.org/sax/features/external-general-entities",
+
+      // Xerces 1 - http://xerces.apache.org/xerces-j/features.html#external-parameter-entities
+      // Xerces 2 - http://xerces.apache.org/xerces2-j/features.html#external-parameter-entities
+      // JDK7+ - http://xml.org/sax/features/external-parameter-entities
+      // This feature has to be used together with the previous one, otherwise it will not protect
+      // you from XXE for sure
+      "http://xml.org/sax/features/external-parameter-entities",
+
+      // Disable external DTDs as well
+      "http://apache.org/xml/features/nonvalidating/load-external-dtd"
+    };
+    for (String feature : featuresToDisable) {
+      try {
+        docBuilderFactory.setFeature(feature, false);
+      } catch (ParserConfigurationException e) {
+        // This should catch a failed setFeature feature
+        if (LogChannel.GENERAL.isDetailed()) {
+          LogChannel.GENERAL.logDetailed(
+              "ParserConfigurationException was thrown. The feature '"
+                  + feature
+                  + "' is probably not supported by your XML processor.");
+        }
+      }
+    }
+
+    docBuilderFactory.setXIncludeAware(false);
+    docBuilderFactory.setExpandEntityReferences(false);
+    docBuilderFactory.setValidating(false);
     return docBuilderFactory;
   }
 
@@ -69,6 +114,32 @@ public class XmlParserFactoryProducer {
     factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
     factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
     factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+
+    return factory;
+  }
+
+  /**
+   * Creates an instance of {@link SchemaFactory} class with enabled {@link
+   * XMLConstants#FEATURE_SECURE_PROCESSING} property, external DTD access denied and external
+   * schema access restricted to the local file system.
+   *
+   * <p>Hardening the factory matters separately from hardening the {@link
+   * javax.xml.validation.Validator} it produces: the factory is what resolves the schema document
+   * itself, so without these restrictions a schema is free to pull in a DTD or another schema over
+   * the network before any validation begins.
+   *
+   * @param schemaLanguage the schema language URI, e.g. {@link XMLConstants#W3C_XML_SCHEMA_NS_URI}
+   * @throws SAXNotRecognizedException When the underlying parser does not recognize the property
+   *     name.
+   * @throws SAXNotSupportedException When the underlying parser recognizes the property name but
+   *     doesn't support the property.
+   */
+  public static SchemaFactory createSecureSchemaFactory(String schemaLanguage)
+      throws SAXNotRecognizedException, SAXNotSupportedException {
+    SchemaFactory factory = SchemaFactory.newInstance(schemaLanguage);
+    factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+    factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+    factory.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, LOCAL_FILE_ACCESS_ONLY);
 
     return factory;
   }

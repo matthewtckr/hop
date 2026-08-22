@@ -18,6 +18,8 @@
 package org.apache.hop.pipeline.transforms.update;
 
 import java.util.List;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
@@ -35,6 +37,8 @@ import org.apache.hop.core.util.StringUtil;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.lineage.api.RelationalLineage;
+import org.apache.hop.lineage.model.RelationalIoOperation;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
@@ -53,10 +57,11 @@ import org.apache.hop.pipeline.transform.utils.RowMetaUtils;
     keywords = "i18n::UpdateMeta.keyword",
     documentationUrl = "/pipeline/transforms/update.html",
     actionTransformTypes = {ActionTransformType.RDBMS, ActionTransformType.OUTPUT})
+@Getter
+@Setter
+@RelationalLineage(operation = RelationalIoOperation.WRITE)
 public class UpdateMeta extends BaseTransformMeta<Update, UpdateData> {
   private static final Class<?> PKG = UpdateMeta.class;
-
-  private IHopMetadataProvider metadataProvider;
 
   /** Commit size for inserts/updates */
   @HopMetadataProperty(
@@ -108,31 +113,6 @@ public class UpdateMeta extends BaseTransformMeta<Update, UpdateData> {
       hopMetadataPropertyType = HopMetadataPropertyType.RDBMS_CONNECTION)
   private String connection;
 
-  public String getConnection() {
-    return connection;
-  }
-
-  public void setConnection(String connection) {
-    this.connection = connection;
-  }
-
-  public UpdateLookupField getLookupField() {
-    return lookupField;
-  }
-
-  public void setLookupField(UpdateLookupField lookupField) {
-    this.lookupField = lookupField;
-  }
-
-  /**
-   * @return Returns the commitSize.
-   * @deprecated use public String getCommitSizeVar() instead
-   */
-  @Deprecated(since = "2.0")
-  public int getCommitSize() {
-    return Integer.parseInt(commitSize);
-  }
-
   /**
    * @return Returns the commitSize.
    */
@@ -148,76 +128,14 @@ public class UpdateMeta extends BaseTransformMeta<Update, UpdateData> {
   public int getCommitSize(IVariables vs) {
     // this happens when the transform is created via API and no setDefaults was called
     commitSize = (commitSize == null) ? "0" : commitSize;
-    return Integer.parseInt(vs.resolve(commitSize));
-  }
-
-  /**
-   * @param commitSize The commitSize to set.
-   * @deprecated use public void setCommitSize( String commitSize ) instead
-   */
-  @Deprecated(since = "2.0")
-  public void setCommitSize(int commitSize) {
-    this.commitSize = Integer.toString(commitSize);
-  }
-
-  /**
-   * @param commitSize The commitSize to set.
-   */
-  public void setCommitSize(String commitSize) {
-    this.commitSize = commitSize;
-  }
-
-  /**
-   * @return Returns the skipLookup.
-   */
-  public boolean isSkipLookup() {
-    return skipLookup;
-  }
-
-  /**
-   * @param skipLookup The skipLookup to set.
-   */
-  public void setSkipLookup(boolean skipLookup) {
-    this.skipLookup = skipLookup;
-  }
-
-  /**
-   * @return Returns the ignoreError.
-   */
-  public boolean isErrorIgnored() {
-    return errorIgnored;
-  }
-
-  /**
-   * @param ignoreError The ignoreError to set.
-   */
-  public void setErrorIgnored(boolean ignoreError) {
-    this.errorIgnored = ignoreError;
-  }
-
-  /**
-   * @return Returns the ignoreFlagField.
-   */
-  public String getIgnoreFlagField() {
-    return ignoreFlagField;
-  }
-
-  /**
-   * @param ignoreFlagField The ignoreFlagField to set.
-   */
-  public void setIgnoreFlagField(String ignoreFlagField) {
-    this.ignoreFlagField = ignoreFlagField;
+    String resolved = vs.resolve(commitSize);
+    String expanded = Const.expandIntegerString(resolved);
+    return Integer.parseInt(expanded != null ? expanded : resolved);
   }
 
   public UpdateMeta() {
     super();
     lookupField = new UpdateLookupField();
-  }
-
-  @Override
-  public Object clone() {
-    UpdateMeta retval = (UpdateMeta) super.clone();
-    return retval;
   }
 
   @Override
@@ -276,8 +194,7 @@ public class UpdateMeta extends BaseTransformMeta<Update, UpdateData> {
     }
 
     if (databaseMeta != null) {
-      Database db = new Database(loggingObject, variables, databaseMeta);
-      try {
+      try (Database db = new Database(loggingObject, variables, databaseMeta)) {
         db.connect();
 
         if (!Utils.isEmpty(lookupField.getTableName())) {
@@ -486,14 +403,23 @@ public class UpdateMeta extends BaseTransformMeta<Update, UpdateData> {
                     + e.getMessage(),
                 transformMeta);
         remarks.add(cr);
-      } finally {
-        db.disconnect();
       }
     } else {
       cr =
           new CheckResult(
               ICheckResult.TYPE_RESULT_ERROR,
               BaseMessages.getString(PKG, "UpdateMeta.CheckResult.InvalidConnection"),
+              transformMeta);
+      remarks.add(cr);
+    }
+
+    // Without lookup keys we cannot build the WHERE clause of the UPDATE statement, not even when
+    // the lookup is skipped.
+    if (lookupField.getLookupKeys().isEmpty()) {
+      cr =
+          new CheckResult(
+              ICheckResult.TYPE_RESULT_ERROR,
+              BaseMessages.getString(PKG, "UpdateMeta.CheckResult.MissingKeyFields"),
               transformMeta);
       remarks.add(cr);
     }
@@ -531,9 +457,8 @@ public class UpdateMeta extends BaseTransformMeta<Update, UpdateData> {
     try {
       DatabaseMeta databaseMeta =
           metadataProvider.getSerializer(DatabaseMeta.class).load(variables.resolve(connection));
-
-      retval =
-          new SqlStatement(transformMeta.getName(), databaseMeta, null); // default: nothing to do!
+      // default: nothing to do!
+      retval = new SqlStatement(transformMeta.getName(), databaseMeta, null);
 
       if (databaseMeta != null) {
         if (prev != null && !prev.isEmpty()) {
@@ -707,21 +632,41 @@ public class UpdateMeta extends BaseTransformMeta<Update, UpdateData> {
   }
 
   @Override
+  public IRowMeta getRequiredFields(IVariables variables) throws HopException {
+
+    String realSchemaName = variables.resolve(lookupField.getSchemaName());
+    String realTableName = variables.resolve(lookupField.getTableName());
+    DatabaseMeta databaseMeta =
+        getParentTransformMeta().getParentPipelineMeta().findDatabase(connection, variables);
+
+    if (databaseMeta != null) {
+      try (Database db = new Database(loggingObject, variables, databaseMeta)) {
+        db.connect();
+
+        if (!Utils.isEmpty(realTableName)) {
+          // Check if this table exists...
+          if (db.checkTableExists(realSchemaName, realTableName)) {
+            return db.getTableFieldsMeta(realSchemaName, realTableName);
+          } else {
+            throw new HopException(
+                BaseMessages.getString(PKG, "UpdateMeta.Exception.TableNotFound"));
+          }
+        } else {
+          throw new HopException(
+              BaseMessages.getString(PKG, "UpdateMeta.Exception.TableNotSpecified"));
+        }
+      } catch (Exception e) {
+        throw new HopException(
+            BaseMessages.getString(PKG, "UpdateMeta.Exception.ErrorGettingFields"), e);
+      }
+    } else {
+      throw new HopException(
+          BaseMessages.getString(PKG, "UpdateMeta.Exception.ConnectionNotDefined"));
+    }
+  }
+
+  @Override
   public boolean supportsErrorHandling() {
     return true;
-  }
-
-  /**
-   * @return the useBatchUpdate
-   */
-  public boolean isUseBatchUpdate() {
-    return useBatchUpdate;
-  }
-
-  /**
-   * @param useBatchUpdate the useBatchUpdate to set
-   */
-  public void setUseBatchUpdate(boolean useBatchUpdate) {
-    this.useBatchUpdate = useBatchUpdate;
   }
 }

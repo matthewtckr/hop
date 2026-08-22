@@ -20,8 +20,9 @@ package org.apache.hop.reflection.workflow.meta;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
+import org.apache.hop.core.logging.LogLevel;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.pipeline.PipelineHopMeta;
 import org.apache.hop.pipeline.PipelineMeta;
@@ -38,11 +39,11 @@ import org.apache.hop.ui.core.widget.TableView;
 import org.apache.hop.ui.core.widget.TextVar;
 import org.apache.hop.ui.hopgui.HopGui;
 import org.apache.hop.ui.hopgui.file.pipeline.HopPipelineFileType;
-import org.apache.hop.ui.hopgui.perspective.dataorch.HopDataOrchestrationPerspective;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
 import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Event;
@@ -62,7 +63,9 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
   private Text wName;
   private Button wEnabled;
   private Button wLoggingParentsOnly;
+  private Button wFailParentOnLoggingFailure;
   private TextVar wFilename;
+  private Combo wLogLevel;
   private Button wAtStart;
   private Button wAtEnd;
   private Button wPeriodic;
@@ -144,7 +147,7 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     FormData fdlLoggingParentsOnly = new FormData();
     fdlLoggingParentsOnly.left = new FormAttachment(0, 0);
     fdlLoggingParentsOnly.right = new FormAttachment(middle, 0);
-    fdlLoggingParentsOnly.top = new FormAttachment(lastControl, 2 * margin);
+    fdlLoggingParentsOnly.top = new FormAttachment(lastControl, margin);
     wlLoggingParentsOnly.setLayoutData(fdlLoggingParentsOnly);
     wLoggingParentsOnly = new Button(parent, SWT.CHECK | SWT.LEFT);
     PropsUi.setLook(wLoggingParentsOnly);
@@ -155,6 +158,27 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     wLoggingParentsOnly.setLayoutData(fdLoggingParentsOnly);
     lastControl = wlLoggingParentsOnly;
 
+    // FailParentOnLoggingFailure?
+    //
+    Label wlFailParentOnLoggingFailure = new Label(parent, SWT.RIGHT);
+    PropsUi.setLook(wlFailParentOnLoggingFailure);
+    wlFailParentOnLoggingFailure.setText(
+        BaseMessages.getString(PKG, "WorkflowLoggingEditor.FailParentOnLoggingFailure.Label"));
+    FormData fdlFailParentOnLoggingFailure = new FormData();
+    fdlFailParentOnLoggingFailure.left = new FormAttachment(0, 0);
+    fdlFailParentOnLoggingFailure.right = new FormAttachment(middle, 0);
+    fdlFailParentOnLoggingFailure.top = new FormAttachment(lastControl, margin);
+    wlFailParentOnLoggingFailure.setLayoutData(fdlFailParentOnLoggingFailure);
+    wFailParentOnLoggingFailure = new Button(parent, SWT.CHECK | SWT.LEFT);
+    PropsUi.setLook(wFailParentOnLoggingFailure);
+    FormData fdFailParentOnLoggingFailure = new FormData();
+    fdFailParentOnLoggingFailure.left = new FormAttachment(middle, margin);
+    fdFailParentOnLoggingFailure.right = new FormAttachment(100, 0);
+    fdFailParentOnLoggingFailure.top =
+        new FormAttachment(wlFailParentOnLoggingFailure, 0, SWT.CENTER);
+    wFailParentOnLoggingFailure.setLayoutData(fdFailParentOnLoggingFailure);
+    lastControl = wlFailParentOnLoggingFailure;
+
     // The filename and some buttons to the right
     //
     Label wlFilename = new Label(parent, SWT.RIGHT);
@@ -163,7 +187,7 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     FormData fdlFilename = new FormData();
     fdlFilename.left = new FormAttachment(0, 0);
     fdlFilename.right = new FormAttachment(middle, 0);
-    fdlFilename.top = new FormAttachment(lastControl, 2 * margin);
+    fdlFilename.top = new FormAttachment(lastControl, margin);
     wlFilename.setLayoutData(fdlFilename);
 
     Button wbbFilename = new Button(parent, SWT.PUSH);
@@ -202,6 +226,26 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     wFilename.setLayoutData(fdFilename);
     lastControl = wlFilename;
 
+    // The log level to run the logging pipeline at
+    //
+    Label wlLogLevel = new Label(parent, SWT.RIGHT);
+    PropsUi.setLook(wlLogLevel);
+    wlLogLevel.setText(BaseMessages.getString(PKG, "WorkflowLoggingEditor.LogLevel.Label"));
+    FormData fdlLogLevel = new FormData();
+    fdlLogLevel.left = new FormAttachment(0, 0);
+    fdlLogLevel.right = new FormAttachment(middle, 0);
+    fdlLogLevel.top = new FormAttachment(lastControl, 2 * margin);
+    wlLogLevel.setLayoutData(fdlLogLevel);
+    wLogLevel = new Combo(parent, SWT.SINGLE | SWT.READ_ONLY | SWT.BORDER | SWT.LEFT);
+    PropsUi.setLook(wLogLevel);
+    wLogLevel.setItems(LogLevel.getLogLevelDescriptions());
+    FormData fdLogLevel = new FormData();
+    fdLogLevel.left = new FormAttachment(middle, margin);
+    fdLogLevel.right = new FormAttachment(100, 0);
+    fdLogLevel.top = new FormAttachment(wlLogLevel, 0, SWT.CENTER);
+    wLogLevel.setLayoutData(fdLogLevel);
+    lastControl = wlLogLevel;
+
     // Execute at start
     //
     Label wlAtStart = new Label(parent, SWT.RIGHT);
@@ -229,7 +273,7 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     FormData fdlAtEnd = new FormData();
     fdlAtEnd.left = new FormAttachment(0, 0);
     fdlAtEnd.right = new FormAttachment(middle, 0);
-    fdlAtEnd.top = new FormAttachment(lastControl, 2 * margin);
+    fdlAtEnd.top = new FormAttachment(lastControl, margin);
     wlAtEnd.setLayoutData(fdlAtEnd);
     wAtEnd = new Button(parent, SWT.CHECK | SWT.LEFT);
     PropsUi.setLook(wAtEnd);
@@ -248,7 +292,7 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     FormData fdlPeriodic = new FormData();
     fdlPeriodic.left = new FormAttachment(0, 0);
     fdlPeriodic.right = new FormAttachment(middle, 0);
-    fdlPeriodic.top = new FormAttachment(lastControl, 2 * margin);
+    fdlPeriodic.top = new FormAttachment(lastControl, margin);
     wlPeriodic.setLayoutData(fdlPeriodic);
     wPeriodic = new Button(parent, SWT.CHECK | SWT.LEFT);
     PropsUi.setLook(wPeriodic);
@@ -267,7 +311,7 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     FormData fdlInterval = new FormData();
     fdlInterval.left = new FormAttachment(0, 0);
     fdlInterval.right = new FormAttachment(middle, 0);
-    fdlInterval.top = new FormAttachment(lastControl, 2 * margin);
+    fdlInterval.top = new FormAttachment(lastControl, margin);
     wlInterval.setLayoutData(fdlInterval);
     wInterval = new TextVar(manager.getVariables(), parent, SWT.SINGLE | SWT.BORDER | SWT.LEFT);
     PropsUi.setLook(wInterval);
@@ -287,7 +331,7 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     FormData fdlSources = new FormData();
     fdlSources.left = new FormAttachment(0, 0);
     fdlSources.right = new FormAttachment(100, 0);
-    fdlSources.top = new FormAttachment(lastControl, 2 * margin);
+    fdlSources.top = new FormAttachment(lastControl, margin);
     wlSources.setLayoutData(fdlSources);
     lastControl = wlSources;
     ColumnInfo[] columns = {
@@ -314,7 +358,9 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     wName.addListener(SWT.Modify, modifyListener);
     wEnabled.addListener(SWT.Selection, modifyListener);
     wLoggingParentsOnly.addListener(SWT.Selection, modifyListener);
+    wFailParentOnLoggingFailure.addListener(SWT.Selection, modifyListener);
     wFilename.addListener(SWT.Modify, modifyListener);
+    wLogLevel.addListener(SWT.Modify, modifyListener);
     wAtStart.addListener(SWT.Selection, modifyListener);
     wAtEnd.addListener(SWT.Selection, modifyListener);
     wPeriodic.addListener(SWT.Selection, modifyListener);
@@ -369,15 +415,13 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
         pipelineMeta.setFilename(realFilename);
         pipelineMeta.clearChanged();
 
-        HopDataOrchestrationPerspective perspective = HopGui.getDataOrchestrationPerspective();
+        // Open it in the Hop GUI
+        //
+        HopGui.getExplorerPerspective().addPipeline(pipelineMeta);
 
         // Switch to the perspective
         //
-        perspective.activate();
-
-        // Open it in the Hop GUI
-        //
-        HopGui.getDataOrchestrationPerspective().addPipeline(hopGui, pipelineMeta, type);
+        HopGui.getExplorerPerspective().activate();
 
         // Save the file
         hopGui.fileDelegate.fileSave();
@@ -427,7 +471,9 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     wName.setText(Const.NVL(wl.getName(), ""));
     wEnabled.setSelection(wl.isEnabled());
     wLoggingParentsOnly.setSelection(wl.isLoggingParentsOnly());
+    wFailParentOnLoggingFailure.setSelection(wl.isFailParentOnLoggingFailure());
     wFilename.setText(Const.NVL(wl.getPipelineFilename(), ""));
+    wLogLevel.setText(wl.getLogLevel().getDescription());
     wAtStart.setSelection(wl.isExecutingAtStart());
     wAtEnd.setSelection(wl.isExecutingAtEnd());
     wPeriodic.setSelection(wl.isExecutingPeriodically());
@@ -447,7 +493,9 @@ public class WorkflowLogEditor extends MetadataEditor<WorkflowLog> {
     pl.setName(wName.getText());
     pl.setEnabled(wEnabled.getSelection());
     pl.setLoggingParentsOnly(wLoggingParentsOnly.getSelection());
+    pl.setFailParentOnLoggingFailure(wFailParentOnLoggingFailure.getSelection());
     pl.setPipelineFilename(wFilename.getText());
+    pl.setLogLevel(LogLevel.lookupDescription(wLogLevel.getText()));
     pl.setExecutingAtStart(wAtStart.getSelection());
     pl.setExecutingAtEnd(wAtEnd.getSelection());
     pl.setExecutingPeriodically(wPeriodic.getSelection());

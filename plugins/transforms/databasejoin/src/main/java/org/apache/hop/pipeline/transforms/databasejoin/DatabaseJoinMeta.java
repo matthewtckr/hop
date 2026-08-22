@@ -118,21 +118,6 @@ public class DatabaseJoinMeta extends BaseTransformMeta<DatabaseJoin, DatabaseJo
     super(); // allocate BaseTransformMeta
   }
 
-  public DatabaseJoinMeta(final DatabaseJoinMeta clone) {
-    super();
-
-    this.connection = clone.connection;
-    this.sql = clone.sql;
-    this.rowLimit = clone.rowLimit;
-    this.outerJoin = clone.outerJoin;
-    this.replaceVariables = clone.replaceVariables;
-    for (ParameterField field : clone.parameters) {
-      parameters.add(new ParameterField(field));
-    }
-    this.cached = clone.cached;
-    this.cacheSize = clone.cacheSize;
-  }
-
   public String getConnection() {
     return connection;
   }
@@ -230,11 +215,6 @@ public class DatabaseJoinMeta extends BaseTransformMeta<DatabaseJoin, DatabaseJo
   }
 
   @Override
-  public Object clone() {
-    return new DatabaseJoinMeta(this);
-  }
-
-  @Override
   public void setDefault() {
     rowLimit = 0;
     sql = "";
@@ -283,49 +263,49 @@ public class DatabaseJoinMeta extends BaseTransformMeta<DatabaseJoin, DatabaseJo
           e);
     }
 
-    Database db = new Database(loggingObject, variables, databaseMeta);
-    databases = new Database[] {db}; // Keep track of this one for cancelQuery
+    try (Database db = new Database(loggingObject, variables, databaseMeta)) {
+      databases = new Database[] {db}; // Keep track of this one for cancelQuery
 
-    // Which fields are parameters?
-    // info[0] comes from the database connection.
-    //
-    IRowMeta param = getParameterRow(row);
-
-    // First try without connecting to the database... (can be S L O W)
-    // See if it's in the cache...
-    //
-    IRowMeta add = null;
-    try {
-      add = db.getQueryFields(variables.resolve(sql), true, param, new Object[param.size()]);
-    } catch (HopDatabaseException dbe) {
-      throw new HopTransformException(
-          BaseMessages.getString(PKG, "DatabaseJoinMeta.Exception.UnableToDetermineQueryFields")
-              + Const.CR
-              + sql,
-          dbe);
-    }
-
-    if (add != null) { // Cache hit, just return it this...
-      for (int i = 0; i < add.size(); i++) {
-        IValueMeta v = add.getValueMeta(i);
-        v.setOrigin(name);
-      }
-      row.addRowMeta(add);
-    } else {
-      // No cache hit, connect to the database, do it the hard way...
+      // Which fields are parameters?
+      // info[0] comes from the database connection.
       //
+      IRowMeta param = getParameterRow(row);
+
+      // First try without connecting to the database... (can be S L O W)
+      // See if it's in the cache...
+      //
+      IRowMeta add = null;
       try {
-        db.connect();
         add = db.getQueryFields(variables.resolve(sql), true, param, new Object[param.size()]);
+      } catch (HopDatabaseException dbe) {
+        throw new HopTransformException(
+            BaseMessages.getString(PKG, "DatabaseJoinMeta.Exception.UnableToDetermineQueryFields")
+                + Const.CR
+                + sql,
+            dbe);
+      }
+
+      if (add != null) { // Cache hit, just return it this...
         for (int i = 0; i < add.size(); i++) {
           IValueMeta v = add.getValueMeta(i);
           v.setOrigin(name);
         }
         row.addRowMeta(add);
-        db.disconnect();
-      } catch (HopDatabaseException dbe) {
-        throw new HopTransformException(
-            BaseMessages.getString(PKG, "DatabaseJoinMeta.Exception.ErrorObtainingFields"), dbe);
+      } else {
+        // No cache hit, connect to the database, do it the hard way...
+        //
+        try {
+          db.connect();
+          add = db.getQueryFields(variables.resolve(sql), true, param, new Object[param.size()]);
+          for (int i = 0; i < add.size(); i++) {
+            IValueMeta v = add.getValueMeta(i);
+            v.setOrigin(name);
+          }
+          row.addRowMeta(add);
+        } catch (HopDatabaseException dbe) {
+          throw new HopTransformException(
+              BaseMessages.getString(PKG, "DatabaseJoinMeta.Exception.ErrorObtainingFields"), dbe);
+        }
       }
     }
   }
@@ -461,7 +441,7 @@ public class DatabaseJoinMeta extends BaseTransformMeta<DatabaseJoin, DatabaseJo
         cr = new CheckResult(ICheckResult.TYPE_RESULT_ERROR, errorMessage, transformMeta);
         remarks.add(cr);
       } finally {
-        db.disconnect();
+        db.close();
       }
     } else {
       errorMessage = BaseMessages.getString(PKG, "DatabaseJoinMeta.CheckResult.InvalidConnection");
@@ -520,7 +500,7 @@ public class DatabaseJoinMeta extends BaseTransformMeta<DatabaseJoin, DatabaseJo
             BaseMessages.getString(PKG, "DatabaseJoinMeta.Log.DatabaseErrorOccurred")
                 + dbe.getMessage());
       } finally {
-        db.disconnect();
+        db.close();
       }
     }
     return fields;

@@ -68,16 +68,6 @@ public class ActionFileExists extends ActionBase implements Cloneable, IAction {
     this("");
   }
 
-  public ActionFileExists(ActionFileExists meta) {
-    super(meta.getName(), meta.getDescription(), meta.getPluginId());
-    this.filename = meta.filename;
-  }
-
-  @Override
-  public Object clone() {
-    return new ActionFileExists(this);
-  }
-
   public void setFilename(String filename) {
     this.filename = filename;
   }
@@ -104,11 +94,15 @@ public class ActionFileExists extends ActionBase implements Cloneable, IAction {
       try {
         FileObject file = HopVfs.getFileObject(realFilename, getVariables());
         if (file.exists() && file.isReadable()) {
-          logDetailed(BaseMessages.getString(PKG, "ActionFileExists.File_Exists", realFilename));
+          if (isDetailed()) {
+            logDetailed(BaseMessages.getString(PKG, "ActionFileExists.File_Exists", realFilename));
+          }
           result.setResult(true);
         } else {
-          logDetailed(
-              BaseMessages.getString(PKG, "ActionFileExists.File_Does_Not_Exist", realFilename));
+          if (isDetailed()) {
+            logDetailed(
+                BaseMessages.getString(PKG, "ActionFileExists.File_Does_Not_Exist", realFilename));
+          }
         }
       } catch (Exception e) {
         result.setNrErrors(1);

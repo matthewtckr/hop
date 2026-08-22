@@ -17,22 +17,22 @@
 
 package org.apache.hop.pipeline.transforms.delete;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.UUID;
-import org.apache.commons.lang.builder.EqualsBuilder;
+import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.plugins.TransformPluginType;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.engines.local.LocalPipelineEngine;
@@ -44,35 +44,40 @@ import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValid
 import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidatorFactory;
 import org.apache.hop.pipeline.transforms.loadsave.validator.ListLoadSaveValidator;
 import org.apache.hop.pipeline.transforms.loadsave.validator.ObjectValidator;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class DeleteMetaTest implements IInitializer<ITransformMeta> {
-  LoadSaveTester loadSaveTester;
-  Class<DeleteMeta> testMetaClass = DeleteMeta.class;
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+/** Unit test for {@link DeleteMeta} */
+class DeleteMetaTest implements IInitializer<ITransformMeta> {
+  private LoadSaveTester loadSaveTester;
+  private final Class<DeleteMeta> testMetaClass = DeleteMeta.class;
 
-  @Before
-  public void setUpLoadSave() throws Exception {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
+
+  @BeforeEach
+  void setUpLoadSave() throws Exception {
     PluginRegistry.init();
-    List<String> attributes = Arrays.asList("commit", "connection", "lookup");
+    List<String> attributes = Arrays.asList("commit", "connection", "lookup", "use_batch");
 
     Map<String, String> getterMap =
-        new HashMap<String, String>() {
+        new HashMap<>() {
           {
             put("commit", "getCommitSize");
             put("connection", "getConnection");
             put("lookup", "getLookup");
+            put("use_batch", "isUseBatchUpdate");
           }
         };
     Map<String, String> setterMap =
-        new HashMap<String, String>() {
+        new HashMap<>() {
           {
             put("commit", "setCommitSize");
             put("connection", "setConnection");
             put("lookup", "setLookup");
+            put("use_batch", "setUseBatchUpdate");
           }
         };
 
@@ -98,14 +103,14 @@ public class DeleteMetaTest implements IInitializer<ITransformMeta> {
             validatorFactory,
             DeleteLookupField.class,
             Arrays.asList("schema", "table", "key"),
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("table", "getTableName");
                 put("schema", "getSchemaName");
                 put("key", "getFields");
               }
             },
-            new HashMap<String, String>() {
+            new HashMap<>() {
               {
                 put("table", "setTableName");
                 put("schema", "setSchemaName");
@@ -136,32 +141,30 @@ public class DeleteMetaTest implements IInitializer<ITransformMeta> {
   }
 
   @Test
-  public void testSerialization() throws HopException {
+  void testSerialization() throws HopException {
     loadSaveTester.testSerialization();
   }
 
-  private TransformMeta transformMeta;
   private Delete del;
-  private DeleteData data;
   private DeleteMeta meta;
 
-  @BeforeClass
-  public static void initEnvironment() throws Exception {
+  @BeforeAll
+  static void initEnvironment() throws Exception {
     HopEnvironment.init();
   }
 
-  @Before
-  public void setUp() {
+  @BeforeEach
+  void setUp() {
     PipelineMeta pipelineMeta = new PipelineMeta();
     pipelineMeta.setName("delete1");
 
     meta = new DeleteMeta();
-    data = new DeleteData();
+    DeleteData data = new DeleteData();
 
     PluginRegistry plugReg = PluginRegistry.getInstance();
     String deletePid = plugReg.getPluginId(TransformPluginType.class, meta);
 
-    transformMeta = new TransformMeta(deletePid, "delete", meta);
+    TransformMeta transformMeta = new TransformMeta(deletePid, "delete", meta);
     Pipeline pipeline = new LocalPipelineEngine(pipelineMeta);
 
     Map<String, String> vars = new HashMap<>();
@@ -173,54 +176,68 @@ public class DeleteMetaTest implements IInitializer<ITransformMeta> {
   }
 
   @Test
-  public void testCommitCountFixed() {
+  void testCommitCountFixed() {
     meta.setCommitSize("100");
     assertEquals(100, meta.getCommitSize(del));
   }
 
   @Test
-  public void testCommitCountVar() {
+  void testCommitCountVar() {
     meta.setCommitSize("${max.sz}");
     assertEquals(10, meta.getCommitSize(del));
   }
 
   @Test
-  public void testCommitCountMissedVar() {
+  void testCommitCountMissedVar() {
     meta.setCommitSize("missed-var");
     try {
       meta.getCommitSize(del);
       fail();
     } catch (Exception ex) {
+      // ignore ex
     }
   }
 
-  public class DeleteLookupKeyFieldInputFieldLoadSaveValidator
-      implements IFieldLoadSaveValidator<DeleteLookupField> {
-    final Random rand = new Random();
-
-    @Override
-    public DeleteLookupField getTestObject() {
-      return new DeleteLookupField(
-          UUID.randomUUID().toString(), UUID.randomUUID().toString(), new ArrayList<>());
-    }
-
-    @Override
-    public boolean validateTestObject(DeleteLookupField testObject, Object actual) {
-      if (!(actual instanceof DeleteLookupField)) {
-        return false;
-      }
-      DeleteLookupField another = (DeleteLookupField) actual;
-      return new EqualsBuilder()
-          .append(testObject.getSchemaName(), another.getSchemaName())
-          .append(testObject.getTableName(), another.getTableName())
-          .append(testObject.getFields(), another.getFields())
-          .isEquals();
-    }
+  @Test
+  void testUseBatchUpdateDefaultIsFalse() {
+    assertFalse(meta.isUseBatchUpdate());
   }
 
-  public class DeleteKeyFieldInputFieldLoadSaveValidator
+  @Test
+  void testUseBatchUpdateSetterAndGetter() {
+    meta.setUseBatchUpdate(true);
+    assertTrue(meta.isUseBatchUpdate());
+  }
+
+  @Test
+  void testCloneIncludesUseBatchUpdate() {
+    meta.setUseBatchUpdate(true);
+    DeleteMeta cloned = (DeleteMeta) meta.clone();
+    assertTrue(cloned.isUseBatchUpdate());
+  }
+
+  @Test
+  void testCopyConstructorIncludesUseBatchUpdate() {
+    meta.setUseBatchUpdate(true);
+    DeleteMeta copied = new DeleteMeta(meta);
+    assertTrue(copied.isUseBatchUpdate());
+  }
+
+  @Test
+  void testSetDefaultValues() {
+    DeleteMeta defaults = new DeleteMeta();
+    defaults.setDefault();
+    assertEquals("100", defaults.getCommitSize());
+    assertFalse(defaults.isUseBatchUpdate());
+  }
+
+  @Test
+  void testSupportsErrorHandling() {
+    assertTrue(meta.supportsErrorHandling());
+  }
+
+  public static class DeleteKeyFieldInputFieldLoadSaveValidator
       implements IFieldLoadSaveValidator<DeleteKeyField> {
-    final Random rand = new Random();
 
     @Override
     public DeleteKeyField getTestObject() {
@@ -233,10 +250,10 @@ public class DeleteMetaTest implements IInitializer<ITransformMeta> {
 
     @Override
     public boolean validateTestObject(DeleteKeyField testObject, Object actual) {
-      if (!(actual instanceof DeleteKeyField)) {
+      if (!(actual instanceof DeleteKeyField another)) {
         return false;
       }
-      DeleteKeyField another = (DeleteKeyField) actual;
+
       return new EqualsBuilder()
           .append(testObject.getKeyLookup(), another.getKeyLookup())
           .append(testObject.getKeyCondition(), another.getKeyCondition())

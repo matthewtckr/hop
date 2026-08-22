@@ -20,17 +20,25 @@ package org.apache.hop.pipeline.transforms.jsonoutput;
 import java.io.BufferedOutputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ResultFile;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopTransformException;
+import org.apache.hop.core.io.CountingOutputStream;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.row.RowDataUtil;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.lineage.LineageFileIoEmitter;
+import org.apache.hop.lineage.model.FileIoContentSchema;
+import org.apache.hop.lineage.model.FileIoOperation;
+import org.apache.hop.lineage.model.FileIoPathSyntax;
+import org.apache.hop.lineage.model.FileIoTabularColumn;
 import org.apache.hop.pipeline.Pipeline;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.BaseTransform;
@@ -272,22 +280,34 @@ public class JsonOutput extends BaseTransform<JsonOutputMeta, JsonOutputData> {
     FileObject parentfolder = null;
     try {
       // Get parent folder
-      parentfolder = HopVfs.getFileObject(filename).getParent();
+      parentfolder = HopVfs.getFileObject(filename, variables).getParent();
+      if (parentfolder == null) {
+        throw new HopTransformException(
+            BaseMessages.getString(PKG, "JsonOutput.Error.ErrorCreatingParentFolder", filename));
+      }
       if (!parentfolder.exists()) {
+        String parentUri = HopVfs.getFriendlyURI(parentfolder);
         if (isDebug()) {
-          logDebug(
-              BaseMessages.getString(
-                  PKG, "JsonOutput.Error.ParentFolderNotExist", parentfolder.getName()));
+          logDebug(BaseMessages.getString(PKG, "JsonOutput.Error.ParentFolderNotExist", parentUri));
         }
-        parentfolder.createFolder();
+        try {
+          parentfolder.createFolder();
+        } catch (Exception createEx) {
+          // Another concurrent writer (e.g. Beam parallel outputs) may have created it
+          parentfolder = HopVfs.getFileObject(filename, variables).getParent();
+          if (parentfolder == null || !parentfolder.exists()) {
+            throw createEx;
+          }
+        }
         if (isDebug()) {
           logDebug(BaseMessages.getString(PKG, "JsonOutput.Log.ParentFolderCreated"));
         }
       }
     } catch (Exception e) {
+      String parentDesc =
+          parentfolder != null ? HopVfs.getFriendlyURI(parentfolder) : String.valueOf(filename);
       throw new HopTransformException(
-          BaseMessages.getString(
-              PKG, "JsonOutput.Error.ErrorCreatingParentFolder", parentfolder.getName()));
+          BaseMessages.getString(PKG, "JsonOutput.Error.ErrorCreatingParentFolder", parentDesc), e);
     } finally {
       if (parentfolder != null) {
         try {
@@ -323,7 +343,8 @@ public class JsonOutput extends BaseTransform<JsonOutputMeta, JsonOutputData> {
 
       OutputStream outputStream;
       OutputStream fos = HopVfs.getOutputStream(filename, meta.isFileAppended());
-      outputStream = fos;
+      data.countingStream = new CountingOutputStream(fos);
+      outputStream = data.countingStream;
 
       if (!Utils.isEmpty(meta.getEncoding())) {
         data.writer =
@@ -337,12 +358,13 @@ public class JsonOutput extends BaseTransform<JsonOutputMeta, JsonOutputData> {
         logDetailed(BaseMessages.getString(PKG, "JsonOutput.FileOpened", filename));
       }
 
+      data.openedFilename = filename;
       data.splitnr++;
 
       retval = true;
 
     } catch (Exception e) {
-      logError(BaseMessages.getString(PKG, "JsonOutput.Error.OpeningFile", e.toString()));
+      logError(BaseMessages.getString(PKG, "JsonOutput.Error.OpeningFile", e.toString()), e);
     }
 
     return retval;
@@ -360,6 +382,32 @@ public class JsonOutput extends BaseTransform<JsonOutputMeta, JsonOutputData> {
         false);
   }
 
+  private FileIoContentSchema jsonWrittenFileContentSchema() {
+    if (meta.getOutputFields() == null || meta.getOutputFields().isEmpty()) {
+      return null;
+    }
+    List<FileIoTabularColumn> cols = new ArrayList<>();
+    for (JsonOutputField f : meta.getOutputFields()) {
+      String typeDesc = "String";
+      if (data.outputRowMeta != null) {
+        IValueMeta v = data.outputRowMeta.searchValueMeta(f.getFieldName());
+        if (v != null) {
+          typeDesc = v.getTypeDesc();
+        }
+      }
+      cols.add(
+          new FileIoTabularColumn(
+              f.getFieldName(),
+              typeDesc,
+              -1,
+              -1,
+              Utils.isEmpty(f.getElementName()) ? null : f.getElementName(),
+              FileIoPathSyntax.JSON_PATH,
+              false));
+    }
+    return FileIoContentSchema.tabularWithMergedTree("json", cols);
+  }
+
   protected boolean closeFile() {
     if (data.writer == null) {
       return true;
@@ -367,8 +415,31 @@ public class JsonOutput extends BaseTransform<JsonOutputMeta, JsonOutputData> {
     boolean retval = false;
 
     try {
+      data.writer.flush();
+      if (data.countingStream != null) {
+        long written = data.countingStream.getCount();
+        dataVolumeOut = (dataVolumeOut != null ? dataVolumeOut : 0L) + written;
+        if (!data.isBeamContext() && written > 0 && data.openedFilename != null) {
+          try {
+            FileObject outFile = HopVfs.getFileObject(data.openedFilename, this);
+            LineageFileIoEmitter.emitTransformFileIo(
+                this,
+                FileIoOperation.WRITE,
+                null,
+                outFile,
+                written,
+                true,
+                null,
+                jsonWrittenFileContentSchema());
+          } catch (Exception ignored) {
+            // optional lineage
+          }
+        }
+      }
+      data.openedFilename = null;
       data.writer.close();
       data.writer = null;
+      data.countingStream = null;
       retval = true;
     } catch (Exception e) {
       logError(BaseMessages.getString(PKG, "JsonOutput.Error.ClosingFile", e.toString()));

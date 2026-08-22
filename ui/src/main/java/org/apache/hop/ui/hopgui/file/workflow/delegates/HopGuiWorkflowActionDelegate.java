@@ -26,11 +26,14 @@ import org.apache.hop.core.gui.Point;
 import org.apache.hop.core.plugins.ActionPluginType;
 import org.apache.hop.core.plugins.IPlugin;
 import org.apache.hop.core.plugins.PluginRegistry;
+import org.apache.hop.core.security.Permission;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.ui.core.PropsUi;
+import org.apache.hop.ui.core.dialog.BaseDialog;
 import org.apache.hop.ui.core.dialog.ErrorDialog;
 import org.apache.hop.ui.core.dialog.MessageBox;
+import org.apache.hop.ui.core.security.HopSecurityUi;
 import org.apache.hop.ui.hopgui.HopGui;
 import org.apache.hop.ui.hopgui.file.workflow.HopGuiWorkflowGraph;
 import org.apache.hop.ui.workflow.actions.missing.MissingActionDialog;
@@ -91,17 +94,15 @@ public class HopGuiWorkflowActionDelegate {
         action.setPluginId(actionPlugin.getIds()[0]);
         action.setName(actionName);
 
-        if (action.isStart()) {
+        if (action.isStart() && workflowMeta.findStart() != null) {
           // Check if start is already on the canvas...
-          if (workflowMeta.findStart() != null) {
-            HopGuiWorkflowGraph.showOnlyStartOnceMessage(hopGui.getActiveShell());
-            return null;
-          }
+          HopGuiWorkflowGraph.showOnlyStartOnceMessage(hopGui.getActiveShell());
+          return null;
         }
 
         if (openIt) {
           IActionDialog d = getActionDialog(action, workflowMeta);
-          if (d != null && d.open() != null) {
+          if (d != null && BaseDialog.withDialogSubject(action, d::open) != null) {
             ActionMeta actionMeta = new ActionMeta();
             actionMeta.setAction(action);
             if (location == null) {
@@ -201,7 +202,7 @@ public class HopGuiWorkflowActionDelegate {
     Object[] arguments =
         new Object[] {hopGui.getShell(), action, workflowMeta, workflowGraph.getVariables()};
 
-    if (MissingAction.ID.equals(action.getPluginId())) {
+    if (action instanceof MissingAction) {
       return new MissingActionDialog(
           hopGui.getActiveShell(), action, workflowMeta, workflowGraph.getVariables());
     }
@@ -290,25 +291,20 @@ public class HopGuiWorkflowActionDelegate {
         return;
       }
 
-      ActionMeta before = (ActionMeta) action.cloneDeep();
+      byte[] beforeSnapshot = workflowGraph.captureUndoSnapshot();
 
       IAction jei = action.getAction();
 
       dialog = getActionDialog(jei, workflowMeta);
       if (dialog != null) {
         dialogs.put(action.getName(), dialog);
-        if (dialog.open() != null) {
+        // Subject stack covers legacy action dialogs that never set BaseDialog.DIALOG_SUBJECT
+        if (BaseDialog.withDialogSubject(jei, dialog::open) != null) {
           // First see if the name changed.
           // If so, we need to verify that the name is not already used in the workflow.
           //
           workflowMeta.renameActionIfNameCollides(action);
-
-          ActionMeta after = action.clone();
-          hopGui.undoDelegate.addUndoChange(
-              workflowMeta,
-              new ActionMeta[] {before},
-              new ActionMeta[] {after},
-              new int[] {workflowMeta.indexOfAction(action)});
+          workflowGraph.commitDialogUndo(beforeSnapshot);
         }
         workflowGraph.updateGui();
       } else {
@@ -330,6 +326,9 @@ public class HopGuiWorkflowActionDelegate {
   }
 
   public void deleteActions(WorkflowMeta workflow, List<ActionMeta> actions) {
+    if (!HopSecurityUi.check(Permission.FILE_EDIT)) {
+      return;
+    }
 
     // Hops belonging to the deleting actions are placed in a single transaction and removed.
     List<WorkflowHopMeta> workflowHops = new ArrayList<>();

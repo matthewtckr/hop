@@ -17,7 +17,7 @@
 
 package org.apache.hop.beam.engines.spark;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.Arrays;
 import org.apache.hop.beam.engines.BeamBasePipelineEngineTest;
@@ -26,16 +26,28 @@ import org.apache.hop.core.variables.DescribedVariable;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.config.PipelineRunConfiguration;
 import org.apache.hop.pipeline.engine.IPipelineEngine;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-public class BeamSparkPipelineEngineTest extends BeamBasePipelineEngineTest {
+/**
+ * Embedded Spark local-mode smoke test for the Beam Spark pipeline engine.
+ *
+ * <p>Requires spark-core on the test classpath (see hop-engines-beam pom). Hop runs on Java 21;
+ * Spark 3.5.x is used for local mode. Cluster multi-version coverage lives in {@code
+ * integration-tests/spark} / {@code run-spark-matrix.sh}.
+ */
+class BeamSparkPipelineEngineTest extends BeamBasePipelineEngineTest {
 
-  // Disabled because of log4j library dependency problems with Spark
   @Test
-  public void testSparkPipelineEngine() throws Exception {
+  void testSparkPipelineEngine() throws Exception {
+    // Spark UI pulls in a shaded Jetty + jersey stack that conflicts with Hop's servlet APIs
+    // on the unit-test classpath. The pipeline does not need the UI.
+    System.setProperty("spark.ui.enabled", "false");
+    System.setProperty("spark.driver.host", "127.0.0.1");
+    System.setProperty("spark.driver.bindAddress", "127.0.0.1");
 
     BeamSparkPipelineRunConfiguration configuration = new BeamSparkPipelineRunConfiguration();
-    configuration.setSparkMaster("local");
+    configuration.setSparkMaster("local[2]");
+    configuration.setTempLocation(System.getProperty("java.io.tmpdir"));
     configuration.setEnginePluginId("BeamSparkPipelineEngine");
     PipelineRunConfiguration pipelineRunConfiguration =
         new PipelineRunConfiguration(

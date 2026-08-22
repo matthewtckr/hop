@@ -21,7 +21,9 @@ import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.util.Utils;
@@ -30,9 +32,17 @@ import org.apache.hop.core.util.Utils;
 @DatabaseMetaPlugin(
     type = "DERBY",
     typeDescription = "Apache Derby",
-    documentationUrl = "/database/databases/derby.html")
+    documentationUrl = "/database/databases/derby.html",
+    classLoaderGroup = "derby-db")
 @GuiPlugin(id = "GUI-DerbyDatabaseMeta")
 public class DerbyDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  /** Derby limits rows at the end of the statement. */
+  @Override
+  public String getLimitClause(int nrRows) {
+    return " FETCH FIRST " + nrRows + " ROWS ONLY";
+  }
+
   @Override
   public int[] getAccessTypeList() {
     return new int[] {DatabaseMeta.TYPE_ACCESS_NATIVE};
@@ -56,6 +66,20 @@ public class DerbyDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     } else {
       return "org.apache.derby.client.ClientAutoloadedDriver";
     }
+  }
+
+  @Override
+  @SuppressWarnings("java:S1313") // the driver version is not an IP address
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("org.apache.derby:derbyclient")
+        .defaultVersion("10.17.1.0")
+        .licenseCategory("A")
+        .licenseName("Apache-2.0")
+        .licenseUrl("https://www.apache.org/licenses/LICENSE-2.0")
+        .vendor("Apache Derby")
+        .vendorUrl("https://db.apache.org/derby/")
+        .build();
   }
 
   @Override
@@ -117,7 +141,7 @@ public class DerbyDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -137,7 +161,8 @@ public class DerbyDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
     return "ALTER TABLE "
         + tableName
         + " ALTER "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -172,35 +197,26 @@ public class DerbyDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
             retval += "BIGINT NOT NULL PRIMARY KEY";
           }
         } else {
-          if (type == IValueMeta.TYPE_INTEGER) {
-            // Integer values...
-            if (length < 3) {
-              retval += "TINYINT";
-            } else if (length < 5) {
-              retval += "SMALLINT";
-            } else if (length < 10) {
-              retval += "INT";
-            } else if (length < 20) {
-              retval += "BIGINT";
-            } else {
-              retval += "DECIMAL(" + length + ")";
+          switch (type) {
+            case IValueMeta.TYPE_INTEGER -> {
+              if (length < 3) {
+                retval += "TINYINT";
+              } else if (length < 5) {
+                retval += "SMALLINT";
+              } else if (length < 10) {
+                retval += "INT";
+              } else if (length < 20) {
+                retval += "BIGINT";
+              } else {
+                retval += "DECIMAL(" + length + ")";
+              }
             }
-          } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-            // Fixed point value...
-            if (length
-                < 1) { // user configured no value for length. Use 16 digits, which is comparable to
-              // mantissa 2^53 of IEEE 754 binary64 "double".
-              length = 16;
+            case IValueMeta.TYPE_BIGNUMBER -> {
+              int len = (length < 1) ? 16 : length;
+              int p = (precision < 1) ? 16 : precision;
+              retval += "DECIMAL(" + len + "," + p + ")";
             }
-            if (precision
-                < 1) { // user configured no value for precision. Use 16 digits, which is comparable
-              // to IEEE 754 binary64 "double".
-              precision = 16;
-            }
-            retval += "DECIMAL(" + length + "," + precision + ")";
-          } else {
-            // Floating point value with double precision...
-            retval += "DOUBLE";
+            default -> retval += "DOUBLE";
           }
         }
         break;
@@ -212,7 +228,8 @@ public class DerbyDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
           if (length > 0) {
             retval += "(" + length;
           } else {
-            retval += "("; // Maybe use some default DB String length?
+            // Maybe use some default DB String length?
+            retval += "(";
           }
           retval += ")";
         }

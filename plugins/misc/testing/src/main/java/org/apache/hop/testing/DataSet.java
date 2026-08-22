@@ -19,7 +19,7 @@ package org.apache.hop.testing;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopPluginException;
@@ -31,6 +31,7 @@ import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.metadata.api.HopMetadata;
 import org.apache.hop.metadata.api.HopMetadataBase;
+import org.apache.hop.metadata.api.HopMetadataCategory;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadata;
@@ -40,8 +41,10 @@ import org.apache.hop.metadata.api.IHopMetadata;
     name = "i18n::DataSet.name",
     description = "i18n::DataSet.description",
     image = "dataset.svg",
+    category = HopMetadataCategory.TESTING,
     documentationUrl = "/metadata-types/data-set.html",
-    hopMetadataPropertyType = HopMetadataPropertyType.PIPELINE_DATA_SET)
+    hopMetadataPropertyType = HopMetadataPropertyType.PIPELINE_DATA_SET,
+    supportsGlobalReplace = true)
 public class DataSet extends HopMetadataBase implements Cloneable, IHopMetadata {
 
   public static final String VARIABLE_HOP_DATASETS_FOLDER = "HOP_DATASETS_FOLDER";
@@ -138,6 +141,10 @@ public class DataSet extends HopMetadataBase implements Cloneable, IHopMetadata 
     IRowMeta rowMeta = new RowMeta();
     for (PipelineUnitTestFieldMapping fieldMapping : location.getFieldMappings()) {
       IValueMeta valueMeta = setRowMeta.searchValueMeta(fieldMapping.getDataSetFieldName());
+      if (valueMeta == null) {
+        valueMeta =
+            new org.apache.hop.core.row.value.ValueMetaString(fieldMapping.getDataSetFieldName());
+      }
       rowMeta.addValueMeta(valueMeta);
     }
     return rowMeta;

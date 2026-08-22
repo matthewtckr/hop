@@ -17,7 +17,11 @@
 
 package org.apache.hop.databases.cratedb;
 
+import java.util.List;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
+import org.apache.hop.core.database.types.DatabaseTypes;
+import org.apache.hop.core.database.types.IDatabaseTypeRule;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.databases.postgresql.PostgreSqlDatabaseMeta;
@@ -31,11 +35,43 @@ import org.apache.hop.databases.postgresql.PostgreSqlDatabaseMeta;
 @GuiPlugin(id = "GUI-CrateDBDatabaseMeta")
 public class CrateDBDatabaseMeta extends PostgreSqlDatabaseMeta {
 
+  /**
+   * CrateDB is Postgres derived but names these differently: a document goes in an OBJECT and an
+   * address in an IP, and it has neither JSONB nor INET.
+   */
+  private static final List<IDatabaseTypeRule> TYPE_RULES =
+      DatabaseTypes.rules()
+          .write(IValueMeta.TYPE_JSON)
+          .as("OBJECT")
+          .write(IValueMeta.TYPE_INET)
+          .as("IP")
+          .include(PostgreSqlDatabaseMeta.POSTGRES_TYPE_RULES)
+          .build();
+
+  @Override
+  public List<IDatabaseTypeRule> getTypeRules() {
+    return TYPE_RULES;
+  }
+
   private static final String SEQUENCES_NOT_SUPPORTED = "CrateDB does not support sequences";
 
   @Override
   public String getDriverClass() {
     return "io.crate.client.jdbc.CrateDriver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("io.crate:crate-jdbc")
+        .defaultVersion("2.7.0")
+        .licenseCategory("A")
+        .licenseName("Apache-2.0")
+        .licenseUrl("https://github.com/crate/crate-jdbc/blob/master/LICENSE")
+        .vendor("CrateDB")
+        .vendorUrl("https://cratedb.com/docs/jdbc/")
+        .excludes(List.of("com.fasterxml.jackson.core:*", "com.google.guava:*", "org.slf4j:*"))
+        .build();
   }
 
   @Override
@@ -219,9 +255,8 @@ public class CrateDBDatabaseMeta extends PostgreSqlDatabaseMeta {
           retval += fieldname + " ";
         }
         if (fieldname.equalsIgnoreCase(tk)
-            || // Technical key
-            fieldname.equalsIgnoreCase(pk) // Primary key
-        ) {
+            || // Technical key, Primary key
+            fieldname.equalsIgnoreCase(pk)) {
           retval += "BIGSERIAL";
         } else {
           if (type == IValueMeta.TYPE_INTEGER) {
@@ -233,11 +268,6 @@ public class CrateDBDatabaseMeta extends PostgreSqlDatabaseMeta {
             } else {
               retval += "SMALLINT";
             }
-          } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-            // Fixed point value...
-            // CrateDB doesn't support NUMERIC type for columns (only in expressions...)
-            // as a work-around we use a double, which can be cast to NUMERIC via SQL by the user
-            retval += "DOUBLE PRECISION";
           } else {
             // Floating point value with double precision...
             retval += "DOUBLE PRECISION";
@@ -258,5 +288,11 @@ public class CrateDBDatabaseMeta extends PostgreSqlDatabaseMeta {
   @Override
   public String getSqlUnlockTables(String[] tableName) {
     throw new UnsupportedOperationException("CrateDB does not support locking tables");
+  }
+
+  @Override
+  public void addDefaultOptions() {
+    setSupportsBooleanDataType(true);
+    setSupportsTimestampDataType(true);
   }
 }

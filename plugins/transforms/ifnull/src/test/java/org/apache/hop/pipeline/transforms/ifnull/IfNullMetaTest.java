@@ -16,30 +16,30 @@
  */
 package org.apache.hop.pipeline.transforms.ifnull;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.plugins.PluginRegistry;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.transform.TransformSerializationTestUtil;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class IfNullMetaTest {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+class IfNullMetaTest {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
-  @Before
-  public void setUpLoadSave() throws Exception {
+  @BeforeEach
+  void setUpLoadSave() throws Exception {
     HopEnvironment.init();
     PluginRegistry.init();
   }
 
   @Test
-  public void testLoadSaveValueType() throws Exception {
+  void testLoadSaveValueType() throws Exception {
     IfNullMeta meta =
         TransformSerializationTestUtil.testSerialization(
             "/if-null-transform-value-type.xml", IfNullMeta.class);
@@ -50,18 +50,18 @@ public class IfNullMetaTest {
     assertEquals(0, meta.getFields().size());
 
     assertEquals("String", meta.getValueTypes().get(0).getName());
-    assertNull(meta.getValueTypes().get(0).getValue());
+    assertEquals("", meta.getValueTypes().get(0).getValue());
     assertTrue(meta.getValueTypes().get(0).isSetEmptyString());
     assertEquals("Number", meta.getValueTypes().get(1).getName());
-    assertNull(meta.getValueTypes().get(1).getValue());
+    assertEquals("", meta.getValueTypes().get(1).getValue());
     assertFalse(meta.getValueTypes().get(1).isSetEmptyString());
     assertEquals("Date", meta.getValueTypes().get(2).getName());
-    assertNull(meta.getValueTypes().get(2).getValue());
+    assertEquals("", meta.getValueTypes().get(2).getValue());
     assertFalse(meta.getValueTypes().get(2).isSetEmptyString());
   }
 
   @Test
-  public void testLoadSaveField() throws Exception {
+  void testLoadSaveField() throws Exception {
     IfNullMeta meta =
         TransformSerializationTestUtil.testSerialization(
             "/if-null-transform-field.xml", IfNullMeta.class);
@@ -79,12 +79,12 @@ public class IfNullMetaTest {
     assertEquals("ddMMYYYY", meta.getFields().get(1).getMask());
     assertFalse(meta.getFields().get(1).isSetEmptyString());
     assertEquals("F3", meta.getFields().get(2).getName());
-    assertNull(meta.getFields().get(2).getValue());
+    assertEquals("", meta.getFields().get(2).getValue());
     assertTrue(meta.getFields().get(2).isSetEmptyString());
   }
 
   @Test
-  public void testSetDefault() throws Exception {
+  void testSetDefault() throws Exception {
     IfNullMeta meta = new IfNullMeta();
     meta.setDefault();
     assertTrue((meta.getValueTypes() != null) && (meta.getValueTypes().isEmpty()));

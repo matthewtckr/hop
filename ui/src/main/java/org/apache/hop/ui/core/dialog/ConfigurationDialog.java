@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import lombok.Setter;
 import org.apache.hop.IExecutionConfiguration;
 import org.apache.hop.base.AbstractMeta;
 import org.apache.hop.core.Const;
@@ -56,7 +57,7 @@ import org.eclipse.swt.widgets.TableItem;
 public abstract class ConfigurationDialog extends Dialog {
 
   protected AbstractMeta abstractMeta;
-  protected IExecutionConfiguration configuration;
+  @Setter protected IExecutionConfiguration configuration;
   protected TableView wVariables;
   protected boolean retval;
   protected Shell shell;
@@ -72,7 +73,9 @@ public abstract class ConfigurationDialog extends Dialog {
   private Shell parent;
   private Button wOk;
   protected FormData fdDetails;
-  private Button alwaysShowOption;
+
+  /** Horizontal separator above the dialog's bottom button row. */
+  protected Label wButtonsSeparator;
 
   protected HopGui hopGui;
 
@@ -133,8 +136,6 @@ public abstract class ConfigurationDialog extends Dialog {
   }
 
   protected void ok() {
-    abstractMeta.setAlwaysShowRunOptions(alwaysShowOption.getSelection());
-    abstractMeta.setShowDialog(alwaysShowOption.getSelection());
     if (Const.isOSX()) {
       // OSX bug workaround.
       wVariables.applyOSXChanges();
@@ -165,8 +166,7 @@ public abstract class ConfigurationDialog extends Dialog {
     ArrayList<String> paramNames = new ArrayList<>(configuration.getParametersMap().keySet());
     Collections.sort(paramNames);
 
-    for (int i = 0; i < paramNames.size(); i++) {
-      String paramName = paramNames.get(i);
+    for (String paramName : paramNames) {
       String paramValue = configuration.getParametersMap().get(paramName);
       String defaultValue;
       try {
@@ -191,13 +191,6 @@ public abstract class ConfigurationDialog extends Dialog {
     wParams.removeEmptyRows();
     wParams.setRowNums();
     wParams.optWidth(true);
-  }
-
-  /**
-   * @param configuration the configuration to set
-   */
-  public void setConfiguration(IExecutionConfiguration configuration) {
-    this.configuration = configuration;
   }
 
   protected void mainLayout(String shellTitle, Image img) {
@@ -240,7 +233,7 @@ public abstract class ConfigurationDialog extends Dialog {
     fdTabFolder.right = new FormAttachment(100, 0);
     fdTabFolder.left = new FormAttachment(0, 0);
     fdTabFolder.top = new FormAttachment(gDetails, 15);
-    fdTabFolder.bottom = new FormAttachment(alwaysShowOption, -15);
+    fdTabFolder.bottom = new FormAttachment(wButtonsSeparator, -15);
     tabFolder.setLayoutData(fdTabFolder);
 
     // Parameters
@@ -312,18 +305,10 @@ public abstract class ConfigurationDialog extends Dialog {
     variablesComposite.setLayout(new FormLayout());
     tbtmVariables.setControl(variablesComposite);
 
-    ColumnInfo[] cVariables = {
-      new ColumnInfo(
-          BaseMessages.getString(PKG, prefix + ".VariablesColumn.Argument"),
-          ColumnInfo.COLUMN_TYPE_TEXT,
-          false,
-          false), // TransformName
-      new ColumnInfo(
-          BaseMessages.getString(PKG, prefix + ".VariablesColumn.Value"),
-          ColumnInfo.COLUMN_TYPE_TEXT,
-          false,
-          false), // Preview size
-    };
+    ColumnInfo[] cVariables =
+        createVariablesColumns(
+            BaseMessages.getString(PKG, prefix + ".VariablesColumn.Argument"),
+            BaseMessages.getString(PKG, prefix + ".VariablesColumn.Value"));
 
     int nrVariables =
         configuration.getVariablesMap() != null ? configuration.getVariablesMap().size() : 0;
@@ -351,12 +336,7 @@ public abstract class ConfigurationDialog extends Dialog {
     wVariables.setLayoutData(fdVariables);
   }
 
-  protected void buttonsSectionLayout(
-      String alwaysShowOptionLabel,
-      String alwaysShowOptionTooltip,
-      final String docTitle,
-      final String docUrl,
-      final String docHeader) {
+  protected void buttonsSectionLayout(final String docUrl) {
 
     // Bottom buttons and separator
 
@@ -376,23 +356,12 @@ public abstract class ConfigurationDialog extends Dialog {
     fdbHelp.left = new FormAttachment(0, 0);
     wbHelp.setLayoutData(fdbHelp);
 
-    Label separator = new Label(shell, SWT.SEPARATOR | SWT.HORIZONTAL);
+    wButtonsSeparator = new Label(shell, SWT.SEPARATOR | SWT.HORIZONTAL);
     FormData fdSeparator = new FormData();
     fdSeparator.right = new FormAttachment(100, 0);
     fdSeparator.left = new FormAttachment(0, 0);
     fdSeparator.bottom = new FormAttachment(wOk, -2 * margin);
-    separator.setLayoutData(fdSeparator);
-
-    alwaysShowOption = new Button(shell, SWT.CHECK);
-    alwaysShowOption.setText(alwaysShowOptionLabel);
-    alwaysShowOption.setToolTipText(alwaysShowOptionTooltip);
-    PropsUi.setLook(alwaysShowOption);
-    alwaysShowOption.setSelection(abstractMeta.isAlwaysShowRunOptions());
-
-    FormData fdAlwaysShowOption = new FormData();
-    fdAlwaysShowOption.left = new FormAttachment(0, 0);
-    fdAlwaysShowOption.bottom = new FormAttachment(separator, -15);
-    alwaysShowOption.setLayoutData(fdAlwaysShowOption);
+    wButtonsSeparator.setLayoutData(fdSeparator);
   }
 
   protected void openDialog() {
@@ -403,4 +372,17 @@ public abstract class ConfigurationDialog extends Dialog {
   }
 
   protected abstract void optionsSectionControls();
+
+  /**
+   * Builds the Variables table columns for Run Options. Only the Value column enables the variable
+   * picker — names are literal keys and are not resolved at runtime.
+   */
+  static ColumnInfo[] createVariablesColumns(String nameTitle, String valueTitle) {
+    ColumnInfo[] columns = {
+      new ColumnInfo(nameTitle, ColumnInfo.COLUMN_TYPE_TEXT, false, false),
+      new ColumnInfo(valueTitle, ColumnInfo.COLUMN_TYPE_TEXT, false, false),
+    };
+    columns[1].setUsingVariables(true);
+    return columns;
+  }
 }

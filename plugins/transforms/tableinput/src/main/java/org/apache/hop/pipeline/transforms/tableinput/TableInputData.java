@@ -27,8 +27,8 @@ import org.apache.hop.pipeline.transform.stream.IStream;
 
 @SuppressWarnings("java:S1104")
 public class TableInputData extends BaseTransformData implements ITransformData {
-  public Object[] nextrow;
-  public Object[] thisrow;
+  public Object[] nextRow;
+  public Object[] thisRow;
   public Database db;
   public ResultSet rs;
   public String lookupTransform;
@@ -37,12 +37,18 @@ public class TableInputData extends BaseTransformData implements ITransformData 
   public boolean isCanceled;
   public IStream infoStream;
 
+  /** JDBC result metadata before specified-field mapping, or null when specify-fields is off. */
+  public IRowMeta jdbcRowMeta;
+
+  /** JDBC column index for each specified output field, or null when specify-fields is off. */
+  public int[] specifiedMapping;
+
   public TableInputData() {
     super();
 
     db = null;
-    thisrow = null;
-    nextrow = null;
+    thisRow = null;
+    nextRow = null;
     rs = null;
     lookupTransform = null;
   }

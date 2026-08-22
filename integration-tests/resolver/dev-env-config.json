@@ -1,19 +1,11 @@
 {
   "variables" : [ {
-    "name" : "ENV_VARIABLE1",
-    "value" : "#{conf:db1:variable}",
-    "description" : ""
+    "name" : "HOP_PWD",
+    "value" : "Encrypted 696e7467d9eacebc03c89cc9bf1cbd649382b8de",
+    "description" : "Hop-encoded password for plaintext integration-test-pwd"
   }, {
-    "name" : "ENV_VARIABLE2",
-    "value" : "#{conf:db2:variable}",
-    "description" : ""
-  }, {
-    "name" : "ENV_VARIABLE3",
-    "value" : "#{conf:db3:variable}",
-    "description" : ""
-  }, {
-    "name" : "DB_PASSWORD",
-    "value" : "#{vault:secret/data/hop:password}",
-    "description" : ""
+    "name" : "HOP_PWD_PLAIN",
+    "value" : "integration-test-pwd",
+    "description" : "Expected plaintext after decrypt"
   } ]
 }

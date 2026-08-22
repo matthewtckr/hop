@@ -17,25 +17,28 @@
 
 package org.apache.hop.mail.pipeline.transforms.mail;
 
+import java.util.ArrayList;
 import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.ICheckResult;
 import org.apache.hop.core.annotations.Transform;
+import org.apache.hop.core.exception.HopTransformException;
 import org.apache.hop.core.row.IRowMeta;
+import org.apache.hop.core.row.IValueMeta;
+import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.mail.workflow.actions.mail.MailEmbeddedImageField;
 import org.apache.hop.metadata.api.HopMetadataProperty;
+import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.BaseTransformMeta;
 import org.apache.hop.pipeline.transform.TransformMeta;
 
-@Getter
-@Setter
 /** Send mail transform. based on Mail action */
 @Transform(
     id = "Mail",
@@ -45,6 +48,8 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Utility",
     keywords = "i18n::MailMeta.keyword",
     documentationUrl = "/pipeline/transforms/mail.html")
+@Getter
+@Setter
 public class MailMeta extends BaseTransformMeta<Mail, MailData> {
   private static final Class<?> PKG = MailMeta.class;
   private static final String CONST_SPACE = "      ";
@@ -79,17 +84,21 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
   @HopMetadataProperty(key = "isFilenameDynamic")
   private boolean filenameDynamic;
 
-  @HopMetadataProperty private String dynamicFieldname;
+  @HopMetadataProperty(key = "dynamicFieldname")
+  private String dynamicFieldName;
 
   @HopMetadataProperty private String dynamicWildcard;
 
   @HopMetadataProperty private String dynamicZipFilename;
 
-  @HopMetadataProperty private String sourcefilefoldername;
+  @HopMetadataProperty(key = "sourcefilefoldername")
+  private String sourceFileFolderName;
 
-  @HopMetadataProperty private String sourcewildcard;
+  @HopMetadataProperty(key = "sourcewildcard")
+  private String sourceWildCard;
 
-  @HopMetadataProperty private String connectionName;
+  @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.MAIL_SERVER_CONNECTION)
+  private String connectionName;
 
   @HopMetadataProperty(key = "contact_person")
   private String contactPerson;
@@ -109,13 +118,13 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
   private String zipFilename;
 
   @HopMetadataProperty(key = "zip_limit_size")
-  private String ziplimitsize;
+  private String zipLimitSize;
 
   @HopMetadataProperty(key = "use_auth")
   private boolean usingAuthentication;
 
   @HopMetadataProperty(key = "usexoauth2")
-  private boolean usexoauth2;
+  private boolean useXOAuth2;
 
   @HopMetadataProperty(key = "auth_user")
   private String authenticationUser;
@@ -177,12 +186,28 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
   private String trustedHosts;
 
   public MailMeta() {
-    super(); // allocate BaseTransformMeta
+    super();
+    embeddedImages = new ArrayList<>();
   }
 
   @Override
-  public Object clone() {
-    return super.clone();
+  public void getFields(
+      IRowMeta row,
+      String origin,
+      IRowMeta[] info,
+      TransformMeta nextTransform,
+      IVariables variables,
+      IHopMetadataProvider metadataProvider)
+      throws HopTransformException {
+    if (isAddMessageToOutput()) {
+      try {
+        IValueMeta v = ValueMetaFactory.createValueMeta(messageOutputField, IValueMeta.TYPE_STRING);
+        v.setOrigin(origin);
+        row.addValueMeta(v);
+      } catch (Exception e) {
+        throw new HopTransformException(e);
+      }
+    }
   }
 
   @Override
@@ -196,6 +221,20 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
       IRowMeta info,
       IVariables variables,
       IHopMetadataProvider metadataProvider) {
+    checkNotReceivingInput(remarks, transformMeta, prev);
+    checkInputStreams(remarks, transformMeta, input);
+    checkServerName(remarks, transformMeta, prev, variables);
+    checkPort(remarks, transformMeta);
+    checkReplyAddress(remarks, transformMeta);
+    checkDestination(remarks, transformMeta);
+    checkSubject(remarks, transformMeta);
+    checkComment(remarks, transformMeta);
+    checkFileName(remarks, transformMeta);
+    checkZipFilename(remarks, transformMeta);
+  }
+
+  private static void checkNotReceivingInput(
+      List<ICheckResult> remarks, TransformMeta transformMeta, IRowMeta prev) {
     CheckResult cr;
     if (prev == null || prev.isEmpty()) {
       cr =
@@ -212,7 +251,11 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
               transformMeta);
     }
     remarks.add(cr);
+  }
 
+  private static void checkInputStreams(
+      List<ICheckResult> remarks, TransformMeta transformMeta, String[] input) {
+    CheckResult cr;
     // See if we have input streams leading to this transform!
     if (input.length > 0) {
       cr =
@@ -229,7 +272,14 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
               transformMeta);
     }
     remarks.add(cr);
+  }
 
+  private void checkServerName(
+      List<ICheckResult> remarks,
+      TransformMeta transformMeta,
+      IRowMeta prev,
+      IVariables variables) {
+    CheckResult cr;
     // Servername
     if (Utils.isEmpty(server)) {
       cr =
@@ -246,7 +296,7 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
               transformMeta);
       remarks.add(cr);
       // is the field exists?
-      if (prev.indexOfValue(variables.resolve(server)) < 0) {
+      if (prev != null && prev.indexOfValue(variables.resolve(server)) < 0) {
         cr =
             new CheckResult(
                 ICheckResult.TYPE_RESULT_WARNING,
@@ -255,7 +305,10 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
       }
       remarks.add(cr);
     }
+  }
 
+  private void checkPort(List<ICheckResult> remarks, TransformMeta transformMeta) {
+    CheckResult cr;
     // port number
     if (Utils.isEmpty(port)) {
       cr =
@@ -271,7 +324,10 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
               transformMeta);
     }
     remarks.add(cr);
+  }
 
+  private void checkReplyAddress(List<ICheckResult> remarks, TransformMeta transformMeta) {
+    CheckResult cr;
     // reply address
     if (Utils.isEmpty(replyAddress)) {
       cr =
@@ -287,7 +343,10 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
               transformMeta);
     }
     remarks.add(cr);
+  }
 
+  private void checkDestination(List<ICheckResult> remarks, TransformMeta transformMeta) {
+    CheckResult cr;
     // Destination
     if (Utils.isEmpty(destination)) {
       cr =
@@ -303,7 +362,10 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
               transformMeta);
     }
     remarks.add(cr);
+  }
 
+  private void checkSubject(List<ICheckResult> remarks, TransformMeta transformMeta) {
+    CheckResult cr;
     // Subject
     if (Utils.isEmpty(subject)) {
       cr =
@@ -319,7 +381,10 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
               transformMeta);
     }
     remarks.add(cr);
+  }
 
+  private void checkComment(List<ICheckResult> remarks, TransformMeta transformMeta) {
+    CheckResult cr;
     // Comment
     if (Utils.isEmpty(comment)) {
       cr =
@@ -335,10 +400,13 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
               transformMeta);
     }
     remarks.add(cr);
+  }
 
+  private void checkFileName(List<ICheckResult> remarks, TransformMeta transformMeta) {
+    CheckResult cr;
     if (filenameDynamic) {
       // Dynamic Filename field
-      if (Utils.isEmpty(dynamicFieldname)) {
+      if (Utils.isEmpty(dynamicFieldName)) {
         cr =
             new CheckResult(
                 ICheckResult.TYPE_RESULT_ERROR,
@@ -355,7 +423,7 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
 
     } else {
       // static filename
-      if (Utils.isEmpty(sourcefilefoldername)) {
+      if (Utils.isEmpty(sourceFileFolderName)) {
         cr =
             new CheckResult(
                 ICheckResult.TYPE_RESULT_ERROR,
@@ -370,7 +438,10 @@ public class MailMeta extends BaseTransformMeta<Mail, MailData> {
       }
       remarks.add(cr);
     }
+  }
 
+  private void checkZipFilename(List<ICheckResult> remarks, TransformMeta transformMeta) {
+    CheckResult cr;
     if (isZipFiles()) {
       if (filenameDynamic) {
         // dynamic zipfilename

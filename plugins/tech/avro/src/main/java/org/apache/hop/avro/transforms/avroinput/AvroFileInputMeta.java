@@ -31,7 +31,7 @@ import org.apache.hop.pipeline.transform.TransformMeta;
 
 @Transform(
     id = "AvroFileInput",
-    name = "Avro File Input",
+    name = "Avro file input",
     description = "Reads file serialized in the Apache Avro file format",
     image = "avro_input.svg",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Input",
@@ -51,17 +51,6 @@ public class AvroFileInputMeta extends BaseTransformMeta<AvroFileInput, AvroFile
 
   public AvroFileInputMeta() {
     outputFieldName = "avro";
-  }
-
-  public AvroFileInputMeta(AvroFileInputMeta m) {
-    this.outputFieldName = m.outputFieldName;
-    this.dataFilenameField = m.dataFilenameField;
-    this.rowsLimit = m.rowsLimit;
-  }
-
-  @Override
-  public AvroFileInputMeta clone() {
-    return new AvroFileInputMeta(this);
   }
 
   @Override

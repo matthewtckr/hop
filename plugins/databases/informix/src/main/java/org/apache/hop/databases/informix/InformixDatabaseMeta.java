@@ -21,7 +21,9 @@ import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.gui.plugin.GuiElementType;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.gui.plugin.GuiWidgetElement;
@@ -31,9 +33,16 @@ import org.apache.hop.core.row.IValueMeta;
 @DatabaseMetaPlugin(
     type = "INFORMIX",
     typeDescription = "Informix",
-    documentationUrl = "/database/databases/informix.html")
+    documentationUrl = "/database/databases/informix.html",
+    classLoaderGroup = "informix-db")
 @GuiPlugin(id = "GUI-InformixDatabaseMeta")
 public class InformixDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  /** Informix limits rows with FIRST, between SELECT and the column list. */
+  @Override
+  public String getLimitClausePrefix(int nrRows) {
+    return " FIRST " + nrRows;
+  }
 
   @GuiWidgetElement(
       id = "servername",
@@ -71,6 +80,20 @@ public class InformixDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
   @Override
   public String getDriverClass() {
     return "com.informix.jdbc.IfxDriver";
+  }
+
+  @Override
+  @SuppressWarnings("java:S1313") // the driver version is not an IP address
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("com.ibm.informix:jdbc")
+        .defaultVersion("15.0.1.2")
+        .licenseCategory("X")
+        .licenseName("IBM International Program License Agreement")
+        .licenseUrl("https://www.ibm.com/products/informix")
+        .vendor("IBM Informix")
+        .vendorUrl("https://www.ibm.com/docs/en/informix-servers")
+        .build();
   }
 
   @Override
@@ -132,7 +155,7 @@ public class InformixDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
     return "ALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -152,7 +175,8 @@ public class InformixDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
     return "ALTER TABLE "
         + tableName
         + " MODIFY "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -194,34 +218,26 @@ public class InformixDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
             retval += "INTEGER PRIMARY KEY";
           }
         } else {
-          if (type == IValueMeta.TYPE_INTEGER) {
-            // Integer values...
-            if (length < 5) {
-              retval += "SMALLINT";
-            } else if (length < 10) {
-              retval += "INT";
-            } else if (length < 20) {
-              retval += "BIGINT";
-            } else {
-              retval += "DECIMAL(" + length + ",0)";
-            }
-          } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-            // Fixed point value...
-            if (length
-                < 1) { // user configured no value for length. Use 16 digits, which is comparable to
-              // mantissa 2^53 of IEEE 754 binary64 "double".
-              length = 16;
-            }
-            if (precision
-                < 1) { // user configured no value for precision. Use 16 digits, which is comparable
-              // to IEEE 754 binary64 "double".
-              precision = 16;
-            }
-            retval += "DECIMAL(" + length + "," + precision + ")";
-          } else {
-            // Floating point value with double precision...
-            retval += "FLOAT";
-          }
+          retval +=
+              switch (type) {
+                case IValueMeta.TYPE_INTEGER -> {
+                  if (length < 5) {
+                    yield "SMALLINT";
+                  } else if (length < 10) {
+                    yield "INT";
+                  } else if (length < 20) {
+                    yield "BIGINT";
+                  } else {
+                    yield "DECIMAL(" + length + ",0)";
+                  }
+                }
+                case IValueMeta.TYPE_BIGNUMBER -> {
+                  int p = (precision < 1) ? 16 : precision;
+                  int len = (length < 1) ? 16 : length;
+                  yield "DECIMAL(" + len + "," + p + ")";
+                }
+                default -> "FLOAT";
+              };
         }
         break;
       case IValueMeta.TYPE_STRING:
@@ -257,8 +273,8 @@ public class InformixDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
   @Override
   public String getSqlLockTables(String[] tableNames) {
     StringBuilder sql = new StringBuilder(128);
-    for (int i = 0; i < tableNames.length; i++) {
-      sql.append("LOCK TABLE " + tableNames[i] + " IN EXCLUSIVE MODE;" + Const.CR);
+    for (String tableName : tableNames) {
+      sql.append("LOCK TABLE " + tableName + " IN EXCLUSIVE MODE;" + Const.CR);
     }
     return sql.toString();
   }
@@ -285,5 +301,10 @@ public class InformixDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
   @Override
   public boolean isInformixVariant() {
     return true;
+  }
+
+  @Override
+  public void addDefaultOptions() {
+    setSupportsBooleanDataType(true);
   }
 }

@@ -17,18 +17,16 @@
 
 package org.apache.hop.ui.hopgui.perspective.explorer.file.types.noext;
 
-import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.variables.IVariables;
-import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.ui.hopgui.HopGui;
+import org.apache.hop.ui.hopgui.file.HopFileTypeBase;
 import org.apache.hop.ui.hopgui.file.HopFileTypePlugin;
 import org.apache.hop.ui.hopgui.file.IHopFileType;
 import org.apache.hop.ui.hopgui.file.IHopFileTypeHandler;
 import org.apache.hop.ui.hopgui.file.empty.EmptyHopFileTypeHandler;
 import org.apache.hop.ui.hopgui.perspective.explorer.ExplorerFile;
 import org.apache.hop.ui.hopgui.perspective.explorer.ExplorerPerspective;
-import org.apache.hop.ui.hopgui.perspective.explorer.file.IExplorerFileType;
 import org.apache.hop.ui.hopgui.perspective.explorer.file.capabilities.FileTypeCapabilities;
 import org.apache.hop.ui.hopgui.perspective.explorer.file.types.text.BaseTextExplorerFileType;
 
@@ -38,8 +36,7 @@ import org.apache.hop.ui.hopgui.perspective.explorer.file.types.text.BaseTextExp
     description = "No extension files handling in the explorer perspective",
     image = "ui/images/script-active.svg")
 public class NoExtensionExplorerFileType
-    extends BaseTextExplorerFileType<NoExtensionExplorerFileTypeHandler>
-    implements IExplorerFileType<NoExtensionExplorerFileTypeHandler> {
+    extends BaseTextExplorerFileType<NoExtensionExplorerFileTypeHandler> {
 
   public NoExtensionExplorerFileType() {
     super(
@@ -77,9 +74,7 @@ public class NoExtensionExplorerFileType
 
   @Override
   public boolean isHandledBy(String filename, boolean checkContent) throws HopException {
-    FileObject fileObject = HopVfs.getFileObject(filename);
-    String baseName = fileObject.getName().getBaseName();
-
+    String baseName = HopFileTypeBase.extractBaseName(filename);
     for (String extension : getFilterExtensions()) {
       if (extension.equals(baseName)) {
         return true;

@@ -28,17 +28,19 @@ import java.util.List;
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.encryption.ITwoWayPasswordEncoder;
 import org.apache.hop.core.encryption.TwoWayPasswordEncoderPlugin;
 import org.apache.hop.core.exception.HopException;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.util.StringUtil;
+import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 
 /**
  * We expect a few variables to be set for this plugin to be picked up: 1.
- * HOP_PASSWORD_ENCODER_PLUGIN set to the ID of this plugin:"AES" 2. HOP_AES_ENCODER_KEY set to the
- * key of your choice.
+ * HOP_PASSWORD_ENCODER_PLUGIN set to the ID of this plugin: "AES2" 2. HOP_AES_ENCODER_KEY set to
+ * the key of your choice, or HOP_AES_ENCODER_KEY_FILE pointing at a key file.
  */
 @TwoWayPasswordEncoderPlugin(
     id = "AES2",
@@ -50,35 +52,30 @@ public class Aes2TwoWayPasswordEncoder implements ITwoWayPasswordEncoder {
   public static final String AES_PREFIX = "AES2 ";
   public static final String AES_ALGORITHM = "AES/GCM/NoPadding";
 
+  /** {@link SecureRandom} is thread safe, seeding it once per encoded password is wasteful. */
+  private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
   private SecretKeySpec secretKeySpec;
 
   @Override
   public void init() throws HopException {
+    init(Variables.getADefaultVariableSpace());
+  }
 
+  @Override
+  public void init(IVariables variables) throws HopException {
     try {
-      String aesKey = System.getProperty(VARIABLE_HOP_AES_ENCODER_KEY, null);
-      if (StringUtils.isEmpty(aesKey)) {
-        noKeySpecified();
-      }
-      String realAesKey = Variables.getADefaultVariableSpace().resolve(aesKey);
-      if (StringUtils.isEmpty(realAesKey)) {
-        noKeySpecified();
-      }
+      String realAesKey = AesEncoderKeyUtil.resolveKey(variables);
       byte[] key = realAesKey.getBytes(StandardCharsets.UTF_8);
       MessageDigest messageDigest = MessageDigest.getInstance("SHA-512");
       byte[] digestKey = messageDigest.digest(key);
       byte[] copiedKey = Arrays.copyOf(digestKey, 16);
       secretKeySpec = new SecretKeySpec(copiedKey, "AES");
+    } catch (HopException e) {
+      throw e;
     } catch (Exception e) {
       throw new HopException("Error initializing AES password encoder plugin", e);
     }
-  }
-
-  private void noKeySpecified() throws HopException {
-    throw new HopException(
-        "Please specify a key to encrypt/decrypt with by setting variable "
-            + VARIABLE_HOP_AES_ENCODER_KEY
-            + " in the system properties");
   }
 
   @Override
@@ -98,7 +95,7 @@ public class Aes2TwoWayPasswordEncoder implements ITwoWayPasswordEncoder {
         return encodeInternal(password);
       }
     } catch (Exception e) {
-      throw new RuntimeException("Error encoding password using AES", e);
+      throw new HopRuntimeException("Error encoding password using AES", e);
     }
   }
 
@@ -109,8 +106,7 @@ public class Aes2TwoWayPasswordEncoder implements ITwoWayPasswordEncoder {
 
     // Generate a new, unique 12-byte IV for this encryption
     byte[] iv = new byte[12];
-    SecureRandom secureRandom = new SecureRandom();
-    secureRandom.nextBytes(iv);
+    SECURE_RANDOM.nextBytes(iv);
 
     // Initialize a new Cipher with the unique IV
     GCMParameterSpec parameterSpec = new GCMParameterSpec(128, iv);
@@ -172,7 +168,7 @@ public class Aes2TwoWayPasswordEncoder implements ITwoWayPasswordEncoder {
       try {
         encryptedPassword = AES_PREFIX + encodeInternal(password);
       } catch (Exception e) {
-        throw new RuntimeException("Error encoding password using AES", e);
+        throw new HopRuntimeException("Error encoding password using AES", e);
       }
     } else {
       encryptedPassword = password;
@@ -198,7 +194,7 @@ public class Aes2TwoWayPasswordEncoder implements ITwoWayPasswordEncoder {
       // Decrypt the ciphertext and return as a String
       return new String(cipher.doFinal(ciphertext));
     } catch (Exception e) {
-      throw new RuntimeException("Error decoding password using AES", e);
+      throw new HopRuntimeException("Error decoding password using AES", e);
     }
   }
 

@@ -23,16 +23,25 @@ public class ExplorerPerspectiveConfig {
 
   private String lazyLoadingDepth;
   private String fileLoadingMaxSize;
+  private Boolean fileExplorerVisibleByDefault;
+  private Boolean openingHelpFiles;
+  private Boolean activeFileSelection;
 
   public ExplorerPerspectiveConfig() {
     this.lazyLoadingDepth = "0";
     this.fileLoadingMaxSize = "16";
+    this.fileExplorerVisibleByDefault = true;
+    this.openingHelpFiles = false;
+    this.activeFileSelection = true;
   }
 
   public ExplorerPerspectiveConfig(ExplorerPerspectiveConfig config) {
     this();
     this.lazyLoadingDepth = config.lazyLoadingDepth;
     this.fileLoadingMaxSize = config.fileLoadingMaxSize;
+    this.fileExplorerVisibleByDefault = config.fileExplorerVisibleByDefault;
+    this.openingHelpFiles = config.openingHelpFiles;
+    this.activeFileSelection = config.activeFileSelection;
   }
 
   public String getLazyLoadingDepth() {
@@ -49,5 +58,29 @@ public class ExplorerPerspectiveConfig {
 
   public void setFileLoadingMaxSize(String fileLoadingMaxSize) {
     this.fileLoadingMaxSize = fileLoadingMaxSize;
+  }
+
+  public Boolean getFileExplorerVisibleByDefault() {
+    return fileExplorerVisibleByDefault;
+  }
+
+  public void setFileExplorerVisibleByDefault(Boolean fileExplorerVisibleByDefault) {
+    this.fileExplorerVisibleByDefault = fileExplorerVisibleByDefault;
+  }
+
+  public Boolean isOpeningHelpFiles() {
+    return openingHelpFiles != null ? openingHelpFiles : false;
+  }
+
+  public void setOpeningHelpFiles(Boolean openingHelpFiles) {
+    this.openingHelpFiles = openingHelpFiles;
+  }
+
+  public Boolean getActiveFileSelection() {
+    return activeFileSelection != null ? activeFileSelection : true;
+  }
+
+  public void setActiveFileSelection(Boolean activeFileSelection) {
+    this.activeFileSelection = activeFileSelection;
   }
 }

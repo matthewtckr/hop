@@ -20,7 +20,7 @@ package org.apache.hop.pipeline.transforms.validator;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopTransformException;
@@ -49,7 +49,6 @@ import org.eclipse.swt.layout.FormData;
 import org.eclipse.swt.layout.FormLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
-import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Group;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.List;
@@ -114,6 +113,8 @@ public class ValidatorDialog extends BaseTransformDialog {
   private TextVar wErrorDescription;
   private Button wConcatErrors;
   private TextVar wConcatSeparator;
+  private Button wSuppressLogFailedData;
+  private Button wSuppressErrorLog;
 
   public ValidatorDialog(
       Shell parent, IVariables variables, ValidatorMeta transformMeta, PipelineMeta pipelineMeta) {
@@ -139,53 +140,17 @@ public class ValidatorDialog extends BaseTransformDialog {
 
   @Override
   public String open() {
-    Shell parent = getParent();
-    Display display = parent.getDisplay();
+    createShell(BaseMessages.getString(PKG, "ValidatorDialog.Transform.Name"));
 
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MIN | SWT.MAX);
-    PropsUi.setLook(shell);
-    setShellImage(shell, input);
-
-    shell.setLayout(props.createFormLayout());
-    shell.setText(BaseMessages.getString(PKG, "ValidatorDialog.Transform.Name"));
-
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
-
-    // TransformName line
-    //
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(BaseMessages.getString(PKG, "ValidatorDialog.TransformName.Label"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    fdlTransformName.top = new FormAttachment(0, margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(middle, 0);
-    fdTransformName.top = new FormAttachment(0, margin);
-    fdTransformName.right = new FormAttachment(100, 0);
-    wTransformName.setLayoutData(fdTransformName);
-
-    // Add some buttons at the bottom of the dialog
-    //
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, e -> ok());
-    Button wNew = new Button(shell, SWT.PUSH);
-    wNew.setText(BaseMessages.getString(PKG, "ValidatorDialog.NewButton.Label"));
-    wNew.addListener(SWT.Selection, e -> newValidation());
-    Button wClear = new Button(shell, SWT.PUSH);
-    wClear.setText(BaseMessages.getString(PKG, "ValidatorDialog.ClearButton.Label"));
-    wClear.addListener(SWT.Selection, e -> clearValidation());
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, e -> cancel());
-    setButtonPositions(new Button[] {wOk, wNew, wClear, wCancel}, margin, null);
+    buildButtonBar()
+        .ok(e -> ok())
+        .custom(
+            BaseMessages.getString(PKG, "ValidatorDialog.NewButton.Label"), e -> newValidation())
+        .custom(
+            BaseMessages.getString(PKG, "ValidatorDialog.ClearButton.Label"),
+            e -> clearValidation())
+        .cancel(e -> cancel())
+        .build();
 
     // List of fields to the left...
     //
@@ -193,9 +158,9 @@ public class ValidatorDialog extends BaseTransformDialog {
     wlFieldList.setText(BaseMessages.getString(PKG, "ValidatorDialog.FieldList.Label"));
     PropsUi.setLook(wlFieldList);
     FormData fdlFieldList = new FormData();
-    fdlFieldList.left = new FormAttachment(0, 0);
+    fdlFieldList.left = new FormAttachment(0, margin);
     fdlFieldList.right = new FormAttachment(middle, -margin);
-    fdlFieldList.top = new FormAttachment(wTransformName, margin);
+    fdlFieldList.top = new FormAttachment(wSpacer, margin);
     wlFieldList.setLayoutData(fdlFieldList);
     wValidationsList =
         new List(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER | SWT.V_SCROLL | SWT.H_SCROLL);
@@ -205,10 +170,10 @@ public class ValidatorDialog extends BaseTransformDialog {
         SWT.Selection, e -> showSelectedValidatorField(wValidationsList.getSelection()[0]));
 
     FormData fdFieldList = new FormData();
-    fdFieldList.left = new FormAttachment(0, 0);
+    fdFieldList.left = new FormAttachment(0, margin);
     fdFieldList.top = new FormAttachment(wlFieldList, margin);
     fdFieldList.right = new FormAttachment(middle / 2, -margin);
-    fdFieldList.bottom = new FormAttachment(wOk, -margin * 2);
+    fdFieldList.bottom = new FormAttachment(wOk, -margin);
     wValidationsList.setLayoutData(fdFieldList);
 
     // General: an option to allow ALL the options to be checked.
@@ -219,7 +184,7 @@ public class ValidatorDialog extends BaseTransformDialog {
     FormData fdValidateAll = new FormData();
     fdValidateAll.left = new FormAttachment(middle, 0);
     fdValidateAll.right = new FormAttachment(100, 0);
-    fdValidateAll.top = new FormAttachment(wTransformName, margin);
+    fdValidateAll.top = new FormAttachment(wSpacer, margin);
     wValidateAll.setLayoutData(fdValidateAll);
     wValidateAll.addListener(SWT.Selection, e -> setFlags());
 
@@ -244,16 +209,47 @@ public class ValidatorDialog extends BaseTransformDialog {
     fdConcatSeparator.top = new FormAttachment(wValidateAll, margin);
     wConcatSeparator.setLayoutData(fdConcatSeparator);
 
+    // Optionally suppress logging of failed validation data (reduces log volume)
+    //
+    wSuppressLogFailedData = new Button(shell, SWT.CHECK);
+    wSuppressLogFailedData.setText(
+        BaseMessages.getString(PKG, "ValidatorDialog.SuppressLogFailedData.Label"));
+    wSuppressLogFailedData.setToolTipText(
+        BaseMessages.getString(PKG, "ValidatorDialog.SuppressLogFailedData.Tooltip"));
+    PropsUi.setLook(wSuppressLogFailedData);
+    FormData fdSuppressLogFailedData = new FormData();
+    fdSuppressLogFailedData.left = new FormAttachment(middle, 0);
+    fdSuppressLogFailedData.right = new FormAttachment(100, 0);
+    fdSuppressLogFailedData.top = new FormAttachment(wConcatErrors, margin);
+    wSuppressLogFailedData.setLayoutData(fdSuppressLogFailedData);
+
+    // Optionally suppress the log line the engine writes for every rejected row
+    //
+    wSuppressErrorLog = new Button(shell, SWT.CHECK);
+    wSuppressErrorLog.setText(
+        BaseMessages.getString(PKG, "ValidatorDialog.SuppressErrorLog.Label"));
+    wSuppressErrorLog.setToolTipText(
+        BaseMessages.getString(PKG, "ValidatorDialog.SuppressErrorLog.Tooltip"));
+    PropsUi.setLook(wSuppressErrorLog);
+    FormData fdSuppressErrorLog = new FormData();
+    fdSuppressErrorLog.left = new FormAttachment(middle, 0);
+    fdSuppressErrorLog.right = new FormAttachment(100, 0);
+    fdSuppressErrorLog.top = new FormAttachment(wSuppressLogFailedData, margin);
+    wSuppressErrorLog.setLayoutData(fdSuppressErrorLog);
+
     // Create a scrolled composite on the right side...
     //
     ScrolledComposite wSComp = new ScrolledComposite(shell, SWT.H_SCROLL | SWT.V_SCROLL);
     PropsUi.setLook(wSComp);
     wSComp.setLayout(new FillLayout());
     FormData fdComp = new FormData();
-    fdComp.left = new FormAttachment(middle / 2, 0);
-    fdComp.top = new FormAttachment(wConcatSeparator, margin);
-    fdComp.right = new FormAttachment(100, 0);
-    fdComp.bottom = new FormAttachment(wOk, -margin * 2);
+    fdComp.left = new FormAttachment(middle / 2, margin);
+    fdComp.top = new FormAttachment(wSuppressErrorLog, margin);
+    fdComp.right = new FormAttachment(100, -margin);
+    fdComp.bottom = new FormAttachment(wOk, -margin);
+    // Limit viewport size so the dialog opens at a reasonable size; content scrolls inside.
+    fdComp.width = 550;
+    fdComp.height = 450;
     wSComp.setLayoutData(fdComp);
 
     Composite wComp = new Composite(wSComp, SWT.BORDER);
@@ -378,13 +374,13 @@ public class ValidatorDialog extends BaseTransformDialog {
     PropsUi.setLook(wgType);
     wgType.setText(BaseMessages.getString(PKG, "ValidatorDialog.TypeGroup.Label"));
     FormLayout typeGroupLayout = new FormLayout();
-    typeGroupLayout.marginHeight = Const.FORM_MARGIN;
-    typeGroupLayout.marginWidth = Const.FORM_MARGIN;
+    typeGroupLayout.marginHeight = PropsUi.getFormMargin();
+    typeGroupLayout.marginWidth = PropsUi.getFormMargin();
     wgType.setLayout(typeGroupLayout);
     FormData fdType = new FormData();
     fdType.left = new FormAttachment(0, 0);
     fdType.right = new FormAttachment(100, 0);
-    fdType.top = new FormAttachment(wErrorDescription, margin * 2);
+    fdType.top = new FormAttachment(wErrorDescription, margin);
     wgType.setLayoutData(fdType);
 
     // Check for data type correctness?
@@ -854,12 +850,13 @@ public class ValidatorDialog extends BaseTransformDialog {
     wSComp.setContent(wComp);
     wSComp.setExpandHorizontal(true);
     wSComp.setExpandVertical(true);
+    // Use full content size so scrollbars appear and the entire form is reachable.
     wSComp.setMinWidth(bounds.width);
     wSComp.setMinHeight(bounds.height);
 
     getData();
     input.setChanged(changed);
-
+    focusTransformName();
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 
     return transformName;
@@ -926,10 +923,6 @@ public class ValidatorDialog extends BaseTransformDialog {
       selectedField.setSourcingField(wSourceField.getText());
       selectedField.setSourcingTransformName(wSourceTransform.getText());
       selectedField.setSourcingTransform(pipelineMeta.findTransform(wSourceTransform.getText()));
-
-      // Save the old info in the map
-      //
-      // selectionList.add(selectedField);
     }
   }
 
@@ -1077,11 +1070,13 @@ public class ValidatorDialog extends BaseTransformDialog {
     wValidateAll.setSelection(input.isValidatingAll());
     wConcatErrors.setSelection(input.isConcatenatingErrors());
     wConcatSeparator.setText(Const.NVL(input.getConcatenationSeparator(), ""));
+    wSuppressLogFailedData.setSelection(input.isSuppressingLogFailedData());
+    wSuppressErrorLog.setSelection(input.isSuppressingErrorLog());
 
     // Select the first available field...
     //
     if (!input.getValidations().isEmpty()) {
-      Validation validatorField = input.getValidations().get(0);
+      Validation validatorField = input.getValidations().getFirst();
       String description = validatorField.getName();
       int index = wValidationsList.indexOf(description);
       if (index >= 0) {
@@ -1091,9 +1086,6 @@ public class ValidatorDialog extends BaseTransformDialog {
     }
 
     setFlags();
-
-    wTransformName.selectAll();
-    wTransformName.setFocus();
   }
 
   private void refreshValidationsList() {
@@ -1121,6 +1113,8 @@ public class ValidatorDialog extends BaseTransformDialog {
     input.setValidatingAll(wValidateAll.getSelection());
     input.setConcatenatingErrors(wConcatErrors.getSelection());
     input.setConcatenationSeparator(wConcatSeparator.getText());
+    input.setSuppressingLogFailedData(wSuppressLogFailedData.getSelection());
+    input.setSuppressingErrorLog(wSuppressErrorLog.getSelection());
 
     input.setValidations(selectionList);
 
@@ -1205,17 +1199,37 @@ public class ValidatorDialog extends BaseTransformDialog {
 
   /** Clear the validation rules for a certain field. */
   private void clearValidation() {
-
     int index = wValidationsList.getSelectionIndex();
-    if (index >= 0) {
-      selectionList.remove(index);
-      selectedField = null;
-      wValidationsList.remove(index);
-      enableFields();
-
-      if (!selectionList.isEmpty()) {
-        wValidationsList.select(selectionList.size() - 1);
-      }
+    if (index < 0) {
+      return;
     }
+
+    selectionList.remove(index);
+    selectedField = null;
+    wValidationsList.remove(index);
+
+    if (selectionList.isEmpty()) {
+      enableFields();
+      return;
+    }
+
+    // Keep showing the nearest remaining rule (same index, or previous when deleting the last)
+    int newIndex = indexAfterRemoval(index, selectionList.size());
+    wValidationsList.select(newIndex);
+    showSelectedValidatorField(wValidationsList.getItem(newIndex));
+  }
+
+  /**
+   * Calculate which list index to select after removing an item.
+   *
+   * @param removedIndex the index that was removed
+   * @param remainingCount the number of items left after removal
+   * @return the index to select, or -1 when nothing remains
+   */
+  static int indexAfterRemoval(int removedIndex, int remainingCount) {
+    if (remainingCount <= 0) {
+      return -1;
+    }
+    return Math.min(removedIndex, remainingCount - 1);
   }
 }

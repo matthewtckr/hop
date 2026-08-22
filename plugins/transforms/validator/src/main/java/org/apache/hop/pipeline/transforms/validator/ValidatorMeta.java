@@ -20,6 +20,9 @@ package org.apache.hop.pipeline.transforms.validator;
 
 import java.util.ArrayList;
 import java.util.List;
+import lombok.Getter;
+import lombok.Setter;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
@@ -38,13 +41,16 @@ import org.apache.hop.pipeline.transform.stream.IStream;
 import org.apache.hop.pipeline.transform.stream.Stream;
 import org.apache.hop.pipeline.transform.stream.StreamIcon;
 
+@Getter
+@Setter
 @Transform(
     id = "Validator",
     name = "i18n::ValidatorDialog.Transform.Name",
     description = "i18n::ValidatorDialog.Transform.Description",
     keywords = "i18n::ValidatorDialog.Transform.KeyWords",
     image = "validator.svg",
-    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Transform",
+    categoryDescription =
+        "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Validation",
     documentationUrl = "/pipeline/transforms/validator.html")
 public class ValidatorMeta extends BaseTransformMeta<Validator, ValidatorData> {
   private static final Class<?> PKG = ValidatorMeta.class;
@@ -75,21 +81,39 @@ public class ValidatorMeta extends BaseTransformMeta<Validator, ValidatorData> {
       injectionKeyDescription = "Validator.Injection.CONCATENATION_SEPARATOR")
   private String concatenationSeparator;
 
+  /**
+   * When true, failed field/row values are omitted from validation error messages. Errors are still
+   * logged and error rows are still produced for error handling. Defaults to false so existing
+   * pipelines keep including failed values in messages.
+   */
+  @HopMetadataProperty(
+      key = "suppress_log_failed_data",
+      injectionKey = "SUPPRESS_LOG_FAILED_DATA",
+      injectionKeyDescription = "Validator.Injection.SUPPRESS_LOG_FAILED_DATA")
+  private boolean suppressingLogFailedData;
+
+  /**
+   * When true, no log line is written for every rejected row. Error rows are still sent to the
+   * error handling hop. Defaults to false so existing pipelines keep logging every rejected row.
+   */
+  @HopMetadataProperty(
+      key = "suppress_error_log",
+      injectionKey = "SUPPRESS_ERROR_LOG",
+      injectionKeyDescription = "Validator.Injection.SUPPRESS_ERROR_LOG")
+  private boolean suppressingErrorLog;
+
+  /** The standard new validation stream */
+  @Getter @Setter
+  private static IStream newValidation =
+      new Stream(
+          IStream.StreamType.INFO,
+          null,
+          BaseMessages.getString(PKG, "ValidatorMeta.NewValidation.Description"),
+          StreamIcon.INFO,
+          null);
+
   public ValidatorMeta() {
     this.validations = new ArrayList<>();
-  }
-
-  public ValidatorMeta(ValidatorMeta m) {
-    this();
-    m.validations.forEach(v -> this.validations.add(new Validation(v)));
-    this.validatingAll = m.validatingAll;
-    this.concatenatingErrors = m.concatenatingErrors;
-    this.concatenationSeparator = m.concatenationSeparator;
-  }
-
-  @Override
-  public ValidatorMeta clone() {
-    return new ValidatorMeta(this);
   }
 
   @Override
@@ -137,6 +161,44 @@ public class ValidatorMeta extends BaseTransformMeta<Validator, ValidatorData> {
               transformMeta);
       remarks.add(cr);
     }
+
+    checkInfoTransformsReachEveryCopy(remarks, pipelineMeta, transformMeta, variables);
+  }
+
+  /**
+   * Every copy of this transform builds its own list of allowed values, so the transforms
+   * delivering those values have to copy their rows to all the copies instead of distributing them.
+   * Report that at design time as well, the transform refuses to start otherwise.
+   */
+  private void checkInfoTransformsReachEveryCopy(
+      List remarks, PipelineMeta pipelineMeta, TransformMeta transformMeta, IVariables variables) {
+    if (pipelineMeta == null
+        || transformMeta.isPartitioned()
+        || transformMeta.getCopies(variables) <= 1) {
+      return;
+    }
+
+    for (Validation validation : validations) {
+      if (!validation.isSourcingValues()
+          || StringUtils.isEmpty(validation.getSourcingTransformName())) {
+        continue;
+      }
+      TransformMeta sourceTransform =
+          pipelineMeta.findTransform(validation.getSourcingTransformName());
+      if (sourceTransform != null && sourceTransform.isDistributes()) {
+        remarks.add(
+            new CheckResult(
+                ICheckResult.TYPE_RESULT_ERROR,
+                BaseMessages.getString(
+                    PKG,
+                    "Validator.Exception.InfoTransformIsDistributing",
+                    sourceTransform.getName(),
+                    transformMeta.getName(),
+                    Integer.toString(transformMeta.getCopies(variables)),
+                    Const.NVL(validation.getName(), validation.getFieldName())),
+                transformMeta));
+      }
+    }
   }
 
   @Override
@@ -169,7 +231,7 @@ public class ValidatorMeta extends BaseTransformMeta<Validator, ValidatorData> {
   }
 
   @Override
-  public void searchInfoAndTargetTransforms(List transforms) {
+  public void searchInfoAndTargetTransforms(List<TransformMeta> transforms) {
     for (Validation validation : validations) {
       TransformMeta transformMeta =
           TransformMeta.findTransform(transforms, validation.getSourcingTransformName());
@@ -177,15 +239,6 @@ public class ValidatorMeta extends BaseTransformMeta<Validator, ValidatorData> {
     }
     resetTransformIoMeta();
   }
-
-  /** The standard new validation stream */
-  private static IStream newValidation =
-      new Stream(
-          IStream.StreamType.INFO,
-          null,
-          BaseMessages.getString(PKG, "ValidatorMeta.NewValidation.Description"),
-          StreamIcon.INFO,
-          null);
 
   @Override
   public void handleStreamSelection(IStream stream) {
@@ -210,95 +263,5 @@ public class ValidatorMeta extends BaseTransformMeta<Validator, ValidatorData> {
 
     // Force the IO to be recreated when it is next needed.
     resetTransformIoMeta();
-  }
-
-  /**
-   * Gets validations
-   *
-   * @return value of validations
-   */
-  public List<Validation> getValidations() {
-    return validations;
-  }
-
-  /**
-   * Sets validations
-   *
-   * @param validations value of validations
-   */
-  public void setValidations(List<Validation> validations) {
-    this.validations = validations;
-  }
-
-  /**
-   * Gets validatingAll
-   *
-   * @return value of validatingAll
-   */
-  public boolean isValidatingAll() {
-    return validatingAll;
-  }
-
-  /**
-   * Sets validatingAll
-   *
-   * @param validatingAll value of validatingAll
-   */
-  public void setValidatingAll(boolean validatingAll) {
-    this.validatingAll = validatingAll;
-  }
-
-  /**
-   * Gets concatenatingErrors
-   *
-   * @return value of concatenatingErrors
-   */
-  public boolean isConcatenatingErrors() {
-    return concatenatingErrors;
-  }
-
-  /**
-   * Sets concatenatingErrors
-   *
-   * @param concatenatingErrors value of concatenatingErrors
-   */
-  public void setConcatenatingErrors(boolean concatenatingErrors) {
-    this.concatenatingErrors = concatenatingErrors;
-  }
-
-  /**
-   * Gets concatenationSeparator
-   *
-   * @return value of concatenationSeparator
-   */
-  public String getConcatenationSeparator() {
-    return concatenationSeparator;
-  }
-
-  /**
-   * Sets concatenationSeparator
-   *
-   * @param concatenationSeparator value of concatenationSeparator
-   */
-  public void setConcatenationSeparator(String concatenationSeparator) {
-    this.concatenationSeparator = concatenationSeparator;
-  }
-
-  /**
-   * Gets newValidation
-   *
-   * @return value of newValidation
-   */
-  public static IStream getNewValidation() {
-    return newValidation;
-  }
-
-  /**
-   * Sets newValidation
-   *
-   * @param newValidation value of newValidation
-   */
-  public static void setNewValidation(IStream newValidation) {
-    ValidatorMeta.newValidation = newValidation;
   }
 }

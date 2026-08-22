@@ -52,8 +52,7 @@ public class MetadataEditorDialog extends Dialog implements IMetadataDialog {
   public String open() {
 
     Shell parent = getParent();
-    shell =
-        new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN | SWT.APPLICATION_MODAL);
+    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MAX | SWT.MIN | SWT.PRIMARY_MODAL);
     shell.setText(editor.getTitle());
     shell.setImage(editor.getTitleImage());
     FormLayout formLayout = new FormLayout();
@@ -80,6 +79,7 @@ public class MetadataEditorDialog extends Dialog implements IMetadataDialog {
     buttons.add(wCancel);
     BaseTransformDialog.positionBottomButtons(
         shell, buttons.toArray(new Button[0]), PropsUi.getMargin(), null);
+    shell.setDefaultButton(wOk);
 
     Button wHelp = editor.createHelpButton(shell);
     FormData fdHelp = new FormData();
@@ -103,6 +103,13 @@ public class MetadataEditorDialog extends Dialog implements IMetadataDialog {
 
     // Create editor controls
     editor.createControl(area);
+
+    shell.addListener(SWT.Activate, e -> editor.refreshOnDialogActivate());
+
+    BaseDialog.setDialogSubject(shell, editor.getMetadata());
+    BaseDialog.keepEnabledInReadOnly(wCancel);
+    // Also apply to the content area early so createControl-time enabled state is overridden
+    BaseDialog.applyReadOnlyIfNeeded(area, editor.getMetadata());
 
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 

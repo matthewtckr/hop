@@ -21,10 +21,13 @@ import java.io.InputStream;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.security.ProtectionDomain;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 public class HopURLClassLoader extends URLClassLoader {
 
   private String name;
+  private final ConcurrentHashMap<Class<?>, Object> cache = new ConcurrentHashMap<>();
 
   public HopURLClassLoader(URL[] url, ClassLoader classLoader) {
     super(url, classLoader);
@@ -35,9 +38,41 @@ public class HopURLClassLoader extends URLClassLoader {
     this.name = name;
   }
 
+  public <T> T get(final Class<T> key) {
+    return key.cast(cache.get(key));
+  }
+
+  public <T> T computeIfAbsent(final Class<T> key, Supplier<T> provider) {
+    return key.cast(cache.computeIfAbsent(key, k -> provider));
+  }
+
+  /**
+   * Public entry point to add a jar to this classloader at runtime, e.g. a JDBC driver downloaded
+   * while Hop is running. After this the classes in the jar become loadable without a restart.
+   *
+   * @param url the jar URL to add
+   */
+  public void addJar(URL url) {
+    addURL(url);
+  }
+
   @Override
   protected void addURL(URL url) {
     super.addURL(url);
+    // invalidate the cache since it is wrong if related to the classloader,
+    // do not lock since we assume addURL is called in a safe context
+    cache.values().stream()
+        .filter(AutoCloseable.class::isInstance)
+        .map(AutoCloseable.class::cast)
+        .forEach(
+            it -> {
+              try {
+                it.close();
+              } catch (final Exception e) {
+                // no-op
+              }
+            });
+    cache.clear();
   }
 
   @Override

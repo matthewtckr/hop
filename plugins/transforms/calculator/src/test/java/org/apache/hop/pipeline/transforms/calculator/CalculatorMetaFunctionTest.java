@@ -17,35 +17,37 @@
 
 package org.apache.hop.pipeline.transforms.calculator;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 
+import org.apache.hop.core.xml.XmlHandler;
 import org.apache.hop.metadata.serializer.xml.XmlMetadataUtil;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.w3c.dom.Node;
 
-public class CalculatorMetaFunctionTest {
+class CalculatorMetaFunctionTest {
 
   @Test
-  public void testEquals() {
+  void testEquals() {
     CalculatorMetaFunction meta1 = new CalculatorMetaFunction();
     CalculatorMetaFunction meta2 = (CalculatorMetaFunction) meta1.clone();
     assertNotSame(meta1, meta2);
 
     assertNotEquals(null, meta1);
-    assertNotEquals(meta1, new Object());
+    assertNotEquals(new Object(), meta1);
     assertEquals(meta1, meta2);
 
-    meta2.setCalcType(CalculatorMetaFunction.CalculationType.ADD_DAYS);
+    meta2.setCalcType(CalculationType.ADD_DAYS);
     assertNotEquals(meta1, meta2);
   }
 
   @Test
-  public void testXmlSerialization() throws Exception {
+  void testXmlSerialization() throws Exception {
     CalculatorMetaFunction function =
         new CalculatorMetaFunction(
             "copyA",
-            CalculatorMetaFunction.CalculationType.COPY_OF_FIELD,
+            CalculationType.COPY_OF_FIELD,
             "A",
             null,
             null,
@@ -58,21 +60,13 @@ public class CalculatorMetaFunctionTest {
             null,
             false);
     String xml = XmlMetadataUtil.serializeObjectToXml(function);
-    assertEquals(
-        "<calc_type>COPY_FIELD</calc_type>"
-            + System.lineSeparator()
-            + "<field_a>A</field_a>"
-            + System.lineSeparator()
-            + "<field_name>copyA</field_name>"
-            + System.lineSeparator()
-            + "<remove>N</remove>"
-            + System.lineSeparator()
-            + "<value_length>100</value_length>"
-            + System.lineSeparator()
-            + "<value_precision>-1</value_precision>"
-            + System.lineSeparator()
-            + "<value_type>String</value_type>"
-            + System.lineSeparator(),
-        xml);
+    Node node = XmlHandler.loadXmlString(XmlHandler.aroundTag("hop", xml), "hop");
+    assertEquals("COPY_FIELD", XmlHandler.getTagValue(node, "calc_type"));
+    assertEquals("A", XmlHandler.getTagValue(node, "field_a"));
+    assertEquals("copyA", XmlHandler.getTagValue(node, "field_name"));
+    assertEquals("N", XmlHandler.getTagValue(node, "remove"));
+    assertEquals("100", XmlHandler.getTagValue(node, "value_length"));
+    assertEquals("-1", XmlHandler.getTagValue(node, "value_precision"));
+    assertEquals("String", XmlHandler.getTagValue(node, "value_type"));
   }
 }

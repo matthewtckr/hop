@@ -46,7 +46,9 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     categoryDescription =
         "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Statistics",
     documentationUrl = "/pipeline/transforms/groupby.html",
-    keywords = "i18n::GroupByMeta.keyword")
+    keywords = "i18n::GroupByMeta.keyword",
+    // Must match SparkConst.PLUGIN_ID — do not import engines-spark from transform modules.
+    excludedEngines = {"SparkPipelineEngine"})
 public class GroupByMeta extends BaseTransformMeta<GroupBy, GroupByData> {
 
   private static final Class<?> PKG = GroupByMeta.class;
@@ -180,25 +182,6 @@ public class GroupByMeta extends BaseTransformMeta<GroupBy, GroupByData> {
   }
 
   @Override
-  public GroupByMeta clone() {
-    GroupByMeta groupByMeta = (GroupByMeta) super.clone();
-
-    List<GroupingField> groupingFieldsCopy = new ArrayList<>();
-    for (GroupingField item : groupingFields) {
-      groupingFieldsCopy.add(item.clone());
-    }
-    groupByMeta.setGroupingFields(groupingFieldsCopy);
-
-    List<Aggregation> aggsCopy = new ArrayList<>();
-    for (Aggregation aggregation : aggregations) {
-      aggsCopy.add(aggregation.clone());
-    }
-    groupByMeta.setAggregations(aggsCopy);
-
-    return groupByMeta;
-  }
-
-  @Override
   public void setDefault() {
     directory = "${java.io.tmpdir}";
     prefix = "grp";
@@ -225,8 +208,8 @@ public class GroupByMeta extends BaseTransformMeta<GroupBy, GroupByData> {
     if (!passAllRows) {
       // Add the grouping fields in the correct order...
       //
-      for (int i = 0; i < groupingFields.size(); i++) {
-        IValueMeta valueMeta = rowMeta.searchValueMeta(groupingFields.get(i).getName());
+      for (GroupingField groupingField : groupingFields) {
+        IValueMeta valueMeta = rowMeta.searchValueMeta(groupingField.getName());
         if (valueMeta != null) {
           fields.addValueMeta(valueMeta);
         }
@@ -274,6 +257,7 @@ public class GroupByMeta extends BaseTransformMeta<GroupBy, GroupByData> {
           case Aggregation.TYPE_GROUP_STANDARD_DEVIATION_SAMPLE:
           case Aggregation.TYPE_GROUP_PERCENTILE:
           case Aggregation.TYPE_GROUP_PERCENTILE_NEAREST_RANK:
+          case Aggregation.TYPE_GROUP_MOVING_AVERAGE:
             valueType = IValueMeta.TYPE_NUMBER;
             break;
           case Aggregation.TYPE_GROUP_CONCAT_STRING:
@@ -327,14 +311,12 @@ public class GroupByMeta extends BaseTransformMeta<GroupBy, GroupByData> {
       }
     }
 
-    if (passAllRows) {
+    if (passAllRows && addingLineNrInGroup && !Utils.isEmpty(lineNrInGroupField)) {
       // If we pass all rows, we can add a line nr in the group...
-      if (addingLineNrInGroup && !Utils.isEmpty(lineNrInGroupField)) {
-        IValueMeta lineNr = new ValueMetaInteger(lineNrInGroupField);
-        lineNr.setLength(IValueMeta.DEFAULT_INTEGER_LENGTH, 0);
-        lineNr.setOrigin(origin);
-        fields.addValueMeta(lineNr);
-      }
+      IValueMeta lineNr = new ValueMetaInteger(lineNrInGroupField);
+      lineNr.setLength(IValueMeta.DEFAULT_INTEGER_LENGTH, 0);
+      lineNr.setOrigin(origin);
+      fields.addValueMeta(lineNr);
     }
 
     // Now that we have all the fields we want, we should clear the original row and replace the

@@ -16,18 +16,37 @@
  */
 package org.apache.hop.databases.redshift;
 
+import java.util.List;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
+import org.apache.hop.core.database.types.DatabaseTypes;
+import org.apache.hop.core.database.types.IDatabaseTypeRule;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
+import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.databases.postgresql.PostgreSqlDatabaseMeta;
 
 @DatabaseMetaPlugin(
     type = "REDSHIFT",
     typeDescription = "Redshift",
     image = "redshift.svg",
-    documentationUrl = "/database/databases/redshift.html")
+    documentationUrl = "/database/databases/redshift.html",
+    classLoaderGroup = "redshift-db")
 @GuiPlugin(id = "GUI-RedshiftDatabaseMeta")
 public class RedshiftDatabaseMeta extends PostgreSqlDatabaseMeta {
+
+  private static final List<IDatabaseTypeRule> TYPE_RULES =
+      DatabaseTypes.rules()
+          // Redshift is Postgres derived but has neither JSONB nor INET: semi structured data
+          // goes in a SUPER, and an address is text like anything else.
+          .write(IValueMeta.TYPE_JSON)
+          .as("SUPER")
+          .build();
+
+  @Override
+  public List<IDatabaseTypeRule> getTypeRules() {
+    return TYPE_RULES;
+  }
 
   public RedshiftDatabaseMeta() {
     addExtraOption("REDSHIFT", "tcpKeepAlive", "true");
@@ -44,6 +63,19 @@ public class RedshiftDatabaseMeta extends PostgreSqlDatabaseMeta {
   @Override
   public String getDriverClass() {
     return "com.amazon.redshift.jdbc42.Driver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("com.amazon.redshift:redshift-jdbc42")
+        .defaultVersion("2.2.7")
+        .licenseCategory("A")
+        .licenseName("Apache-2.0")
+        .licenseUrl("https://github.com/aws/amazon-redshift-jdbc-driver/blob/master/LICENSE")
+        .vendor("Amazon Web Services")
+        .vendorUrl("https://docs.aws.amazon.com/redshift/latest/mgmt/jdbc20-download-driver.html")
+        .build();
   }
 
   @Override

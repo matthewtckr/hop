@@ -16,42 +16,56 @@
  */
 package org.apache.hop.history;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.history.local.LocalAuditManager;
-import org.junit.Ignore;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
-public class AuditManagerTest {
+class AuditManagerTest {
+  @TempDir Path testFolder;
 
-  @Rule public TemporaryFolder testFolder = new TemporaryFolder();
+  /**
+   * Reset the AuditManager singleton to a fresh LocalAuditManager pointed at a per-test temp
+   * folder, and ensure no leftover events from prior tests are visible.
+   */
+  @BeforeEach
+  void resetAuditManager() throws HopException {
+    AuditManager.getInstance()
+        .setActiveAuditManager(new LocalAuditManager(testFolder.toAbsolutePath().toString()));
+    AuditManager.clearEvents();
+  }
 
   @Test
-  public void testSingleton() {
+  void testSingleton() {
     AuditManager instance1 = AuditManager.getInstance();
     AuditManager instance2 = AuditManager.getInstance();
     assertEquals(instance1, instance2);
   }
 
   @Test
-  public void testHasAnActiveAuditManager() {
+  void testHasAnActiveAuditManager() {
     assertNotNull(AuditManager.getActive());
   }
 
   @Test
-  public void testRegisterEvent() throws HopException {
+  void testRegisterEvent() throws HopException {
     IAuditManager mockManager = Mockito.mock(IAuditManager.class);
     AuditManager.getInstance().setActiveAuditManager(mockManager);
     AuditManager.registerEvent("", "", "", "");
@@ -59,7 +73,7 @@ public class AuditManagerTest {
   }
 
   @Test
-  public void testEvents() throws HopException {
+  void testEvents() throws HopException {
     String group = "testEvents";
     IAuditManager mockManager = Mockito.mock(IAuditManager.class);
     AuditManager.getInstance().setActiveAuditManager(mockManager);
@@ -70,11 +84,11 @@ public class AuditManagerTest {
 
     when(mockManager.findEvents(group, "type1", false)).thenReturn(events);
     List<AuditEvent> allEvents = AuditManager.findEvents(group, "type1", "operation1", 10, false);
-    assertEquals("Not getting all events", 2, allEvents.size());
+    assertEquals(2, allEvents.size(), "Not getting all events");
   }
 
   @Test
-  public void testFindUniqueEvents() throws HopException {
+  void testFindUniqueEvents() throws HopException {
     String group = "testFindUniqueEvents";
     IAuditManager mockManager = Mockito.mock(IAuditManager.class);
     AuditManager.getInstance().setActiveAuditManager(mockManager);
@@ -85,45 +99,37 @@ public class AuditManagerTest {
 
     when(mockManager.findEvents(group, "type1", true)).thenReturn(events);
     List<AuditEvent> uniqueEvents = AuditManager.findEvents(group, "type1", "operation1", 10, true);
-    assertEquals("Not getting unique events", 2, uniqueEvents.size());
+    assertEquals(2, uniqueEvents.size(), "Not getting unique events");
   }
 
-  @Ignore(
-      "This test needs to be reviewed") // TODO Race condition with other test data, works fine when
-  // run stand-alone
   @Test
-  public void testFindAllEventsWithDefaultAuditManager() throws HopException {
-    AuditManager.getInstance()
-        .setActiveAuditManager(new LocalAuditManager(testFolder.getRoot().getAbsolutePath()));
+  void testFindAllEventsWithDefaultAuditManager() throws HopException {
     String group = "testFindAllEventsWithDefaultAuditManager";
-    AuditManager.clearEvents();
-    AuditManager.registerEvent(group, "type1", "name1", "operation1");
-    AuditManager.registerEvent(group, "type1", "name1", "operation1");
-    AuditManager.registerEvent(group, "type1", "name1", "operation1");
-    AuditManager.registerEvent(group, "type1", "name2", "operation1");
-    AuditManager.registerEvent(group, "type2", "name2", "operation1");
+    // LocalAuditManager stores events keyed by (timestamp-ms + operation), so events with the
+    // same name+operation registered within a single millisecond collide on disk. Use distinct
+    // operations so each register produces a separate file.
+    AuditManager.registerEvent(group, "type1", "name1", "operationA");
+    AuditManager.registerEvent(group, "type1", "name1", "operationB");
+    AuditManager.registerEvent(group, "type1", "name1", "operationC");
+    AuditManager.registerEvent(group, "type1", "name2", "operationD");
+    AuditManager.registerEvent(group, "type2", "name2", "operationE");
 
-    List<AuditEvent> allEvents = AuditManager.findEvents(group, "type1", "operation1", 10, false);
-    assertEquals("Not getting unique events", 4, allEvents.size());
-    AuditManager.clearEvents();
+    List<AuditEvent> allEvents = AuditManager.findEvents(group, "type1", null, 10, false);
+    assertEquals(4, allEvents.size(), "Not getting all events");
   }
 
   @Test
-  public void testFindUniqueEventsWithDefaultAuditManager() throws HopException {
-    AuditManager.getInstance()
-        .setActiveAuditManager(new LocalAuditManager(testFolder.getRoot().getAbsolutePath()));
+  void testFindUniqueEventsWithDefaultAuditManager() throws HopException {
     String group = "testFindUniqueEventsWithDefaultAuditManager";
-    AuditManager.clearEvents();
-    AuditManager.registerEvent(group, "type1", "name1", "operation1");
-    AuditManager.registerEvent(group, "type1", "name1", "operation1");
+    AuditManager.registerEvent(group, "type1", "name1", "operationA");
+    AuditManager.registerEvent(group, "type1", "name1", "operationB");
 
-    List<AuditEvent> uniqueEvents = AuditManager.findEvents(group, "type1", "operation1", 10, true);
-    assertEquals("Not getting unique events", 1, uniqueEvents.size());
-    AuditManager.clearEvents();
+    List<AuditEvent> uniqueEvents = AuditManager.findEvents(group, "type1", null, 10, true);
+    assertEquals(1, uniqueEvents.size(), "Not getting unique events");
   }
 
   @Test
-  public void testFindMaxEvents() throws HopException {
+  void testFindMaxEvents() throws HopException {
     String group = "testFindMaxEvents";
     IAuditManager mockManager = Mockito.mock(IAuditManager.class);
     AuditManager.getInstance().setActiveAuditManager(mockManager);
@@ -135,34 +141,71 @@ public class AuditManagerTest {
     events.add(new AuditEvent(group, "type1", "name4", "operation1", new Date()));
     when(mockManager.findEvents(group, "type1", false)).thenReturn(events);
     List<AuditEvent> maxEvents = AuditManager.findEvents(group, "type1", "operation1", 2, false);
-    assertEquals("Not getting unique events", 2, maxEvents.size());
+    assertEquals(2, maxEvents.size(), "Not getting unique events");
   }
 
-  // Figure out why this sometimes fails in windows and to a lesser extent Linux.
-  // It's likely an initialization issue which occurs for this testing scenario.
-  //
-  @Ignore("This test needs to be reviewed")
-  public void testClearEvents() throws HopException {
-    AuditManager.getInstance()
-        .setActiveAuditManager(new LocalAuditManager(testFolder.getRoot().getAbsolutePath()));
+  @Test
+  void testClearEvents() throws HopException {
+    String group = "testClearEvents";
+    // Use distinct operations so each register produces a separate on-disk file (see comment on
+    // testFindAllEventsWithDefaultAuditManager).
+    AuditManager.registerEvent(group, "type1", "name1", "operationA");
+    AuditManager.registerEvent(group, "type1", "name1", "operationB");
+    assertEquals(
+        2,
+        AuditManager.findEvents(group, "type1", null, 10, false).size(),
+        "Problem in registering events");
 
-    // Repeat the test 100 times.
-    //
-    for (int i = 0; i < 100; i++) {
-      AuditManager.getActive().clearEvents();
+    AuditManager.clearEvents();
+    assertEquals(
+        0,
+        AuditManager.findEvents(group, "type1", null, 10, false).size(),
+        "Problem in clearing events");
+  }
 
-      String group = "testClearEvents";
-      AuditManager.registerEvent(group, "type1", "name1", "operation1");
-      AuditManager.registerEvent(group, "type1", "name1", "operation1");
-      assertEquals(
-          "Problem in registering event",
-          2,
-          AuditManager.findEvents(group, "type1", "operation1", 10, false).size());
-      AuditManager.clearEvents();
-      assertEquals(
-          "Problem in clearning event",
-          0,
-          AuditManager.findEvents(group, "type1", "operation1", 10, false).size());
-    }
+  @Test
+  void testClearStates() throws HopException {
+    String group = "hop-gui";
+    String type = "shells";
+    Map<String, Object> stateProperties = new HashMap<>();
+    stateProperties.put("x", 100);
+    stateProperties.put("y", 200);
+    AuditManager.storeState(
+        org.apache.hop.core.logging.LogChannel.GENERAL, group, type, "TestDialog", stateProperties);
+
+    AuditStateMap stateMap = AuditManager.getActive().loadAuditStateMap(group, type);
+    assertEquals(1, stateMap.getNameStateMap().size(), "State should be stored");
+
+    AuditManager.clearStates(group, type);
+
+    stateMap = AuditManager.getActive().loadAuditStateMap(group, type);
+    assertTrue(stateMap.getNameStateMap().isEmpty(), "State should be cleared");
+  }
+
+  @Test
+  void testRemoveState() throws HopException {
+    String group = "hop-gui";
+    String type = "table-view";
+
+    Map<String, Object> first = new HashMap<>();
+    first.put("columns", List.of("id", "name"));
+    AuditManager.storeState(
+        org.apache.hop.core.logging.LogChannel.GENERAL, group, type, "Customer keys", first);
+
+    Map<String, Object> second = new HashMap<>();
+    second.put("columns", List.of("order_id"));
+    AuditManager.storeState(
+        org.apache.hop.core.logging.LogChannel.GENERAL, group, type, "Order dates", second);
+
+    AuditStateMap stateMap = AuditManager.getActive().loadAuditStateMap(group, type);
+    assertEquals(2, stateMap.getNameStateMap().size(), "Both views should be stored");
+
+    assertNotNull(stateMap.remove("Customer keys"));
+    AuditManager.getActive().saveAuditStateMap(group, type, stateMap);
+
+    stateMap = AuditManager.getActive().loadAuditStateMap(group, type);
+    assertNull(stateMap.get("Customer keys"), "Removed view should be gone");
+    assertNotNull(stateMap.get("Order dates"), "The other view should remain");
+    assertEquals(1, stateMap.getNameStateMap().size());
   }
 }

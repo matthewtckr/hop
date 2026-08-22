@@ -70,16 +70,12 @@ public class ActionCheckFilesLocked extends ActionBase implements Cloneable, IAc
     this("");
   }
 
-  @Override
-  public ActionCheckFilesLocked clone() {
-    return new ActionCheckFilesLocked(this);
-  }
-
-  public ActionCheckFilesLocked(ActionCheckFilesLocked a) {
-    this();
-    this.argFromPrevious = a.argFromPrevious;
-    this.includeSubfolders = a.includeSubfolders;
-    for (CheckedFile checkedFile : a.checkedFiles) {
+  public ActionCheckFilesLocked(ActionCheckFilesLocked other) {
+    super(other.getName(), other.getDescription(), other.getPluginId());
+    this.checkedFiles = new ArrayList<>();
+    this.argFromPrevious = other.argFromPrevious;
+    this.includeSubfolders = other.includeSubfolders;
+    for (CheckedFile checkedFile : other.checkedFiles) {
       this.checkedFiles.add(new CheckedFile(checkedFile));
     }
   }
@@ -114,9 +110,11 @@ public class ActionCheckFilesLocked extends ActionBase implements Cloneable, IAc
       } else if (!checkedFiles.isEmpty()) {
         oneFileLocked = isOneSpecifiedFileLocked();
       } else {
-        logBasic(
-            "This action didn't execute any locking checks "
-                + "as there were no lines to check and no arguments provided.");
+        if (isBasic()) {
+          logBasic(
+              "This action didn't execute any locking checks "
+                  + "as there were no lines to check and no arguments provided.");
+        }
       }
 
       if (oneFileLocked) {
@@ -212,8 +210,11 @@ public class ActionCheckFilesLocked extends ActionBase implements Cloneable, IAc
         locked = checkFilesLocked(files);
       } else {
         // We can not find thsi file
-        logBasic(
-            BaseMessages.getString(PKG, "ActionCheckFilesLocked.FileNotExist", realFileFolderName));
+        if (isBasic()) {
+          logBasic(
+              BaseMessages.getString(
+                  PKG, "ActionCheckFilesLocked.FileNotExist", realFileFolderName));
+        }
       }
     } catch (Exception e) {
       logError(

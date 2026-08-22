@@ -23,23 +23,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
-import org.apache.commons.lang.builder.EqualsBuilder;
+import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.plugins.PluginRegistry;
 import org.apache.hop.core.row.value.ValueMetaFactory;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.transform.ITransformMeta;
 import org.apache.hop.pipeline.transforms.loadsave.LoadSaveTester;
 import org.apache.hop.pipeline.transforms.loadsave.initializer.IInitializer;
 import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidator;
 import org.apache.hop.pipeline.transforms.loadsave.validator.ListLoadSaveValidator;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class RowGeneratorMetaTest implements IInitializer<ITransformMeta> {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+class RowGeneratorMetaTest implements IInitializer<ITransformMeta> {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
   private final String launchVariable = "${ROW_LIMIT}";
 
@@ -47,8 +48,8 @@ public class RowGeneratorMetaTest implements IInitializer<ITransformMeta> {
   private LoadSaveTester<?> loadSaveTester;
   private Class<RowGeneratorMeta> testMetaClass = RowGeneratorMeta.class;
 
-  @Before
-  public void setUpLoadSave() throws Exception {
+  @BeforeEach
+  void setUpLoadSave() throws Exception {
     HopEnvironment.init();
     PluginRegistry.init();
     List<String> attributes =
@@ -56,7 +57,7 @@ public class RowGeneratorMetaTest implements IInitializer<ITransformMeta> {
             "neverEnding", "intervalInMs", "rowTimeField", "lastTimeField", "rowLimit", "fields");
 
     Map<String, String> getterMap =
-        new HashMap<String, String>() {
+        new HashMap<>() {
           {
             put("neverEnding", "isNeverEnding");
             put("intervalInMs", "getIntervalInMs");
@@ -66,7 +67,7 @@ public class RowGeneratorMetaTest implements IInitializer<ITransformMeta> {
           }
         };
     Map<String, String> setterMap =
-        new HashMap<String, String>() {
+        new HashMap<>() {
           {
             put("neverEnding", "setNeverEnding");
             put("intervalInMs", "setIntervalInMs");
@@ -112,7 +113,7 @@ public class RowGeneratorMetaTest implements IInitializer<ITransformMeta> {
   }
 
   @Test
-  public void testSerialization() throws HopException {
+  void testSerialization() throws HopException {
     loadSaveTester.testSerialization();
   }
 

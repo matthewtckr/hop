@@ -17,30 +17,27 @@
 
 package org.apache.hop.avro.transforms.avroinput;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import org.apache.hop.core.Const;
 import org.apache.hop.core.xml.XmlHandler;
 import org.apache.hop.pipeline.transform.TransformMeta;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.w3c.dom.Node;
 
-public class AvroInputMetaTest {
+class AvroInputMetaTest {
 
   @Test
-  public void testGetLoadXml() throws Exception {
+  void testGetLoadXml() throws Exception {
 
     AvroFileInputMeta meta = new AvroFileInputMeta();
     meta.setOutputFieldName("avro");
     meta.setDataFilenameField("filename");
 
     String xml = meta.getXml();
-    assertEquals(
-        "<data_filename_field>filename</data_filename_field>"
-            + Const.CR
-            + "<output_field>avro</output_field>"
-            + Const.CR,
-        xml);
+
+    Node node = XmlHandler.loadXmlString(XmlHandler.aroundTag("snippet", xml), "snippet");
+    assertEquals("filename", XmlHandler.getTagValue(node, "data_filename_field"));
+    assertEquals("avro", XmlHandler.getTagValue(node, "output_field"));
 
     String transformXml =
         XmlHandler.openTag(TransformMeta.XML_TAG)

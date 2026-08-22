@@ -17,26 +17,30 @@
 
 package org.apache.hop.pipeline.transforms.csvinput;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import org.apache.hop.core.exception.HopTransformException;
-import org.apache.hop.core.file.TextFileInputField;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class CsvInputContentParsingTest extends BaseCsvParsingTest {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+class CsvInputContentParsingTest extends BaseCsvParsingTest {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
   @Test
-  public void testDefaultOptions() throws Exception {
+  void testDefaultOptions() throws Exception {
     init("default.csv");
 
     setFields(
-        new TextFileInputField("Field 1", -1, -1),
-        new TextFileInputField("Field 2", -1, -1),
-        new TextFileInputField("Field 3", -1, -1));
+        new CsvInputField("Field 1", -1, -1),
+        new CsvInputField("Field 2", -1, -1),
+        new CsvInputField("Field 3", -1, -1));
 
     process();
 
@@ -44,13 +48,13 @@ public class CsvInputContentParsingTest extends BaseCsvParsingTest {
   }
 
   @Test
-  public void testColumnNameWithSpaces() throws Exception {
+  void testColumnNameWithSpaces() throws Exception {
     init("column_name_with_spaces.csv");
 
     setFields(
-        new TextFileInputField("Field 1", -1, -1),
-        new TextFileInputField("Field 2", -1, -1),
-        new TextFileInputField("Field 3", -1, -1));
+        new CsvInputField("Field 1", -1, -1),
+        new CsvInputField("Field 2", -1, -1),
+        new CsvInputField("Field 3", -1, -1));
 
     process();
 
@@ -58,14 +62,14 @@ public class CsvInputContentParsingTest extends BaseCsvParsingTest {
   }
 
   @Test
-  public void testSemicolonOptions() throws Exception {
+  void testSemicolonOptions() throws Exception {
     meta.setDelimiter(";");
     init("semicolon.csv");
 
     setFields(
-        new TextFileInputField("Field 1", -1, -1),
-        new TextFileInputField("Field 2", -1, -1),
-        new TextFileInputField("Field 3", -1, -1));
+        new CsvInputField("Field 1", -1, -1),
+        new CsvInputField("Field 2", -1, -1),
+        new CsvInputField("Field 3", -1, -1));
 
     process();
 
@@ -79,14 +83,14 @@ public class CsvInputContentParsingTest extends BaseCsvParsingTest {
   }
 
   @Test
-  public void testMultiCharDelimOptions() throws Exception {
+  void testMultiCharDelimOptions() throws Exception {
     meta.setDelimiter("|||");
     init("multi_delim.csv");
 
     setFields(
-        new TextFileInputField("Field 1", -1, -1),
-        new TextFileInputField("Field 2", -1, -1),
-        new TextFileInputField("Field 3", -1, -1));
+        new CsvInputField("Field 1", -1, -1),
+        new CsvInputField("Field 2", -1, -1),
+        new CsvInputField("Field 3", -1, -1));
 
     process();
 
@@ -100,7 +104,7 @@ public class CsvInputContentParsingTest extends BaseCsvParsingTest {
   }
 
   @Test
-  public void testMixFileFormat() throws Exception {
+  void testMixFileFormat() throws Exception {
     String data =
         "データ1,データ2,データ3,データ4\n"
             + "111,\"a\n"
@@ -116,15 +120,15 @@ public class CsvInputContentParsingTest extends BaseCsvParsingTest {
             + "\n"
             + "999,123,123,123,132,132,132,132,132\r";
 
-    String file = createTestFile("UTF-8", data).getAbsolutePath();
+    String file = createTestFile(StandardCharsets.UTF_8, data).getAbsolutePath();
     init(file, true);
 
     setFields(
-        new TextFileInputField("Col 1", -1, -1),
-        new TextFileInputField("Col 2", -1, -1),
-        new TextFileInputField("Col 3", -1, -1),
-        new TextFileInputField("Col 4", -1, -1),
-        new TextFileInputField("Col 5", -1, -1));
+        new CsvInputField("Col 1", -1, -1),
+        new CsvInputField("Col 2", -1, -1),
+        new CsvInputField("Col 3", -1, -1),
+        new CsvInputField("Col 4", -1, -1),
+        new CsvInputField("Col 5", -1, -1));
 
     process();
 
@@ -144,23 +148,23 @@ public class CsvInputContentParsingTest extends BaseCsvParsingTest {
         });
   }
 
-  @Test(expected = HopTransformException.class)
-  public void testNoHeaderOptions() throws Exception {
+  @Test
+  void testNoHeaderOptions() throws Exception {
     meta.setHeaderPresent(false);
     init("default.csv");
 
-    setFields(new TextFileInputField(), new TextFileInputField(), new TextFileInputField());
+    setFields(new CsvInputField(), new CsvInputField(), new CsvInputField());
 
     transform.setAllowEmptyFieldNamesAndTypes(false);
 
-    process();
+    assertThrows(HopTransformException.class, () -> process());
   }
 
-  File createTestFile(final String encoding, final String content) throws IOException {
+  File createTestFile(final Charset charset, final String content) throws IOException {
     File tempFile = File.createTempFile("PDI_tmp", ".csv");
     tempFile.deleteOnExit();
 
-    try (PrintWriter osw = new PrintWriter(tempFile, encoding)) {
+    try (PrintWriter osw = new PrintWriter(tempFile, charset)) {
       osw.write(content);
     }
 

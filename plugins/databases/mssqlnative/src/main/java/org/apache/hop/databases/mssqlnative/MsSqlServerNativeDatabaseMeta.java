@@ -23,6 +23,7 @@ import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.gui.plugin.GuiElementType;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.gui.plugin.GuiWidgetElement;
@@ -38,7 +39,8 @@ import org.eclipse.swt.widgets.Control;
     type = "MSSQLNATIVE",
     typeDescription = "MS SQL Server (Native)",
     image = "microsoft-sql.svg",
-    documentationUrl = "/database/databases/mssqlnative.html")
+    documentationUrl = "/database/databases/mssqlnative.html",
+    classLoaderGroup = "mssqlnative-db")
 @GuiPlugin(id = "GUI-MSSQLServerNativeDatabaseMeta")
 public class MsSqlServerNativeDatabaseMeta extends MsSqlServerDatabaseMeta
     implements IGuiPluginCompositeWidgetsListener {
@@ -93,7 +95,13 @@ public class MsSqlServerNativeDatabaseMeta extends MsSqlServerDatabaseMeta
     Button wIntegratedSecurity =
         (Button) compositeWidgets.getWidgetsMap().get(ID_INTEGRATED_SECURITY_WIDGET);
 
-    boolean enable = !wIntegratedSecurity.getSelection();
+    // The checkbox is absent when it is switched off in disabledGuiElements.xml. There is nothing
+    // to read the setting from then, so we go by what is on the metadata itself.
+    //
+    boolean enable =
+        wIntegratedSecurity == null
+            ? !isUsingIntegratedSecurity()
+            : !wIntegratedSecurity.getSelection();
     for (Control control : controls) {
       control.setEnabled(enable);
     }
@@ -118,6 +126,20 @@ public class MsSqlServerNativeDatabaseMeta extends MsSqlServerDatabaseMeta
   @Override
   public String getDriverClass() {
     return "com.microsoft.sqlserver.jdbc.SQLServerDriver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("com.microsoft.sqlserver:mssql-jdbc")
+        .defaultVersion("13.4.0.jre11")
+        .licenseCategory("A")
+        .licenseName("MIT")
+        .licenseUrl("https://github.com/microsoft/mssql-jdbc/blob/main/LICENSE")
+        .vendor("Microsoft")
+        .vendorUrl(
+            "https://learn.microsoft.com/sql/connect/jdbc/download-microsoft-jdbc-driver-for-sql-server")
+        .build();
   }
 
   @Override
@@ -188,17 +210,9 @@ public class MsSqlServerNativeDatabaseMeta extends MsSqlServerDatabaseMeta
   }
 
   @Override
-  public boolean isSupportsTimestampDataType() {
-    return true;
-  }
-
-  @Override
-  public boolean isSupportsBooleanDataType() {
-    return true;
-  }
-
-  @Override
   public void addDefaultOptions() {
     addExtraOption(getPluginId(), "encrypt", "false");
+    setSupportsTimestampDataType(true);
+    setSupportsBooleanDataType(true);
   }
 }

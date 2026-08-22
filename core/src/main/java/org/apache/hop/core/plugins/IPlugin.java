@@ -118,7 +118,7 @@ public interface IPlugin {
   /**
    * @param keywords keywords describing this plugin
    */
-  public void setKeywords(String[] keywords);
+  void setKeywords(String[] keywords);
 
   URL getPluginDirectory();
 
@@ -181,7 +181,71 @@ public interface IPlugin {
       Optional.ofNullable(fragment.getCasesUrl()).ifPresent(this::setCasesUrl);
       Optional.ofNullable(fragment.getForumUrl()).ifPresent(this::setForumUrl);
       Optional.ofNullable(fragment.getClassLoaderGroup()).ifPresent(this::setClassLoaderGroup);
+      String[] fragmentSupported = fragment.getSupportedEngines();
+      if (fragmentSupported != null && fragmentSupported.length > 0) {
+        this.setSupportedEngines(
+            EngineCompatibilityResolver.unionEngineIds(
+                this.getSupportedEngines(), fragmentSupported));
+      }
+      String[] fragmentExcluded = fragment.getExcludedEngines();
+      if (fragmentExcluded != null && fragmentExcluded.length > 0) {
+        this.setExcludedEngines(
+            EngineCompatibilityResolver.unionEngineIds(
+                this.getExcludedEngines(), fragmentExcluded));
+      }
     }
+  }
+
+  /**
+   * Engine plugin id patterns this transform/action is supported on. Default is empty (no opinion).
+   * Trailing wildcard supported: {@code "Beam*"}.
+   *
+   * <p>Default returns an empty array so existing external {@link IPlugin} implementations stay
+   * binary-compatible. Concrete plugins backed by {@code @Transform}/{@code @Action} annotations
+   * populate this from the annotation; compatibility fragments add to it via {@link #merge}.
+   */
+  default String[] getSupportedEngines() {
+    return new String[0];
+  }
+
+  /**
+   * Setter counterpart to {@link #getSupportedEngines()}. Default no-op so existing {@link IPlugin}
+   * implementations stay binary-compatible — concrete plugins ({@link Plugin}) override this to
+   * actually store the value. Only used by {@link #merge}.
+   */
+  default void setSupportedEngines(String[] supportedEngines) {
+    // intentional no-op default: external IPlugin implementers don't have to participate
+  }
+
+  /** Deny-list counterpart to {@link #getSupportedEngines()}. */
+  default String[] getExcludedEngines() {
+    return new String[0];
+  }
+
+  /** Setter counterpart to {@link #getExcludedEngines()}. Default no-op (see setter docs). */
+  default void setExcludedEngines(String[] excludedEngines) {
+    // intentional no-op default
+  }
+
+  /**
+   * English-locale aliases for this plugin's name, category and keywords. These let the context
+   * dialog match a transform/action by its original English term even when the UI runs in another
+   * language (issue #2633). Empty when the UI is already English (the localized values are the
+   * English ones) or for external implementations that don't participate.
+   *
+   * <p>Default returns an empty array so existing external {@link IPlugin} implementations stay
+   * binary-compatible.
+   */
+  default String[] getEnglishKeywords() {
+    return new String[0];
+  }
+
+  /**
+   * Setter counterpart to {@link #getEnglishKeywords()}. Default no-op so external {@link IPlugin}
+   * implementers don't have to participate — concrete plugins ({@link Plugin}) override this.
+   */
+  default void setEnglishKeywords(String[] englishKeywords) {
+    // intentional no-op default
   }
 
   /**

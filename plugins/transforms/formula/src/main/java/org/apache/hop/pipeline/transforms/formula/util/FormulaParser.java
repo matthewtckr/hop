@@ -17,52 +17,52 @@
 
 package org.apache.hop.pipeline.transforms.formula.util;
 
-import java.util.ArrayList;
+import static org.apache.hop.pipeline.transforms.formula.util.FormulaFieldsExtractor.getFormulaFieldList;
+
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.apache.hop.core.exception.HopValueException;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.IValueMeta;
 import org.apache.hop.core.variables.IVariables;
+import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.pipeline.transforms.formula.Formula;
 import org.apache.hop.pipeline.transforms.formula.FormulaMetaFunction;
-import org.apache.poi.hssf.usermodel.HSSFRichTextString;
+import org.apache.hop.pipeline.transforms.formula.FormulaPoi;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellValue;
-import org.apache.poi.ss.usermodel.FormulaEvaluator;
+import org.apache.poi.ss.usermodel.DateUtil;
 import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.util.CellReference;
 
 public class FormulaParser {
+  private static final Class<?> PKG = Formula.class; // for i18n purposes
 
   private FormulaMetaFunction formulaMetaFunction;
   private IRowMeta rowMeta;
-  private String[] fieldNames;
   private String formula;
   private List<String> formulaFieldList;
   private Object[] dataRow;
-  private Row sheetRow;
-  private FormulaEvaluator evaluator;
+  private FormulaPoi.Evaluator evaluator;
   private HashMap<String, String> replaceMap;
 
   public FormulaParser(
       FormulaMetaFunction formulaMetaFunction,
       IRowMeta rowMeta,
       Object[] dataRow,
-      Row sheetRow,
+      FormulaPoi poi,
       IVariables variables,
-      HashMap<String, String> replaceMap) {
+      HashMap<String, String> replaceMap,
+      List<String> formulaFieldList) {
     this.formulaMetaFunction = formulaMetaFunction;
     this.rowMeta = rowMeta;
     this.dataRow = dataRow;
-    this.sheetRow = sheetRow;
-    fieldNames = rowMeta.getFieldNames();
     this.replaceMap = replaceMap;
     formula = variables.resolve(formulaMetaFunction.getFormula());
-    evaluator = sheetRow.getSheet().getWorkbook().getCreationHelper().createFormulaEvaluator();
 
-    formulaFieldList = getFormulaFieldList(formula);
+    this.formulaFieldList = formulaFieldList;
 
     boolean getNewList = false;
     for (String formulaField : formulaFieldList) {
@@ -70,53 +70,64 @@ public class FormulaParser {
       Set<String> replaceKeys = replaceMap.keySet();
       if (replaceKeys.contains(formulaField)) {
         String realFieldName = replaceMap.get(formulaField);
-        formula = formula.replaceAll("\\[" + formulaField + "\\]", "\\[" + realFieldName + "\\]");
+        formula = formula.replace("[" + formulaField + "]", "[" + realFieldName + "]");
         getNewList = true;
       }
     }
 
     if (getNewList) {
-      formulaFieldList = getFormulaFieldList(formula);
+      this.formulaFieldList = getFormulaFieldList(variables.resolve(formula));
     }
-  }
-
-  private List<String> getFormulaFieldList(String formula) {
-    List<String> theFields = new ArrayList<>();
-    Pattern regex = Pattern.compile("\\[(.*?)\\]");
-    Matcher regexMatcher = regex.matcher(formula);
-
-    while (regexMatcher.find()) {
-      theFields.add(regexMatcher.group(1));
-    }
-    return theFields;
+    this.evaluator = poi.evaluator(formulaFieldList.size() + 1);
+    this.evaluator.evaluator().clearAllCachedResultValues();
   }
 
   public CellValue getFormulaValue() throws HopValueException {
     String parsedFormula = formula;
-    int fieldIndex = 65;
     int colIndex = 0;
+    Row row = evaluator.row();
+
+    // reset, something changed else reuse to leverage the formula parsing cache which does speed up
+    // a lot the runtime
+    if (row.getLastCellNum() > 0 && row.getLastCellNum() != formulaFieldList.size() + 1) {
+      if (evaluator.row() != null) {
+        evaluator.sheet().removeRow(evaluator.row());
+      }
+      row = evaluator.sheet().createRow(0);
+      evaluator.row(row);
+    }
+
     for (String formulaField : formulaFieldList) {
-      char s = (char) fieldIndex;
-      Cell cell = sheetRow.createCell(colIndex);
+
+      String s = CellReference.convertNumToColString(colIndex);
+      final Cell cell;
+      if (row.getLastCellNum() <= colIndex) {
+        cell = row.createCell(colIndex);
+      } else {
+        cell = row.getCell(colIndex);
+      }
 
       int fieldPosition = rowMeta.indexOfValue(formulaField);
 
-      parsedFormula = parsedFormula.replaceAll("\\[" + formulaField + "\\]", s + "1");
+      parsedFormula = parsedFormula.replace("[" + formulaField + "]", s + "1");
 
       IValueMeta fieldMeta = rowMeta.getValueMeta(fieldPosition);
       if (dataRow[fieldPosition] != null) {
-        if (fieldMeta.isBoolean()) {
+        // most common first to avoid a lot of "if" for nothing
+        if (fieldMeta.isString()) {
+          cell.setCellValue(rowMeta.getString(dataRow, fieldPosition));
+        } else if (fieldMeta.isBoolean()) {
           cell.setCellValue(rowMeta.getBoolean(dataRow, fieldPosition));
         } else if (fieldMeta.isBigNumber()) {
-          cell.setCellValue(new HSSFRichTextString(rowMeta.getString(dataRow, fieldPosition)));
+          cell.setCellValue(rowMeta.getNumber(dataRow, fieldPosition));
         } else if (fieldMeta.isDate()) {
-          cell.setCellValue(rowMeta.getDate(dataRow, fieldPosition));
+          Date date = rowMeta.getDate(dataRow, fieldPosition);
+          checkSupportedDate(fieldMeta, date);
+          cell.setCellValue(date);
         } else if (fieldMeta.isInteger()) {
           cell.setCellValue(rowMeta.getInteger(dataRow, fieldPosition));
         } else if (fieldMeta.isNumber()) {
           cell.setCellValue(rowMeta.getNumber(dataRow, fieldPosition));
-        } else if (fieldMeta.isString()) {
-          cell.setCellValue(rowMeta.getString(dataRow, fieldPosition));
         } else {
           cell.setCellValue(rowMeta.getString(dataRow, fieldPosition));
         }
@@ -128,13 +139,39 @@ public class FormulaParser {
         }
       }
 
-      fieldIndex++;
       colIndex++;
     }
 
-    Cell formulaCell = sheetRow.createCell(colIndex);
-    formulaCell.setCellFormula(parsedFormula);
+    final Cell formulaCell;
+    if (row.getLastCellNum() <= colIndex) {
+      formulaCell = row.createCell(colIndex);
+      formulaCell.setCellFormula(parsedFormula);
+    } else { // already created/parsed
+      formulaCell = row.getCell(colIndex);
+    }
 
-    return evaluator.evaluate(formulaCell);
+    return evaluator.evaluator().evaluate(formulaCell);
+  }
+
+  /**
+   * Formulas are evaluated as Excel date serial numbers, which start at 1899-12-31 (serial 0). POI
+   * silently maps anything older to the same BAD_DATE sentinel (-1), so every earlier date would
+   * collapse to one value and come out of the transform blank or, after date arithmetic, plain
+   * wrong. Report it instead of losing the value without a trace.
+   *
+   * @param fieldMeta the metadata of the date field being written to a cell
+   * @param date the value to write, may be null
+   * @throws HopValueException when the date can not be represented as an Excel date serial number
+   */
+  private void checkSupportedDate(IValueMeta fieldMeta, Date date) throws HopValueException {
+    if (date == null || DateUtil.getExcelDate(date) >= 0) {
+      return;
+    }
+    throw new HopValueException(
+        BaseMessages.getString(
+            PKG,
+            "Formula.Exception.DateBeforeExcelEpoch",
+            fieldMeta.getName(),
+            fieldMeta.getString(date)));
   }
 }

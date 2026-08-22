@@ -84,19 +84,6 @@ public class ActionAddResultFilenames extends ActionBase implements Cloneable, I
     this("");
   }
 
-  public ActionAddResultFilenames(ActionAddResultFilenames other) {
-    super(other.getName(), other.getDescription(), other.getPluginId());
-    this.argFromPrevious = other.argFromPrevious;
-    this.arguments = other.arguments;
-    this.deleteAllBefore = other.deleteAllBefore;
-    this.includeSubFolders = other.includeSubFolders;
-  }
-
-  @Override
-  public Object clone() {
-    return new ActionAddResultFilenames(this);
-  }
-
   @Override
   public Result execute(Result result, int nr) throws HopException {
     List<RowMetaAndData> rows = result.getRows();
@@ -119,14 +106,12 @@ public class ActionAddResultFilenames extends ActionBase implements Cloneable, I
       }
     }
 
-    if (argFromPrevious) {
-      if (isDetailed()) {
-        logDetailed(
-            BaseMessages.getString(
-                PKG,
-                "ActionAddResultFilenames.FoundPreviousRows",
-                String.valueOf((rows != null ? rows.size() : 0))));
-      }
+    if (argFromPrevious && isDetailed()) {
+      logDetailed(
+          BaseMessages.getString(
+              PKG,
+              "ActionAddResultFilenames.FoundPreviousRows",
+              String.valueOf((rows != null ? rows.size() : 0))));
     }
 
     if (argFromPrevious && rows != null) { // Copy the input row to the (command line) arguments
@@ -303,7 +288,7 @@ public class ActionAddResultFilenames extends ActionBase implements Cloneable, I
 
     @Override
     public boolean traverseDescendents(FileSelectInfo info) {
-      return true;
+      return info.getDepth() == 0 || includeSubFolders;
     }
   }
 

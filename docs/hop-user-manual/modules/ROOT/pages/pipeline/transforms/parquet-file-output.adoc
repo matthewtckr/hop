@@ -16,16 +16,16 @@ under the License.
 ////
 :documentationPath: /pipeline/transforms/
 :language: en_US
-:description: The Parquet File Output transform writes data into the Apache Parquet file format.
+:description: The Parquet file output transform writes data into the Apache Parquet file format.
 
-= image:transforms/icons/parquet_output.svg[Parquet File Output transform Icon, role="image-doc-icon"] Parquet File Output
+= image:transforms/icons/parquet_output.svg[Parquet file output transform Icon, role="image-doc-icon"] Parquet file output
 
 [%noheader,cols="3a,1a", role="table-no-borders" ]
 |===
 |
 == Description
 
-The Parquet File Output transform writes data into the Apache Parquet file format.
+The Parquet file output transform writes data into the Apache Parquet file format.
 
 For more information on this see: http://parquet.apache.org/[Apache Parquet].
 
@@ -34,9 +34,11 @@ For more information on this see: http://parquet.apache.org/[Apache Parquet].
 [%noheader,cols="2,1a",frame=none, role="table-supported-engines"]
 !===
 !Hop Engine! image:check_mark.svg[Supported, 24]
-!Spark! image:check_mark.svg[Supported, 24]
-!Flink! image:check_mark.svg[Supported, 24]
-!Dataflow! image:check_mark.svg[Supported, 24]
+!Single Threaded! image:check_mark.svg[Supported, 24]
+!Native Spark! image:check_mark.svg[Supported, 24]
+!Beam Spark! image:check_mark.svg[Supported, 24]
+!Beam Flink! image:check_mark.svg[Supported, 24]
+!Beam Dataflow! image:check_mark.svg[Supported, 24]
 !===
 |===
 
@@ -89,6 +91,11 @@ The copy number is formatted with mask `00`
 Specify a split size larger than 0 and this is then the number of rows per file.
 The file part (split) number will be included in the filename to make sure that the same file is not being overwritten.
 The split number is formatted with mask `0000`
+
+|Include compression codec before extension?
+|When enabled (the default for new transforms), the compression codec is placed before the file extension (for example `file.snappy.parquet`), which matches the naming used by Spark and other Parquet tools.
+When disabled, the compression codec is appended after the extension (for example `file.parquet.snappy`).
+Existing pipelines that do not have this option set keep the previous behavior.
 
 |Compression codec
 |Here you can indicate which compression codec you want to use.

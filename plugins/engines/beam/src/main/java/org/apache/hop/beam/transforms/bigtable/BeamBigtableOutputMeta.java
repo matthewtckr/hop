@@ -53,7 +53,8 @@ import org.json.simple.JSONObject;
     image = "beam-gcp-bigtable-output.svg",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.BigData",
     keywords = "i18n::BeamBigtableOutputMeta.keyword",
-    documentationUrl = "/pipeline/transforms/beambigtableoutput.html")
+    documentationUrl = "/pipeline/transforms/beambigtableoutput.html",
+    supportedEngines = {"Beam*"})
 public class BeamBigtableOutputMeta extends BaseTransformMeta<Dummy, DummyData>
     implements IBeamPipelineTransformHandler {
 
@@ -74,22 +75,6 @@ public class BeamBigtableOutputMeta extends BaseTransformMeta<Dummy, DummyData>
 
   public BeamBigtableOutputMeta() {
     columns = new ArrayList<>();
-  }
-
-  public BeamBigtableOutputMeta(BeamBigtableOutputMeta m) {
-    this();
-    this.projectId = m.projectId;
-    this.instanceId = m.instanceId;
-    this.tableId = m.tableId;
-    this.keyField = m.keyField;
-    for (BigtableColumn column : this.columns) {
-      this.columns.add(new BigtableColumn(column));
-    }
-  }
-
-  @Override
-  public BeamBigtableOutputMeta clone() {
-    return new BeamBigtableOutputMeta(this);
   }
 
   @Override

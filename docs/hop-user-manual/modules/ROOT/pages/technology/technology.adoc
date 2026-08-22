@@ -15,7 +15,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 ////
-:description: Hop integrates with tens if not hundreds of different technologies. The Azure, Apache Cassandra, Google and Neo4j platforms are supported at various points in Hop and are covered in their own section.
+:description: Hop integrates with tens if not hundreds of different technologies. A few are covered here.
 
 = Technology
 
@@ -25,9 +25,12 @@ It also provides starting points for you if you want to learn more about the tec
 
 The technologies supported by Hop currently include:
 
+* xref:technology/arrow/apache-arrow.adoc[Apache Arrow]
 * xref:technology/azure/index.adoc[Azure]
 * xref:technology/cassandra/index.adoc[Apache Cassandra]
 * xref:technology/google/index.adoc[Google]
 * xref:technology/memgraph/index.adoc[Memgraph]
 * xref:technology/neo4j/index.adoc[Neo4j]
 ** xref:technology/neo4j/working-with-neo4j-data.adoc[Working with Neo4j data]
+* xref:technology/openlineage/index.adoc[OpenLineage]
+* xref:technology/redis/index.adoc[Redis]

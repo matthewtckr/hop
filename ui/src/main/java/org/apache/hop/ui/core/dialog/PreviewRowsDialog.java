@@ -53,7 +53,11 @@ import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.TableItem;
 
-/** Displays an ArrayList of rows in a TableView. */
+/**
+ * Displays rows for transform preview: streaming updates, optional logging text, and actions such
+ * as "get more rows" or stop. For a static set of rows with a custom title and message (no preview
+ * actions), prefer {@link ShowRowsDialog}.
+ */
 public class PreviewRowsDialog {
   private static final Class<?> PKG = PreviewRowsDialog.class;
 
@@ -154,22 +158,31 @@ public class PreviewRowsDialog {
   }
 
   public void open() {
-    shell = new Shell(parentShell, style);
-    PropsUi props = PropsUi.getInstance();
-
-    PropsUi.setLook(shell);
-    shell.setImage(GuiResource.getInstance().getImageHopUi());
-
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = PropsUi.getFormMargin();
-    formLayout.marginHeight = PropsUi.getFormMargin();
-
     if (title == null) {
       title = BaseMessages.getString(PKG, "PreviewRowsDialog.Title");
     }
     if (message == null) {
       message = BaseMessages.getString(PKG, "PreviewRowsDialog.Header", transformName);
     }
+
+    // Empty static preview: show a single modal on the real parent. Parenting a message to the
+    // preview shell here caused odd modality (that shell is created but never opened).
+    if (!dynamic && Utils.isEmpty(buffer)) {
+      MessageBox mb =
+          new MessageBox(parentShell, SWT.OK | SWT.ICON_INFORMATION | SWT.APPLICATION_MODAL);
+      mb.setText(title);
+      mb.setMessage(BaseMessages.getString(PKG, "PreviewRowsDialog.NoRows.Message"));
+      mb.open();
+      return;
+    }
+
+    shell = new Shell(parentShell, style);
+    PropsUi.setLook(shell);
+    shell.setImage(GuiResource.getInstance().getImageHopUi());
+
+    FormLayout formLayout = new FormLayout();
+    formLayout.marginWidth = PropsUi.getFormMargin();
+    formLayout.marginHeight = PropsUi.getFormMargin();
 
     if (buffer != null) {
       message += " " + BaseMessages.getString(PKG, "PreviewRowsDialog.NrRows", "" + buffer.size());
@@ -219,14 +232,11 @@ public class PreviewRowsDialog {
     }
 
     // Position the buttons...
-    //
-    bottomButton = buttons.get(0);
+    bottomButton = buttons.getFirst();
     BaseTransformDialog.positionBottomButtons(
         shell, buttons.toArray(new Button[buttons.size()]), PropsUi.getMargin(), null);
 
-    if (addFields()) {
-      return;
-    }
+    addFields();
 
     KeyListener escapeListener =
         new KeyAdapter() {
@@ -275,21 +285,6 @@ public class PreviewRowsDialog {
       rowMeta.addValueMeta(new ValueMetaString("<waiting for rows>"));
       waitingForRows = true;
     }
-    if (!dynamic) {
-      // Mmm, if we don't get any rows in the buffer: show a dialog box.
-      if (Utils.isEmpty(buffer)) {
-        ShowMessageDialog dialog =
-            new ShowMessageDialog(
-                shell,
-                SWT.OK | SWT.ICON_WARNING,
-                BaseMessages.getString(PKG, "PreviewRowsDialog.NoRows.Text"),
-                BaseMessages.getString(PKG, "PreviewRowsDialog.NoRows.Message"));
-        dialog.open();
-        shell.dispose();
-        return true;
-      }
-    }
-
     ColumnInfo[] columns = new ColumnInfo[rowMeta.size()];
     for (int i = 0; i < rowMeta.size(); i++) {
       IValueMeta valueMeta = rowMeta.getValueMeta(i);
@@ -298,12 +293,19 @@ public class PreviewRowsDialog {
       columns[i].setToolTip(valueMeta.toStringMeta());
       columns[i].setValueMeta(valueMeta);
       columns[i].setImage(GuiResource.getInstance().getImage(valueMeta));
+      // A preview is a viewer: the cell may not be edited. The grid gives a read-only column a
+      // view-only inline editor with an expand icon, so the full value is still selectable in place
+      // and can be opened in the multi-line viewer.
+      columns[i].setReadOnly(true);
     }
 
     wFields =
         new TableView(
             variables, shell, SWT.BORDER | SWT.FULL_SELECTION | SWT.MULTI, columns, 0, null, props);
     wFields.setShowingBlueNullValues(true);
+    // Rows stream in and are appended in load order, so sorting them would fight with the rows
+    // still arriving. Keep the preview in load order.
+    wFields.setSortable(false);
 
     FormData fdFields = new FormData();
     fdFields.left = new FormAttachment(0, 0);
@@ -366,7 +368,7 @@ public class PreviewRowsDialog {
     String strNr;
     lineNr++;
     try {
-      strNr = wFields.getNumberColumn().getValueMeta().getString(Long.valueOf(lineNr));
+      strNr = wFields.getNumberColumn().getValueMeta().getString((long) lineNr);
     } catch (Exception e) {
       strNr = Integer.toString(lineNr);
     }
@@ -406,6 +408,8 @@ public class PreviewRowsDialog {
       }
 
       if (show != null) {
+        // Store the full value: the grid shortens long / multi-line text at paint time, so what is
+        // copied, exported or read back out of the table stays complete.
         item.setText(c + 1, show);
         item.setForeground(c + 1, GuiResource.getInstance().getColorBlack());
       } else {

@@ -23,12 +23,23 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      ssh:
+        condition: service_started
     links:
       - postgres
-      - mssql
       - mysql
-    volumes:
-      - ./resource/mssql/mssql_bulkload.csv:/tmp/mssql_bulkload.csv
+      - ssh
+    environment:
+      - SSH_TUNNEL_HOST=ssh
+      - SSH_TUNNEL_PORT=22
+      - SSH_TUNNEL_USER=hop
+      - SSH_TUNNEL_PASSWORD=hop_ssh_password
+      - HOP_DRIVERS_DOWNLOAD=mysql
+
+  ssh:
+    build:
+      context: ../../.
+      dockerfile: docker/integration-tests/ssh.Dockerfile
 
   postgres:
     image: postgres:latest
@@ -42,16 +53,9 @@ services:
       timeout: 10s
       retries: 6
       start_period: 120s
-
-  mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=StrongPassword123!
-    ports:
-      - "1433"
     volumes:
-      - ./resource/mssql/mssql_bulkload.csv:/tmp/mssql_bulkload.csv
+      # init scripts run automatically on first cluster init (read only)
+      - ./unit-test-db-startup.sql:/docker-entrypoint-initdb.d/01-extensions.sql:ro
 
   mysql:
     image: mysql:9.2.0

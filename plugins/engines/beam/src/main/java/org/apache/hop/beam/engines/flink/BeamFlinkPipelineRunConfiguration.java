@@ -21,7 +21,7 @@ import java.util.Arrays;
 import org.apache.beam.runners.flink.FlinkPipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.ExecutionMode;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.hop.beam.engines.BeamPipelineRunConfiguration;
@@ -214,6 +214,8 @@ public class BeamFlinkPipelineRunConfiguration extends BeamPipelineRunConfigurat
   public BeamFlinkPipelineRunConfiguration() {
     super();
     this.tempLocation = "file://" + System.getProperty("java.io.tmpdir");
+    // Batch pipelines can deadlock with Flink's default PIPELINED mode; see FLINK-10672.
+    this.flinkExecutionModeForBatch = ExecutionMode.BATCH_FORCED.name();
   }
 
   public BeamFlinkPipelineRunConfiguration(String flinkMaster, String flinkParallelism) {
@@ -365,7 +367,7 @@ public class BeamFlinkPipelineRunConfiguration extends BeamPipelineRunConfigurat
 
       // The maximum number of elements in a bundle.")
       if (StringUtils.isNotEmpty(getFlinkMaxBundleSize())) {
-        long value = Const.toLong(resolve(getFlinkMaxBundleSize()), -1L);
+        long value = Const.toLongExpanded(resolve(getFlinkMaxBundleSize()), -1L);
         if (value > 0) {
           options.setMaxBundleSize(value);
         }
@@ -375,7 +377,7 @@ public class BeamFlinkPipelineRunConfiguration extends BeamPipelineRunConfigurat
       if (StringUtils.isNotEmpty(getFlinkMaxBundleTimeMills())) {
         long value = Const.toLong(resolve(getFlinkMaxBundleTimeMills()), -1L);
         if (value > 0) {
-          options.setMaxBundleSize(value);
+          options.setMaxBundleTimeMills(value);
         }
       }
 
@@ -414,15 +416,16 @@ public class BeamFlinkPipelineRunConfiguration extends BeamPipelineRunConfigurat
       // org.apache.flink.api.common.ExecutionMode}.
       // Set this to BATCH_FORCED if pipelines get blocked, see
       // https://issues.apache.org/jira/browse/FLINK-10672")
-      if (StringUtils.isNotEmpty(getFlinkExecutionModeForBatch())) {
-        String modeString = resolve(getFlinkExecutionModeForBatch());
-        ExecutionMode mode = ExecutionMode.valueOf(modeString);
-        try {
-          options.setExecutionModeForBatch(modeString);
-        } catch (Exception e) {
-          throw new HopException(
-              "Unable to parse flink execution mode for batch '" + modeString + "'", e);
-        }
+      String batchModeString =
+          StringUtils.isNotEmpty(getFlinkExecutionModeForBatch())
+              ? resolve(getFlinkExecutionModeForBatch())
+              : ExecutionMode.BATCH_FORCED.name();
+      try {
+        ExecutionMode.valueOf(batchModeString);
+        options.setExecutionModeForBatch(batchModeString);
+      } catch (Exception e) {
+        throw new HopException(
+            "Unable to parse flink execution mode for batch '" + batchModeString + "'", e);
       }
 
       if (StringUtils.isNotEmpty(getFatJar())) {

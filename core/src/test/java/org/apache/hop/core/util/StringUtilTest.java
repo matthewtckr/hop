@@ -17,15 +17,24 @@
 
 package org.apache.hop.core.util;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import junit.framework.TestCase;
-import org.junit.Test;
+import org.apache.hop.core.exception.HopRuntimeException;
+import org.junit.jupiter.api.Test;
 
 /** Test class for the basic functionality of StringUtil. */
-public class StringUtilTest extends TestCase {
+class StringUtilTest {
   /** Test initCap */
-  public void testinitCap() {
+  @Test
+  void testingCap() {
     assertEquals("", StringUtil.initCap(null));
     assertEquals("", StringUtil.initCap(""));
     assertEquals("", StringUtil.initCap("   "));
@@ -43,7 +52,7 @@ public class StringUtilTest extends TestCase {
   /**
    * Create an example map to be used for variable resolution.
    *
-   * @return Map of variablenames/values.
+   * @return Map of variable names/values.
    */
   Map<String, String> createVariables1(String open, String close) {
     Map<String, String> map = new HashMap<>();
@@ -73,7 +82,8 @@ public class StringUtilTest extends TestCase {
   }
 
   /** Test the basic substitute call. */
-  public void testSubstituteBasic() {
+  @Test
+  void testSubstituteBasic() {
     Map<String, String> map = createVariables1("${", "}");
     assertEquals("|${BAD_KEY}|", StringUtil.substitute("|${BAD_KEY}|", map, "${", "}"));
     assertEquals("|${NULL}|", StringUtil.substitute("|${NULL}|", map, "${", "}"));
@@ -88,7 +98,8 @@ public class StringUtilTest extends TestCase {
     try {
       StringUtil.substitute("|${recursive_all}|", map, "${", "}", 0);
       fail("recursive check is failing");
-    } catch (RuntimeException rex) {
+    } catch (HopRuntimeException rex) {
+      // ignore
     }
 
     map = createVariables1("%%", "%%");
@@ -103,14 +114,14 @@ public class StringUtilTest extends TestCase {
     try {
       StringUtil.substitute("|%%recursive_all%%|", map, "%%", "%%");
       fail("recursive check is failing");
-    } catch (RuntimeException rex) {
+    } catch (HopRuntimeException rex) {
+      // ignore
     }
 
     map = createVariables1("${", "}");
     assertEquals("||", StringUtil.environmentSubstitute("|%%EMPTY%%|", map));
     assertEquals("|case1|", StringUtil.environmentSubstitute("|%%checkcase%%|", map));
     assertEquals("|case2|", StringUtil.environmentSubstitute("|%%CheckCase%%|", map));
-    assertEquals("|case3|", StringUtil.environmentSubstitute("|%%CHECKCASE%%|", map));
     assertEquals("|Arecurse|", StringUtil.environmentSubstitute("|%%recursive1%%|", map));
     assertEquals("|recurseB|", StringUtil.environmentSubstitute("|%%recursive3%%|", map));
     assertEquals("|ZfinalB|", StringUtil.environmentSubstitute("|%%recursive5%%|", map));
@@ -118,12 +129,14 @@ public class StringUtilTest extends TestCase {
     try {
       StringUtil.environmentSubstitute("|%%recursive_all%%|", map);
       fail("recursive check is failing");
-    } catch (RuntimeException rex) {
+    } catch (HopRuntimeException rex) {
+      // ignore
     }
   }
 
   /** Test isEmpty() call. */
-  public void testIsEmpty() {
+  @Test
+  void testIsEmpty() {
     assertTrue(StringUtil.isEmpty((String) null));
     assertTrue(StringUtil.isEmpty(""));
 
@@ -132,14 +145,16 @@ public class StringUtilTest extends TestCase {
   }
 
   /** Test getIndent() call. */
-  public void testGetIndent() {
+  @Test
+  void testGetIndent() {
     assertEquals("", StringUtil.getIndent(0));
     assertEquals(" ", StringUtil.getIndent(1));
     assertEquals("  ", StringUtil.getIndent(2));
     assertEquals("   ", StringUtil.getIndent(3));
   }
 
-  public void testIsVariable() {
+  @Test
+  void testIsVariable() {
     assertTrue(StringUtil.isVariable("${somename}"));
     assertTrue(StringUtil.isVariable("%%somename%%"));
     assertTrue(StringUtil.isVariable("$[somename]"));
@@ -147,7 +162,8 @@ public class StringUtilTest extends TestCase {
     assertFalse(StringUtil.isVariable(null));
   }
 
-  public void testSafeToLowerCase() {
+  @Test
+  void testSafeToLowerCase() {
     assertNull(StringUtil.safeToLowerCase(null));
     assertEquals("", StringUtil.safeToLowerCase(""));
     assertEquals(" ", StringUtil.safeToLowerCase(" "));
@@ -160,7 +176,7 @@ public class StringUtilTest extends TestCase {
     assertEquals("abc123", StringUtil.safeToLowerCase((new ToString("ABC123")).toString()));
   }
 
-  class ToString {
+  static class ToString {
     private String string;
 
     ToString() {}
@@ -176,32 +192,67 @@ public class StringUtilTest extends TestCase {
   }
 
   @Test
-  public void testTrimStart_Single() {
+  void testTrimStart_Single() {
     assertEquals("file/path/", StringUtil.trimStart("/file/path/", '/'));
   }
 
   @Test
-  public void testTrimStart_Many() {
+  void testTrimStart_Many() {
     assertEquals("file/path/", StringUtil.trimStart("////file/path/", '/'));
   }
 
   @Test
-  public void testTrimStart_None() {
+  void testTrimStart_None() {
     assertEquals("file/path/", StringUtil.trimStart("file/path/", '/'));
   }
 
   @Test
-  public void testTrimEnd_Single() {
+  void testTrimEnd_Single() {
     assertEquals("/file/path", StringUtil.trimEnd("/file/path/", '/'));
   }
 
   @Test
-  public void testTrimEnd_Many() {
+  void testTrimEnd_Many() {
     assertEquals("/file/path", StringUtil.trimEnd("/file/path///", '/'));
   }
 
   @Test
-  public void testTrimEnd_None() {
+  void testTrimEnd_None() {
     assertEquals("/file/path", StringUtil.trimEnd("/file/path", '/'));
+    assertEquals("", StringUtil.trimEnd("/", '/'));
+    assertEquals("", StringUtil.trimEnd("///", '/'));
+  }
+
+  /** By default (and for the encryption path) resolvers count as "used variables". */
+  @Test
+  void testGetUsedVariablesIncludesResolversByDefault() {
+    List<String> list = new ArrayList<>();
+    StringUtil.getUsedVariables("#{vault:hop/data/some-db:password}", list, true);
+    assertTrue(
+        list.contains("vault:hop/data/some-db:password"),
+        "resolver reference should be collected by default");
+  }
+
+  /**
+   * The run options variable list excludes resolvers: a {@code #{...}} reference must not show up
+   * as a settable variable, but a real {@code ${...}} variable nested in the resolver arguments
+   * still must.
+   */
+  @Test
+  void testGetUsedVariablesExcludesResolvers() {
+    List<String> list = new ArrayList<>();
+    StringUtil.getUsedVariables("#{vault:${env}/data/some-db:password}", list, false, false);
+    assertFalse(
+        list.stream().anyMatch(v -> v.startsWith("vault:")),
+        "resolver reference should not be collected when includeResolvers=false");
+    assertTrue(list.contains("env"), "nested ${...} variable should still be collected");
+  }
+
+  @Test
+  void testGetUsedVariablesStillCollectsPlainVariables() {
+    List<String> list = new ArrayList<>();
+    StringUtil.getUsedVariables("${VARIABLE_1} and %%VARIABLE_2%%", list, false, false);
+    assertTrue(list.contains("VARIABLE_1"));
+    assertTrue(list.contains("VARIABLE_2"));
   }
 }

@@ -31,12 +31,21 @@ import java.util.Map;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.stream.Stream;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.hop.core.Const;
+import org.apache.hop.core.database.types.ColumnContext;
+import org.apache.hop.core.database.types.DatabaseTypeMapper;
+import org.apache.hop.core.database.types.IValueBinding;
+import org.apache.hop.core.database.types.ServerInfo;
 import org.apache.hop.core.exception.HopDatabaseException;
+import org.apache.hop.core.exception.HopPluginException;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.exception.HopValueException;
 import org.apache.hop.core.gui.plugin.GuiElementType;
 import org.apache.hop.core.gui.plugin.GuiWidgetElement;
 import org.apache.hop.core.row.IValueMeta;
+import org.apache.hop.core.row.value.ValueMetaFactory;
 import org.apache.hop.core.util.StringUtil;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
@@ -46,6 +55,8 @@ import org.apache.hop.metadata.api.HopMetadataProperty;
  * This class contains the basic information on a database connection. It is not intended to be used
  * other than the inheriting classes such as OracleDatabaseInfo, ...
  */
+@Getter
+@Setter
 public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
 
   /** The SQL to execute at connect time (right after connecting) */
@@ -106,9 +117,17 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
   public static final String ID_PASSWORD_LABEL = "password-label";
   public static final String ID_PASSWORD_WIDGET = "password-widget";
 
+  // Standard UI element IDs that can be excluded from database editors
+  public static final String ELEMENT_ID_HOSTNAME = "hostname";
+  public static final String ELEMENT_ID_PORT = "port";
+  public static final String ELEMENT_ID_DATABASE_NAME = "databaseName";
+  public static final String ELEMENT_ID_MANUAL_URL = "manualUrl";
+  public static final String ELEMENT_ID_USERNAME = "username";
+  public static final String ELEMENT_ID_PASSWORD = "password";
+
   /**
-   * Boolean to indicate if savepoints can be released Most databases do, so we set it to true.
-   * Child classes can overwrite with false if need be.
+   * Boolean to indicate if savepoint can be released Most databases do, so we set it to true. Child
+   * classes can overwrite with false if need be.
    */
   protected boolean releaseSavepoint = true;
 
@@ -121,7 +140,7 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
 
   @HopMetadataProperty
   @GuiWidgetElement(
-      id = "hostname",
+      id = ELEMENT_ID_HOSTNAME,
       order = "01",
       label = "i18n:org.apache.hop.ui.core.database:DatabaseDialog.label.ServerHostname",
       type = GuiElementType.TEXT,
@@ -131,7 +150,7 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
 
   @HopMetadataProperty
   @GuiWidgetElement(
-      id = "port",
+      id = ELEMENT_ID_PORT,
       order = "02",
       label = "i18n:org.apache.hop.ui.core.database:DatabaseDialog.label.PortNumber",
       type = GuiElementType.TEXT,
@@ -172,6 +191,21 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
   @HopMetadataProperty protected String pluginId;
   @HopMetadataProperty protected String pluginName;
 
+  // SSH Tunnel fields
+  @HopMetadataProperty protected boolean sshTunnelEnabled;
+  @HopMetadataProperty protected String sshTunnelHost;
+  @HopMetadataProperty protected String sshTunnelPort;
+  @HopMetadataProperty protected String sshTunnelUsername;
+
+  @HopMetadataProperty(password = true)
+  protected String sshTunnelPassword;
+
+  @HopMetadataProperty protected boolean sshTunnelUsePrivateKey;
+  @HopMetadataProperty protected String sshTunnelPrivateKeyFile;
+
+  @HopMetadataProperty(password = true)
+  protected String sshTunnelPassphrase;
+
   public BaseDatabaseMeta() {
     attributes = Collections.synchronizedMap(new HashMap<>());
     changed = false;
@@ -211,9 +245,6 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
   public void setPluginName(String pluginName) {
     this.pluginName = pluginName;
   }
-
-  @Override
-  public abstract int[] getAccessTypeList();
 
   /**
    * @return Returns the accessType.
@@ -426,7 +457,7 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
         retval.attributes.put(key, attributes.get(key));
       }
     } catch (CloneNotSupportedException e) {
-      throw new RuntimeException(e);
+      throw new HopRuntimeException(e);
     }
     return retval;
   }
@@ -695,6 +726,62 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
   @Override
   public boolean isSupportsSetLong() {
     return true;
+  }
+
+  /**
+   * The definition of a single column, for whatever DDL is being assembled.
+   *
+   * <p>Dialects call this rather than {@link #getFieldDefinition} so that a column keeps the same
+   * spelling in an ALTER TABLE as it has in the CREATE TABLE. The type rules get first say; only
+   * when no rule claims the value does the dialect's own hand written mapping answer.
+   *
+   * <p>There are no variables to resolve with here. A dialect assembles an ALTER TABLE from a
+   * method that has never carried an {@link IVariables}, and adding one would move the statement
+   * body to a new signature, which would quietly stop calling the override of anything that
+   * subclasses a dialect. A rule that keys off a variable therefore only fires on the CREATE path,
+   * which does have them; none do today.
+   *
+   * @param v the value to describe
+   * @param tk the name of the technical key field
+   * @param pk the name of the primary key field
+   * @param useAutoIncrement whether this field uses auto increment
+   * @param addFieldName whether to prefix the definition with the column name
+   * @param addCr whether to end the definition with a carriage return
+   * @param purpose what the definition is going into
+   * @return the column definition
+   */
+  /** What the driver said about the server, once something asked it. See IDatabase. */
+  private transient ServerInfo serverInfo;
+
+  @Override
+  public ServerInfo getServerInfo() {
+    return serverInfo;
+  }
+
+  @Override
+  public void setServerInfo(ServerInfo serverInfo) {
+    this.serverInfo = serverInfo;
+  }
+
+  /**
+   * Whether the server is at least this major version, for a dialect deciding about a type its
+   * database grew at a known release. An unknown version answers true: not knowing is not a no.
+   */
+  protected boolean serverIsAtLeast(int majorVersion) {
+    return ServerInfo.atLeast(serverInfo, majorVersion);
+  }
+
+  public String getColumnDefinition(
+      IValueMeta v,
+      String tk,
+      String pk,
+      boolean useAutoIncrement,
+      boolean addFieldName,
+      boolean addCr,
+      ColumnContext.Purpose purpose) {
+    ColumnContext context =
+        new ColumnContext(purpose, tk, pk, useAutoIncrement, addFieldName, addCr);
+    return DatabaseTypeMapper.getColumnDefinition(null, this, v, context);
   }
 
   /**
@@ -1178,6 +1265,12 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
   }
 
   @Override
+  /**
+   * @deprecated An Oracle-specific option that has no business on the interface every dialect *
+   *     implements. Oracle now expresses it through its own {@link #getTypeRules()}; this accessor
+   *     * remains so that existing dialects and callers keep working.
+   */
+  @Deprecated(since = "2.20")
   public boolean isStrictBigNumberInterpretation() {
     return false;
   }
@@ -1385,9 +1478,25 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
   }
 
   /**
+   * @return true if this is a relational database you can explore. Return false for SAP, PALO, etc.
+   */
+  @Override
+  public boolean isTestable() {
+    return true;
+  }
+
+  /**
+   * @return true if this is a relational database for which exploring is disabled
+   */
+  @Override
+  public boolean isExploringDisabled() {
+    return false;
+  }
+
+  /**
    * @param string
    * @return A string that is properly quoted for use in a SQL statement (insert, update, delete,
-   *     etc)
+   *     etc.)
    */
   @Override
   public String quoteSqlString(String string) {
@@ -1565,6 +1674,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    *     on.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isMySqlVariant() {
     return false;
   }
@@ -1574,6 +1690,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    *     on.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isPostgresVariant() {
     return false;
   }
@@ -1582,6 +1705,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is a Teradata variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isTeradataVariant() {
     return false;
   }
@@ -1590,6 +1720,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is a Sybase variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isSybaseVariant() {
     return false;
   }
@@ -1598,6 +1735,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is a Sybase variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isSybaseIQVariant() {
     return false;
   }
@@ -1606,6 +1750,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is a Neoview variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isNeoviewVariant() {
     return false;
   }
@@ -1614,13 +1765,25 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is a Exasol variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isExasolVariant() {
     return false;
   }
 
   /**
    * @return true if the database is a DuckDb variant.
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so existing implementations
+   *     keep working, and will be removed once the migration completes.
    */
+  @Deprecated(since = "2.20")
   public boolean isDuckDbVariant() {
     return false;
   }
@@ -1629,6 +1792,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is a Informix variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isInformixVariant() {
     return false;
   }
@@ -1637,6 +1807,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is a MS SQL Server (native) variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isMsSqlServerNativeVariant() {
     return false;
   }
@@ -1645,6 +1822,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is a MS SQL Server variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isMsSqlServerVariant() {
     return false;
   }
@@ -1653,6 +1837,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is an Oracle variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isOracleVariant() {
     return false;
   }
@@ -1661,6 +1852,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is an Netezza variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isNetezzaVariant() {
     return false;
   }
@@ -1669,6 +1867,13 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
    * @return true if the database is a SQLite variant.
    */
   @Override
+  /**
+   * @deprecated Dialects now describe their own column types through {@link #getTypeRules()}, which
+   *     core matches by dialect plugin type and class hierarchy rather * than by vendor name. This
+   *     flag is still honoured for dialects that have not migrated, so * existing implementations
+   *     keep working, and will be removed once the migration completes.
+   */
+  @Deprecated(since = "2.20")
   public boolean isSqliteVariant() {
     return false;
   }
@@ -1760,7 +1965,21 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
   @Override
   public Object getValueFromResultSet(ResultSet rs, IValueMeta val, int i)
       throws HopDatabaseException {
-
+    // Asked here rather than inside ValueMetaBase, so that a value type which handles its own
+    // reading still gets the binding its database declared.
+    IValueBinding binding = DatabaseTypeMapper.getBinding(this, val);
+    if (binding != null) {
+      try {
+        Object data = binding.read(this, val, rs, i + 1);
+        return rs.wasNull() ? null : data;
+      } catch (UnsupportedOperationException e) {
+        // A binding declared for writing only. Reading is whatever it was before the binding
+        // existed, which is the value type's own handling below.
+      } catch (SQLException e) {
+        throw new HopDatabaseException(
+            "Unable to read value '" + val.getName() + "' from the result set", e);
+      }
+    }
     return val.getValueFromResultSet(this, rs, i);
   }
 
@@ -1913,6 +2132,39 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
   @Override
   public IValueMeta customizeValueFromSqlType(
       IValueMeta v, java.sql.ResultSetMetaData rm, int index) throws SQLException {
+    if (v == null || rm == null) {
+      return null;
+    }
+
+    String typeName = rm.getColumnTypeName(index);
+    if (typeName == null) {
+      return null;
+    }
+
+    typeName = typeName.toLowerCase();
+    try {
+      switch (typeName) {
+          // Most dbs expose uuid as "UUID", sql server (native) as "UNIQUEIDENTIFIER"
+        case "uniqueidentifier", "uuid":
+          {
+            int uuidTypeId = ValueMetaFactory.getIdForValueMeta("UUID");
+
+            // Keep any existing metadata
+            IValueMeta u = ValueMetaFactory.cloneValueMeta(v, uuidTypeId);
+
+            u.setLength(-1);
+            u.setPrecision(-1);
+
+            return u;
+          }
+        case "json", "jsonb":
+          return ValueMetaFactory.cloneValueMeta(v, IValueMeta.TYPE_JSON);
+        default:
+          break;
+      }
+    } catch (HopPluginException ignore) {
+      // plugin not present
+    }
     return null;
   }
 
@@ -1974,5 +2226,27 @@ public abstract class BaseDatabaseMeta implements Cloneable, IDatabase {
       }
     }
     return identifier;
+  }
+
+  /**
+   * Returns a list of UI element IDs that should be excluded from the database editor. Databricks
+   * doesn't need database name or manual URL fields.
+   *
+   * @return List of element IDs to exclude
+   */
+  @Override
+  public List<String> getRemoveItems() {
+    return new ArrayList<>();
+  }
+
+  /**
+   * Returns whether URL information should be hidden in test connection dialogs. Databricks URLs
+   * may contain sensitive authentication tokens.
+   *
+   * @return true to hide URL information in test connection results
+   */
+  @Override
+  public boolean isHideUrlInTestConnection() {
+    return false; // don't hide URLs by default, set to true if the url may contain sensitive tokens
   }
 }

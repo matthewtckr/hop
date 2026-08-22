@@ -24,7 +24,7 @@ import com.google.cloud.secretmanager.v1.SecretManagerServiceSettings;
 import com.google.cloud.secretmanager.v1.SecretVersionName;
 import lombok.Getter;
 import lombok.Setter;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.gui.plugin.GuiElementType;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
@@ -41,8 +41,7 @@ import org.apache.hop.metadata.api.HopMetadataProperty;
     name = "Google Secret Manager Variable Resolver",
     description = "Automatically look up values of secrets in Google Secret Manager",
     documentationUrl =
-        "/variables/resolvers/google-secret-manager.html" // TODO: write this documentation
-    )
+        "/metadata-types/variable-resolver/google-secret-manager-variable-resolver.html")
 public class GooleSecretManagerVariableResolver implements IVariableResolver {
 
   /** The name of the variable that will contain the expression in the pipeline. */
@@ -123,18 +122,8 @@ public class GooleSecretManagerVariableResolver implements IVariableResolver {
   }
 
   @Override
-  public void setPluginId() {
-    // Nothing to set
-  }
-
-  @Override
   public String getPluginId() {
     return "Variable-Resolver-GoogleSecretManager";
-  }
-
-  @Override
-  public void setPluginName(String pluginName) {
-    // Nothing to set
   }
 
   @Override

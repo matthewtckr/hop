@@ -18,7 +18,8 @@
 
 package org.apache.hop.pipeline.transforms.validator;
 
-import org.apache.commons.lang.StringUtils;
+import java.io.Serial;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.exception.HopValueException;
 
 public class HopValidatorException extends HopValueException {
@@ -50,8 +51,7 @@ public class HopValidatorException extends HopValueException {
   private final Validation validatorField;
   private final int code;
   private final String fieldName;
-
-  private static final long serialVersionUID = -212228277329271284L;
+  @Serial private static final long serialVersionUID = -212228277329271284L;
 
   /**
    * Constructs a new Throwable with the specified detail message.
@@ -72,6 +72,16 @@ public class HopValidatorException extends HopValueException {
     this.validatorField = validatorField;
     this.code = code;
     this.fieldName = fieldName;
+  }
+
+  /**
+   * This exception carries the outcome of a validation rule to the error handling hop, it is never
+   * used to debug a code path. Capturing a stack trace for it would cost a stack walk for every
+   * rejected row, which is pure overhead on a transform whose job is to reject rows.
+   */
+  @Override
+  public synchronized Throwable fillInStackTrace() {
+    return this;
   }
 
   /**

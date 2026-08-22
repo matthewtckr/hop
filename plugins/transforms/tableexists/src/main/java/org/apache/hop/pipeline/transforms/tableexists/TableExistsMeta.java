@@ -44,7 +44,8 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     image = "tableexists.svg",
     name = "i18n::TableExists.Name",
     description = "i18n::TableExists.Description",
-    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Lookup",
+    categoryDescription =
+        "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Validation",
     keywords = "i18n::TableExistsMeta.keyword",
     documentationUrl = "/pipeline/transforms/tableexists.html",
     actionTransformTypes = {ActionTransformType.RDBMS})
@@ -223,7 +224,9 @@ public class TableExistsMeta extends BaseTransformMeta<TableExists, TableExistsD
       cr = new CheckResult(ICheckResult.TYPE_RESULT_ERROR, errorMessage, transformMeta);
       remarks.add(cr);
     } finally {
-      database.disconnect();
+      if (database != null) {
+        database.close();
+      }
     }
   }
 

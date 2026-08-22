@@ -28,9 +28,7 @@ import org.apache.hop.ui.core.dialog.MessageBox;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.widget.ComboVar;
 import org.apache.hop.ui.core.widget.TextVar;
-import org.apache.hop.ui.pipeline.transform.BaseTransformDialog;
 import org.apache.hop.ui.workflow.action.ActionDialog;
-import org.apache.hop.ui.workflow.dialog.WorkflowDialog;
 import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.action.IAction;
 import org.apache.hop.workflow.actions.simpleeval.ActionSimpleEval.FieldType;
@@ -50,13 +48,10 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Group;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
-import org.eclipse.swt.widgets.Text;
 
 /** This dialog allows you to edit the Simple Eval action settings. */
 public class ActionSimpleEvalDialog extends ActionDialog {
   private static final Class<?> PKG = ActionSimpleEval.class;
-
-  private Text wName;
 
   private ActionSimpleEval action;
 
@@ -102,50 +97,10 @@ public class ActionSimpleEvalDialog extends ActionDialog {
 
   @Override
   public IAction open() {
-
-    shell = new Shell(getParent(), SWT.DIALOG_TRIM | SWT.MIN | SWT.MAX | SWT.RESIZE);
-    PropsUi.setLook(shell);
-    WorkflowDialog.setShellImage(shell, action);
+    createShell(BaseMessages.getString(PKG, "ActionSimpleEval.Title"), action);
+    buildButtonBar().ok(e -> ok()).cancel(e -> cancel()).build();
 
     changed = action.hasChanged();
-
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = PropsUi.getFormMargin();
-    formLayout.marginHeight = PropsUi.getFormMargin();
-
-    shell.setLayout(formLayout);
-    shell.setText(BaseMessages.getString(PKG, "ActionSimpleEval.Title"));
-
-    int middle = props.getMiddlePct();
-    int margin = PropsUi.getMargin();
-
-    // Buttons go at the very bottom
-    //
-    Button wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, e -> ok());
-    Button wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, e -> cancel());
-    BaseTransformDialog.positionBottomButtons(shell, new Button[] {wOk, wCancel}, margin, null);
-
-    // Filename line
-    Label wlName = new Label(shell, SWT.RIGHT);
-    wlName.setText(BaseMessages.getString(PKG, "ActionSimpleEval.Name.Label"));
-    PropsUi.setLook(wlName);
-    FormData fdlName = new FormData();
-    fdlName.left = new FormAttachment(0, 0);
-    fdlName.right = new FormAttachment(middle, -margin);
-    fdlName.top = new FormAttachment(0, margin);
-    wlName.setLayoutData(fdlName);
-    wName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    PropsUi.setLook(wName);
-    FormData fdName = new FormData();
-    fdName.left = new FormAttachment(middle, 0);
-    fdName.top = new FormAttachment(0, margin);
-    fdName.right = new FormAttachment(100, 0);
-    wName.setLayoutData(fdName);
-    wName.addListener(SWT.Modify, e -> action.setChanged());
 
     CTabFolder wTabFolder = new CTabFolder(shell, SWT.BORDER);
     PropsUi.setLook(wTabFolder, Props.WIDGET_STYLE_TAB);
@@ -521,15 +476,16 @@ public class ActionSimpleEvalDialog extends ActionDialog {
 
     FormData fdTabFolder = new FormData();
     fdTabFolder.left = new FormAttachment(0, 0);
-    fdTabFolder.top = new FormAttachment(wName, margin);
+    fdTabFolder.top = new FormAttachment(wSpacer, margin);
     fdTabFolder.right = new FormAttachment(100, 0);
-    fdTabFolder.bottom = new FormAttachment(wOk, -2 * margin);
+    fdTabFolder.bottom = new FormAttachment(wCancel, -margin);
     wTabFolder.setLayoutData(fdTabFolder);
 
     getData();
     refresh();
 
     wTabFolder.setSelection(0);
+    focusActionName();
 
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 
@@ -538,7 +494,9 @@ public class ActionSimpleEvalDialog extends ActionDialog {
 
   /** Copy information from the meta-data input to the dialog fields. */
   public void getData() {
-    wName.setText(Const.nullToEmpty(action.getName()));
+    if (action.getName() != null) {
+      wName.setText(action.getName());
+    }
     wValueType.setText(action.getValueType().getDescription());
     wFieldName.setText(Const.nullToEmpty(action.getFieldName()));
     wVariableName.setText(Const.nullToEmpty(action.getVariableName()));
@@ -551,16 +509,19 @@ public class ActionSimpleEvalDialog extends ActionDialog {
     wSuccessStringCondition.setText(action.getSuccessStringCondition().getDescription());
     wSuccessNumberCondition.setText(action.getSuccessNumberCondition().getDescription());
     wSuccessBooleanCondition.setText(action.getSuccessBooleanCondition().getDescription());
+  }
 
-    wName.selectAll();
-    wName.setFocus();
+  @Override
+  protected void onActionNameModified() {
+    action.setChanged();
   }
 
   private void refresh() {
-    boolean evaluatepreviousRowField =
-        ValueType.lookupDescription(wValueType.getText()) == ValueType.FIELD;
-    boolean evaluateVariable =
-        ValueType.lookupDescription(wValueType.getText()) == ValueType.VARIABLE;
+    ValueType selectedValueType = ValueType.lookupDescription(wValueType.getText());
+    boolean evaluatepreviousRowField = selectedValueType == ValueType.FIELD;
+    boolean evaluateVariable = selectedValueType == ValueType.VARIABLE;
+    boolean evaluateResultFiles = selectedValueType == ValueType.RESULT_FILES;
+    boolean evaluateLogText = selectedValueType == ValueType.LOG_TEXT;
     wlVariableName.setVisible(evaluateVariable);
     wVariableName.setVisible(evaluateVariable);
     wlFieldName.setVisible(evaluatepreviousRowField);
@@ -569,27 +530,32 @@ public class ActionSimpleEvalDialog extends ActionDialog {
     wSuccessWhenSet.setVisible(evaluateVariable);
 
     boolean successWhenSet = wSuccessWhenSet.getSelection() && evaluateVariable;
+    boolean showType = !successWhenSet && !evaluateResultFiles && !evaluateLogText;
 
-    wlFieldType.setVisible(!successWhenSet);
-    wFieldType.setVisible(!successWhenSet);
+    wlFieldType.setVisible(showType);
+    wFieldType.setVisible(showType);
 
     boolean valueTypeDate =
-        FieldType.lookupDescription(wFieldType.getText()) == FieldType.DATE_TIME;
-    wlMask.setVisible(!successWhenSet && valueTypeDate);
-    wMask.setVisible(!successWhenSet && valueTypeDate);
+        showType && FieldType.lookupDescription(wFieldType.getText()) == FieldType.DATE_TIME;
+    wlMask.setVisible(valueTypeDate);
+    wMask.setVisible(valueTypeDate);
 
-    boolean valueTypeString = FieldType.lookupDescription(wFieldType.getText()) == FieldType.STRING;
+    boolean valueTypeString =
+        evaluateLogText
+            || (showType && FieldType.lookupDescription(wFieldType.getText()) == FieldType.STRING);
     wlSuccessStringCondition.setVisible(!successWhenSet && valueTypeString);
     wSuccessStringCondition.setVisible(!successWhenSet && valueTypeString);
 
     boolean valueTypeNumber =
-        FieldType.lookupDescription(wFieldType.getText()) == FieldType.NUMBER
-            || FieldType.lookupDescription(wFieldType.getText()) == FieldType.DATE_TIME;
+        evaluateResultFiles
+            || (showType
+                && (FieldType.lookupDescription(wFieldType.getText()) == FieldType.NUMBER
+                    || FieldType.lookupDescription(wFieldType.getText()) == FieldType.DATE_TIME));
     wlSuccessNumberCondition.setVisible(!successWhenSet && valueTypeNumber);
     wSuccessNumberCondition.setVisible(!successWhenSet && valueTypeNumber);
 
     boolean valueTypeBoolean =
-        FieldType.lookupDescription(wFieldType.getText()) == FieldType.BOOLEAN;
+        showType && FieldType.lookupDescription(wFieldType.getText()) == FieldType.BOOLEAN;
     wlSuccessBooleanCondition.setVisible(!successWhenSet && valueTypeBoolean);
     wSuccessBooleanCondition.setVisible(!successWhenSet && valueTypeBoolean);
 
@@ -623,10 +589,17 @@ public class ActionSimpleEvalDialog extends ActionDialog {
     }
 
     action.setName(wName.getText());
-    action.setValueType(ValueType.lookupDescription(wValueType.getText()));
+    ValueType valueType = ValueType.lookupDescription(wValueType.getText());
+    action.setValueType(valueType);
     action.setFieldName(wFieldName.getText());
     action.setVariableName(wVariableName.getText());
-    action.setFieldType(FieldType.lookupDescription(wFieldType.getText()));
+    if (valueType == ValueType.RESULT_FILES) {
+      action.setFieldType(FieldType.NUMBER);
+    } else if (valueType == ValueType.LOG_TEXT) {
+      action.setFieldType(FieldType.STRING);
+    } else {
+      action.setFieldType(FieldType.lookupDescription(wFieldType.getText()));
+    }
     action.setMask(wMask.getText());
     action.setCompareValue(wCompareValue.getText());
     action.setMinValue(wMinValue.getText());

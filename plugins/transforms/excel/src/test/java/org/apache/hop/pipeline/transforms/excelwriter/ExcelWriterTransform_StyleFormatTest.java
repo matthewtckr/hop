@@ -17,8 +17,8 @@
 
 package org.apache.hop.pipeline.transforms.excelwriter;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -48,12 +48,12 @@ import org.apache.poi.ss.usermodel.FillPatternType;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.util.CellReference;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /** Tests for applying Format and Style from cell (from a template) when writing fields */
-public class ExcelWriterTransform_StyleFormatTest {
+class ExcelWriterTransform_StyleFormatTest {
 
   private TransformMockHelper<ExcelWriterTransformMeta, ExcelWriterTransformData>
       transformMockHelper;
@@ -64,7 +64,7 @@ public class ExcelWriterTransform_StyleFormatTest {
   private IRowMeta outputRowMeta;
   private IRowSet inputRowSet;
 
-  @Before
+  @BeforeEach
   /** Get mock helper */
   public void setUp() throws Exception {
     transformMockHelper =
@@ -82,7 +82,7 @@ public class ExcelWriterTransform_StyleFormatTest {
     data = mock(ExcelWriterTransformData.class);
   }
 
-  @After
+  @AfterEach
   /** Clean-up objects */
   public void tearDown() {
     ExcelWriterWorkbookDefinition workbookDefinition =
@@ -126,8 +126,8 @@ public class ExcelWriterTransform_StyleFormatTest {
     // object
     // Values are written in A2:D2 and A3:D3 rows
     List<Object[]> rows = createRowData();
-    for (int i = 0; i < rows.size(); i++) {
-      transform.writeNextLine(data.currentWorkbookDefinition, rows.get(i));
+    for (Object[] row : rows) {
+      transform.writeNextLine(data.currentWorkbookDefinition, row);
     }
 
     // Custom styles are loaded from G1 cell
@@ -301,21 +301,9 @@ public class ExcelWriterTransform_StyleFormatTest {
    */
   private ArrayList<Object[]> createRowData() {
     ArrayList<Object[]> rows = new ArrayList<>();
-    Object[] row =
-        new Object[] {
-          Long.valueOf(123456),
-          Double.valueOf(2.34e-4),
-          new BigDecimal("123456789.987654321"),
-          Double.valueOf(504150)
-        };
+    Object[] row = new Object[] {123456L, 2.34e-4, new BigDecimal("123456789.987654321"), 504150.0};
     rows.add(row);
-    row =
-        new Object[] {
-          Long.valueOf(1001001),
-          Double.valueOf(4.6789e10),
-          new BigDecimal(123123e-2),
-          Double.valueOf(12312300)
-        };
+    row = new Object[] {1001001L, 4.6789e10, new BigDecimal(123123e-2), 12312300.0};
     rows.add(row);
     return rows;
   }
@@ -335,8 +323,8 @@ public class ExcelWriterTransform_StyleFormatTest {
         new ValueMetaBigNumber("col 3"),
         new ValueMetaNumber("col 4")
       };
-      for (int i = 0; i < valuesMeta.length; i++) {
-        rm.addValueMeta(valuesMeta[i]);
+      for (IValueMeta iValueMeta : valuesMeta) {
+        rm.addValueMeta(iValueMeta);
       }
     } catch (Exception ex) {
       return null;

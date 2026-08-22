@@ -18,6 +18,8 @@
 package org.apache.hop.pipeline.transforms.dynamicsqlrow;
 
 import java.util.List;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.hop.core.CheckResult;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.ICheckResult;
@@ -41,12 +43,14 @@ import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transform.BaseTransformMeta;
 import org.apache.hop.pipeline.transform.TransformMeta;
 
+@Getter
+@Setter
 @Transform(
     id = "DynamicSqlRow",
     image = "dynamicsqlrow.svg",
     name = "i18n::DynamicSQLRow.Name",
     description = "i18n::DynamicSQLRow.Description",
-    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Lookup",
+    categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Transform",
     keywords = "i18n::DynamicSqlRowMeta.keyword",
     documentationUrl = "/pipeline/transforms/dynamicsqlrow.html",
     actionTransformTypes = {ActionTransformType.RDBMS})
@@ -111,117 +115,8 @@ public class DynamicSqlRowMeta extends BaseTransformMeta<DynamicSqlRow, DynamicS
     this.sqlFieldName = meta.sqlFieldName;
     this.replaceVariables = meta.replaceVariables;
     this.rowLimit = meta.rowLimit;
-    this.connection = meta.connection;
     this.outerJoin = meta.outerJoin;
     this.queryOnlyOnChange = meta.queryOnlyOnChange;
-  }
-
-  public String getConnection() {
-    return connection;
-  }
-
-  public void setConnection(String connection) {
-    this.connection = connection;
-  }
-
-  /**
-   * @return Returns the database.
-   */
-  public DatabaseMeta getDatabaseMeta() {
-    return databaseMeta;
-  }
-
-  /**
-   * @param database The database to set.
-   */
-  public void setDatabaseMeta(DatabaseMeta database) {
-    this.databaseMeta = database;
-  }
-
-  /**
-   * @return Returns the outerJoin.
-   */
-  public boolean isOuterJoin() {
-    return outerJoin;
-  }
-
-  /**
-   * @param outerJoin The outerJoin to set.
-   */
-  public void setOuterJoin(boolean outerJoin) {
-    this.outerJoin = outerJoin;
-  }
-
-  /**
-   * @return Returns the replacevars.
-   */
-  public boolean isReplaceVariables() {
-    return replaceVariables;
-  }
-
-  public void setReplaceVariables(boolean replaceVariables) {
-    this.replaceVariables = replaceVariables;
-  }
-
-  /**
-   * @return Returns the queryonlyonchange.
-   */
-  public boolean isQueryOnlyOnChange() {
-    return queryOnlyOnChange;
-  }
-
-  /**
-   * @param queryonlyonchange The queryonlyonchange to set.
-   */
-  public void setQueryOnlyOnChange(boolean queryonlyonchange) {
-    this.queryOnlyOnChange = queryonlyonchange;
-  }
-
-  /**
-   * @return Returns the rowLimit.
-   */
-  public int getRowLimit() {
-    return rowLimit;
-  }
-
-  /**
-   * @param rowLimit The rowLimit to set.
-   */
-  public void setRowLimit(int rowLimit) {
-    this.rowLimit = rowLimit;
-  }
-
-  /**
-   * @return Returns the sql.
-   */
-  public String getSql() {
-    return sql;
-  }
-
-  /**
-   * @param sql The sql to set.
-   */
-  public void setSql(String sql) {
-    this.sql = sql;
-  }
-
-  /**
-   * @return Returns the sqlfieldname.
-   */
-  public String getSqlFieldName() {
-    return sqlFieldName;
-  }
-
-  /**
-   * @param sqlfieldname The sqlfieldname to set.
-   */
-  public void setSqlFieldName(String sqlfieldname) {
-    this.sqlFieldName = sqlfieldname;
-  }
-
-  @Override
-  public Object clone() {
-    return new DynamicSqlRowMeta(this);
   }
 
   @Override
@@ -250,46 +145,47 @@ public class DynamicSqlRowMeta extends BaseTransformMeta<DynamicSqlRow, DynamicS
       return;
     }
 
-    Database db = new Database(loggingObject, variables, databaseMeta);
-    databases = new Database[] {db}; // Keep track of this one for cancelQuery
+    try (Database db = new Database(loggingObject, variables, databaseMeta)) {
+      // Keep track of this one for cancelQuery
+      databases = new Database[] {db};
 
-    // First try without connecting to the database... (can be S L O W)
-    // See if it's in the cache...
-    IRowMeta add = null;
-    String realSql = sql;
-    if (replaceVariables) {
-      realSql = variables.resolve(realSql);
-    }
-    try {
-      add = db.getQueryFields(realSql, false);
-    } catch (HopDatabaseException dbe) {
-      throw new HopTransformException(
-          BaseMessages.getString(PKG, "DynamicSQLRowMeta.Exception.UnableToDetermineQueryFields")
-              + Const.CR
-              + sql,
-          dbe);
-    }
-
-    if (add != null) { // Cache hit, just return it this...
-      for (int i = 0; i < add.size(); i++) {
-        IValueMeta v = add.getValueMeta(i);
-        v.setOrigin(name);
+      // First try without connecting to the database... (can be S L O W)
+      // See if it's in the cache...
+      IRowMeta add = null;
+      String realSql = sql;
+      if (replaceVariables) {
+        realSql = variables.resolve(realSql);
       }
-      row.addRowMeta(add);
-    } else {
-      // No cache hit, connect to the database, do it the hard way...
       try {
-        db.connect();
         add = db.getQueryFields(realSql, false);
+      } catch (HopDatabaseException dbe) {
+        throw new HopTransformException(
+            BaseMessages.getString(PKG, "DynamicSQLRowMeta.Exception.UnableToDetermineQueryFields")
+                + Const.CR
+                + sql,
+            dbe);
+      }
+      // Cache hit, just return it this...
+      if (add != null) {
         for (int i = 0; i < add.size(); i++) {
           IValueMeta v = add.getValueMeta(i);
           v.setOrigin(name);
         }
         row.addRowMeta(add);
-        db.disconnect();
-      } catch (HopDatabaseException dbe) {
-        throw new HopTransformException(
-            BaseMessages.getString(PKG, "DynamicSQLRowMeta.Exception.ErrorObtainingFields"), dbe);
+      } else {
+        // No cache hit, connect to the database, do it the hard way...
+        try {
+          db.connect();
+          add = db.getQueryFields(realSql, false);
+          for (int i = 0; i < add.size(); i++) {
+            IValueMeta v = add.getValueMeta(i);
+            v.setOrigin(name);
+          }
+          row.addRowMeta(add);
+        } catch (HopDatabaseException dbe) {
+          throw new HopTransformException(
+              BaseMessages.getString(PKG, "DynamicSQLRowMeta.Exception.ErrorObtainingFields"), dbe);
+        }
       }
     }
   }
@@ -357,10 +253,9 @@ public class DynamicSqlRowMeta extends BaseTransformMeta<DynamicSqlRow, DynamicS
     }
 
     if (databaseMeta != null) {
-      Database db = new Database(loggingObject, variables, databaseMeta);
-      databases = new Database[] {db}; // Keep track of this one for cancelQuery
-
-      try {
+      try (Database db = new Database(loggingObject, variables, databaseMeta)) {
+        // Keep track of this one for cancelQuery
+        databases = new Database[] {db};
         db.connect();
         if (!Utils.isEmpty(sql)) {
 
@@ -387,8 +282,6 @@ public class DynamicSqlRowMeta extends BaseTransformMeta<DynamicSqlRow, DynamicS
                 + e.getMessage();
         cr = new CheckResult(ICheckResult.TYPE_RESULT_ERROR, errorMessage, transformMeta);
         remarks.add(cr);
-      } finally {
-        db.disconnect();
       }
     } else {
       errorMessage = BaseMessages.getString(PKG, "DynamicSQLRowMeta.CheckResult.InvalidConnection");

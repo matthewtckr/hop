@@ -22,21 +22,23 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Pattern;
 import org.apache.hop.core.IRowSet;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.logging.ILoggingObject;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-public class RegexEvalUnitTest {
+class RegexEvalUnitTest {
   private TransformMockHelper<RegexEvalMeta, RegexEvalData> transformMockHelper;
 
-  @Before
-  public void setup() throws Exception {
+  @BeforeEach
+  void setup() throws Exception {
     transformMockHelper =
         new TransformMockHelper<>("REGEX EVAL TEST", RegexEvalMeta.class, RegexEvalData.class);
     when(transformMockHelper.logChannelFactory.create(any(), any(ILoggingObject.class)))
@@ -44,14 +46,13 @@ public class RegexEvalUnitTest {
     when(transformMockHelper.pipeline.isRunning()).thenReturn(true);
   }
 
-  @After
-  public void tearDown() {
+  @AfterEach
+  void tearDown() {
     transformMockHelper.cleanUp();
   }
 
   @Test
-  public void testOutputIsMuchBiggerThanInputDoesntThrowArrayIndexOutOfBounds()
-      throws HopException {
+  void testOutputIsMuchBiggerThanInputDoesntThrowArrayIndexOutOfBounds() throws HopException {
     RegexEval regexEval =
         new RegexEval(
             transformMockHelper.transformMeta,
@@ -60,9 +61,15 @@ public class RegexEvalUnitTest {
             0,
             transformMockHelper.pipelineMeta,
             transformMockHelper.pipeline);
-    when(transformMockHelper.iTransformMeta.isAllowCaptureGroupsFlagSet()).thenReturn(true);
+    when(transformMockHelper.iTransformMeta.isAllowingCaptureGroups()).thenReturn(true);
+    List<RegexEvalMeta.RegexField> fields = new ArrayList<>();
     String[] outFields = new String[] {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"};
-    when(transformMockHelper.iTransformMeta.getFieldName()).thenReturn(outFields);
+    for (String outField : outFields) {
+      RegexEvalMeta.RegexField field = new RegexEvalMeta.RegexField();
+      fields.add(field);
+      field.setFieldName(outField);
+    }
+    when(transformMockHelper.iTransformMeta.getRegexFields()).thenReturn(fields);
     when(transformMockHelper.iTransformMeta.getMatcher()).thenReturn("\\.+");
     transformMockHelper.iTransformData.pattern =
         Pattern.compile("(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)");

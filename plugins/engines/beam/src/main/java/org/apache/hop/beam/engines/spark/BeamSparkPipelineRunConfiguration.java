@@ -39,7 +39,7 @@ import org.apache.beam.runners.spark.SparkPipelineOptions;
 import org.apache.beam.sdk.io.azure.options.BlobstoreOptions;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.beam.engines.BeamPipelineRunConfiguration;
 import org.apache.hop.beam.engines.IBeamPipelineEngineRunConfiguration;
 import org.apache.hop.beam.metadata.RunnerType;
@@ -231,7 +231,7 @@ public class BeamSparkPipelineRunConfiguration extends BeamPipelineRunConfigurat
       }
     }
     if (StringUtils.isNotEmpty(getSparkMaxRecordsPerBatch())) {
-      long records = Const.toLong(resolve(getSparkMaxRecordsPerBatch()), -1L);
+      long records = Const.toLongExpanded(resolve(getSparkMaxRecordsPerBatch()), -1L);
       if (records >= 0) {
         options.setMaxRecordsPerBatch(records);
       }
@@ -249,7 +249,7 @@ public class BeamSparkPipelineRunConfiguration extends BeamPipelineRunConfigurat
       }
     }
     if (StringUtils.isNotEmpty(getSparkBundleSize())) {
-      long bundleSize = Const.toLong(resolve(getSparkBundleSize()), -1L);
+      long bundleSize = Const.toLongExpanded(resolve(getSparkBundleSize()), -1L);
       if (bundleSize >= 0) {
         options.setBundleSize(bundleSize);
       }

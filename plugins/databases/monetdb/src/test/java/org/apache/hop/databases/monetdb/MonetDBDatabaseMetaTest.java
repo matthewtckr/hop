@@ -16,10 +16,10 @@
  */
 package org.apache.hop.databases.monetdb;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.row.value.ValueMetaBigNumber;
@@ -30,21 +30,30 @@ import org.apache.hop.core.row.value.ValueMetaInternetAddress;
 import org.apache.hop.core.row.value.ValueMetaNumber;
 import org.apache.hop.core.row.value.ValueMetaString;
 import org.apache.hop.core.row.value.ValueMetaTimestamp;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-public class MonetDBDatabaseMetaTest {
+class MonetDBDatabaseMetaTest {
 
   private MonetDBDatabaseMeta nativeMeta;
 
-  @Before
-  public void setupBefore() {
+  @AfterEach
+  void tearDownAfter() {
+    // getFieldDefinition() reads this static ThreadLocal, so leaving it set leaks into every
+    // later test on the same thread.
+    MonetDBDatabaseMeta.safeModeLocal.remove();
+  }
+
+  @BeforeEach
+  void setupBefore() {
     nativeMeta = new MonetDBDatabaseMeta();
     nativeMeta.setAccessType(DatabaseMeta.TYPE_ACCESS_NATIVE);
+    nativeMeta.addDefaultOptions();
   }
 
   @Test
-  public void testSettings() {
+  void testSettings() {
     assertArrayEquals(new int[] {DatabaseMeta.TYPE_ACCESS_NATIVE}, nativeMeta.getAccessTypeList());
     assertEquals(50000, nativeMeta.getDefaultDatabasePort());
     assertTrue(nativeMeta.isSupportsAutoInc());
@@ -146,7 +155,7 @@ public class MonetDBDatabaseMetaTest {
   }
 
   @Test
-  public void testSqlStatements() {
+  void testSqlStatements() {
     assertEquals(
         "ALTER TABLE FOO ADD BAR VARCHAR(15)",
         nativeMeta.getAddColumnStatement(
@@ -175,7 +184,7 @@ public class MonetDBDatabaseMetaTest {
   }
 
   @Test
-  public void testGetFieldDefinition() {
+  void testGetFieldDefinition() {
     assertEquals(
         "FOO TIMESTAMP",
         nativeMeta.getFieldDefinition(new ValueMetaDate("FOO"), "", "", false, true, false));
@@ -268,7 +277,7 @@ public class MonetDBDatabaseMetaTest {
             false,
             false)); // should end up with (100) if "safeMode = true"
 
-    MonetDBDatabaseMeta.safeModeLocal.set(Boolean.valueOf(true));
+    MonetDBDatabaseMeta.safeModeLocal.set(Boolean.TRUE);
     assertEquals(
         "VARCHAR(100)",
         nativeMeta.getFieldDefinition(

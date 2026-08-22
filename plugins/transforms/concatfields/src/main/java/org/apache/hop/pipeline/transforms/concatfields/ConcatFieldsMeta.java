@@ -74,20 +74,14 @@ public class ConcatFieldsMeta extends BaseTransformMeta<ConcatFields, ConcatFiel
   @HopMetadataProperty(key = "ConcatFields")
   private ExtraFields extraFields;
 
+  /** ignore empty value */
+  @HopMetadataProperty(key = "skip_value_empty", injectionKey = "SKIP_VALUE_EMPTY")
+  private boolean skipValueEmpty;
+
   public ConcatFieldsMeta() {
     super();
     outputFields = new ArrayList<>();
     extraFields = new ExtraFields();
-  }
-
-  public ConcatFieldsMeta(ConcatFieldsMeta m) {
-    this();
-    this.separator = m.separator;
-    this.enclosure = m.enclosure;
-    this.extraFields = new ExtraFields(m.extraFields);
-    for (ConcatField field : outputFields) {
-      outputFields.add(new ConcatField(field));
-    }
   }
 
   @Override
@@ -100,6 +94,9 @@ public class ConcatFieldsMeta extends BaseTransformMeta<ConcatFields, ConcatFiel
     extraFields.setTargetFieldName("");
     extraFields.setTargetFieldLength(0);
     extraFields.setRemoveSelectedFields(false);
+
+    // default disable null/empty value
+    skipValueEmpty = false;
   }
 
   @Override

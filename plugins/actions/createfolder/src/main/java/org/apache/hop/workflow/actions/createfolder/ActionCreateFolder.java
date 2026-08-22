@@ -18,7 +18,7 @@
 package org.apache.hop.workflow.actions.createfolder;
 
 import java.util.List;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.commons.vfs2.FileType;
 import org.apache.hop.core.ICheckResult;
@@ -65,17 +65,6 @@ public class ActionCreateFolder extends ActionBase implements Cloneable, IAction
 
   public ActionCreateFolder() {
     this("");
-  }
-
-  public ActionCreateFolder(ActionCreateFolder f) {
-    super(f.getName(), f.getDescription(), f.getPluginId());
-    this.folderName = f.folderName;
-    this.failIfFolderExists = f.failIfFolderExists;
-  }
-
-  @Override
-  public ActionCreateFolder clone() {
-    return new ActionCreateFolder(this);
   }
 
   @Override

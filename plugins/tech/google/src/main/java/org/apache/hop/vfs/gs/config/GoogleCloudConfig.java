@@ -27,11 +27,60 @@ public class GoogleCloudConfig {
   public static final String HOP_CONFIG_GOOGLE_CLOUD_CONFIG_KEY = "googleCloud";
 
   private String serviceAccountKeyFile;
+  private Boolean scanFoldersForLastModifDate;
+  private String maxAttempts;
+  private String initialRetryDelay;
+  private String retryDelayMultiplier;
+  private String maxRetryDelay;
+  private String totalTimeout;
+  private String initialRpcTimeout;
+  private String rpcTimeoutMultiplier;
+  private String maxRpcTimeout;
+  private String connectionTimeout;
+  private String readTimeout;
 
-  public GoogleCloudConfig() {}
+  /**
+   * Retry operations that the GCS client considers non-idempotent (object create, delete, starting
+   * an upload). The client only retries idempotent calls by default, so without this the retry
+   * settings above never apply to writes. Off by default: a retried delete can come back 404 once
+   * the first attempt succeeded server-side, and a retried create is a last-write-wins overwrite.
+   */
+  private Boolean retryNonIdempotentOperations;
+
+  /** Cache TTL in seconds for list-result caching (same as S3/MinIO/Azure). */
+  private String cacheTtlSeconds;
+
+  public GoogleCloudConfig() {
+    scanFoldersForLastModifDate = false;
+    maxAttempts = "6";
+    initialRetryDelay = "1";
+    retryDelayMultiplier = "2.0";
+    maxRetryDelay = "32";
+    totalTimeout = "50";
+    initialRpcTimeout = "50";
+    rpcTimeoutMultiplier = "1.0";
+    maxRpcTimeout = "50";
+    connectionTimeout = "20";
+    readTimeout = "20";
+    retryNonIdempotentOperations = false;
+    cacheTtlSeconds = "5";
+  }
 
   public GoogleCloudConfig(GoogleCloudConfig config) {
     this();
     serviceAccountKeyFile = config.serviceAccountKeyFile;
+    scanFoldersForLastModifDate = config.scanFoldersForLastModifDate;
+    maxAttempts = config.maxAttempts;
+    initialRetryDelay = config.initialRetryDelay;
+    retryDelayMultiplier = config.retryDelayMultiplier;
+    maxRetryDelay = config.maxRetryDelay;
+    totalTimeout = config.totalTimeout;
+    initialRpcTimeout = config.initialRpcTimeout;
+    rpcTimeoutMultiplier = config.rpcTimeoutMultiplier;
+    maxRpcTimeout = config.maxRpcTimeout;
+    connectionTimeout = config.connectionTimeout;
+    readTimeout = config.readTimeout;
+    retryNonIdempotentOperations = config.retryNonIdempotentOperations;
+    cacheTtlSeconds = config.cacheTtlSeconds;
   }
 }

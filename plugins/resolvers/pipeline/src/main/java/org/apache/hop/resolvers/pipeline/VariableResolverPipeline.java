@@ -20,7 +20,7 @@ package org.apache.hop.resolvers.pipeline;
 
 import lombok.Getter;
 import lombok.Setter;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.core.exception.HopTransformException;
 import org.apache.hop.core.gui.plugin.GuiElementType;
@@ -35,6 +35,7 @@ import org.apache.hop.core.variables.resolver.IVariableResolver;
 import org.apache.hop.core.variables.resolver.VariableResolver;
 import org.apache.hop.core.variables.resolver.VariableResolverPlugin;
 import org.apache.hop.metadata.api.HopMetadataProperty;
+import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.serializer.multi.MultiMetadataProvider;
 import org.apache.hop.metadata.util.HopMetadataInstance;
 import org.apache.hop.pipeline.PipelineExecutionConfiguration;
@@ -55,7 +56,7 @@ import org.json.simple.JSONObject;
     id = "Variable-Resolver-Pipeline",
     name = "Pipeline Variable Resolver",
     description = "Use a pipeline to resolve the value of a variable expression",
-    documentationUrl = "/metadata-types/variable-resolvers/pipeline-variable-resolver.html")
+    documentationUrl = "/metadata-types/variable-resolver/pipeline-variable-resolver.html")
 public class VariableResolverPipeline implements IVariableResolver {
 
   /** The name of the pipeline filename to use to resolve variable expressions */
@@ -66,7 +67,7 @@ public class VariableResolverPipeline implements IVariableResolver {
       typeFilename = TypePipelineFile.class,
       type = GuiElementType.FILENAME,
       parentId = VariableResolver.GUI_PLUGIN_ELEMENT_PARENT_ID)
-  @HopMetadataProperty()
+  @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.PIPELINE_FILE)
   private String filename;
 
   /** The name of the local Hop pipeline run configuration to use */
@@ -77,7 +78,7 @@ public class VariableResolverPipeline implements IVariableResolver {
       type = GuiElementType.METADATA,
       metadata = PipelineRunConfiguration.class,
       parentId = VariableResolver.GUI_PLUGIN_ELEMENT_PARENT_ID)
-  @HopMetadataProperty
+  @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.PIPELINE_RUN_CONFIG)
   private String runConfigurationName;
 
   /** The name of the variable that will contain the expression in the pipeline. */
@@ -106,15 +107,9 @@ public class VariableResolverPipeline implements IVariableResolver {
   }
 
   @Override
-  public void setPluginId() {}
-
-  @Override
   public String getPluginId() {
     return "Variable-Resolver-Pipeline";
   }
-
-  @Override
-  public void setPluginName(String pluginName) {}
 
   @Override
   public String getPluginName() {

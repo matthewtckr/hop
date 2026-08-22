@@ -18,22 +18,31 @@
 package org.apache.hop.ui.hopgui.file.workflow.delegates;
 
 import java.util.ArrayList;
-import org.apache.commons.lang.StringUtils;
+import lombok.Getter;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Props;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.gui.plugin.toolbar.GuiToolbarElement;
+import org.apache.hop.core.gui.plugin.toolbar.GuiToolbarElementType;
 import org.apache.hop.core.logging.HopLogStore;
 import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.EnterSelectionDialog;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.gui.GuiToolbarWidgets;
+import org.apache.hop.ui.core.gui.IToolbarContainer;
 import org.apache.hop.ui.core.widget.OsHelper;
+import org.apache.hop.ui.core.widget.StyledTextComp;
+import org.apache.hop.ui.core.widget.StyledTextVar;
+import org.apache.hop.ui.core.widget.TextComposite;
 import org.apache.hop.ui.hopgui.HopGui;
+import org.apache.hop.ui.hopgui.ToolbarFacade;
 import org.apache.hop.ui.hopgui.file.IHopFileTypeHandler;
 import org.apache.hop.ui.hopgui.file.pipeline.HopGuiLogBrowser;
+import org.apache.hop.ui.hopgui.file.shared.TextZoom;
 import org.apache.hop.ui.hopgui.file.workflow.HopGuiWorkflowGraph;
+import org.apache.hop.ui.util.EnvironmentUtils;
 import org.apache.hop.workflow.WorkflowMeta;
 import org.apache.hop.workflow.action.ActionMeta;
 import org.eclipse.swt.SWT;
@@ -41,11 +50,10 @@ import org.eclipse.swt.custom.CTabItem;
 import org.eclipse.swt.layout.FormAttachment;
 import org.eclipse.swt.layout.FormData;
 import org.eclipse.swt.layout.FormLayout;
+import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Text;
-import org.eclipse.swt.widgets.ToolBar;
-import org.eclipse.swt.widgets.ToolItem;
 
 @GuiPlugin(description = "Workflow Graph Log Delegate")
 public class HopGuiWorkflowLogDelegate {
@@ -57,21 +65,31 @@ public class HopGuiWorkflowLogDelegate {
   public static final String TOOLBAR_ICON_LOG_COPY_TO_CLIPBOARD =
       "ToolbarIcon-10020-LogCopyToClipboard";
   public static final String TOOLBAR_ICON_LOG_PAUSE_RESUME = "ToolbarIcon-10030-LogPauseResume";
+  public static final String TOOLBAR_ICON_LOG_INCREASE_FONT = "ToolbarIcon-10040-LogIncreaseFont";
+  public static final String TOOLBAR_ICON_LOG_DECREASE_FONT = "ToolbarIcon-10050-LogDecreaseFont";
+  public static final String TOOLBAR_ICON_LOG_RESET_FONT = "ToolbarIcon-10060-LogResetFont";
+  public static final String TOOLBAR_ICON_LOG_FILTER_TEXT = "ToolbarIcon-10070-LogFilterText";
+  public static final String TOOLBAR_ICON_LOG_FILTER_HIGHLIGHT =
+      "ToolbarIcon-10080-LogFilterHighlight";
+  public static final String TOOLBAR_ICON_LOG_FILTER_CASE_SENSITIVE =
+      "ToolbarIcon-10090-LogFilterCaseSensitive";
+  public static final String TOOLBAR_ICON_LOG_FILTER_EXCLUDE = "ToolbarIcon-10100-LogFilterExclude";
 
   private HopGui hopGui;
   private HopGuiWorkflowGraph workflowGraph;
 
   private CTabItem workflowLogTab;
 
-  private Text workflowLogText;
+  private TextComposite workflowLogText;
+  private TextZoom textZoom;
 
   /** The number of lines in the log tab */
   private Composite workflowLogComposite;
 
-  private ToolBar toolbar;
+  private Control toolbar;
   private GuiToolbarWidgets toolBarWidgets;
 
-  private HopGuiLogBrowser logBrowser;
+  @Getter private HopGuiLogBrowser logBrowser;
 
   /**
    * @param hopGui
@@ -110,17 +128,37 @@ public class HopGuiWorkflowLogDelegate {
     fd.right = new FormAttachment(100, 0);
     toolbar.setLayoutData(fd);
 
-    workflowLogText =
-        new Text(
-            workflowLogComposite,
-            SWT.READ_ONLY | SWT.BORDER | SWT.MULTI | SWT.V_SCROLL | SWT.H_SCROLL);
+    // Use StyledTextComp for web (uses Text widget), StyledTextVar for desktop (uses StyledText
+    // for highlighting)
+    if (EnvironmentUtils.getInstance().isWeb()) {
+      workflowLogText =
+          new StyledTextComp(
+              workflowGraph.getVariables(),
+              workflowLogComposite,
+              SWT.READ_ONLY | SWT.BORDER | SWT.MULTI | SWT.V_SCROLL | SWT.H_SCROLL,
+              TextComposite.STYLE_TYPE_LOG);
+    } else {
+      workflowLogText =
+          new StyledTextVar(
+              workflowGraph.getVariables(),
+              workflowLogComposite,
+              SWT.READ_ONLY | SWT.BORDER | SWT.MULTI | SWT.V_SCROLL | SWT.H_SCROLL,
+              false,
+              false,
+              TextComposite.STYLE_TYPE_LOG);
+      // Error highlighting is applied directly in HopGuiLogBrowser when adding lines
+    }
     PropsUi.setLook(workflowLogText);
     FormData fdText = new FormData();
     fdText.left = new FormAttachment(0, 0);
     fdText.right = new FormAttachment(100, 0);
-    fdText.top = new FormAttachment((Control) toolbar, 0);
+    fdText.top = new FormAttachment(toolbar, 0);
     fdText.bottom = new FormAttachment(100, 0);
     workflowLogText.setLayoutData(fdText);
+
+    this.textZoom = new TextZoom(workflowLogText, GuiResource.getInstance().getFontFixed());
+    this.textZoom.resetFont();
+
     // add a CR to avoid fontStyle from getting lost on macos HOP-2583
     if (OsHelper.isMac()) {
       workflowLogText.setText(Const.CR);
@@ -157,7 +195,10 @@ public class HopGuiWorkflowLogDelegate {
   }
 
   private void addToolBar() {
-    toolbar = new ToolBar(workflowLogComposite, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    IToolbarContainer toolBarContainer =
+        ToolbarFacade.createToolbarContainer(
+            workflowLogComposite, SWT.WRAP | SWT.LEFT | SWT.HORIZONTAL);
+    toolbar = toolBarContainer.getControl();
     FormData fdToolBar = new FormData();
     fdToolBar.left = new FormAttachment(0, 0);
     fdToolBar.top = new FormAttachment(0, 0);
@@ -167,18 +208,28 @@ public class HopGuiWorkflowLogDelegate {
 
     toolBarWidgets = new GuiToolbarWidgets();
     toolBarWidgets.registerGuiPluginObject(this);
-    toolBarWidgets.createToolbarWidgets(toolbar, GUI_PLUGIN_TOOLBAR_PARENT_ID);
+    toolBarWidgets.createToolbarWidgets(toolBarContainer, GUI_PLUGIN_TOOLBAR_PARENT_ID);
+    // Apply filter while typing (not only on Enter) so only-matching mode updates live.
+    Control filterControl = toolBarWidgets.getControlForMenu(TOOLBAR_ICON_LOG_FILTER_TEXT);
+    if (filterControl instanceof Text filterText) {
+      filterText.addListener(SWT.Modify, event -> applyLogFilterFromToolbar());
+    }
     toolbar.pack();
   }
 
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_CLEAR_LOG_VIEW,
+      toolTip = "i18n:org.apache.hop.ui.hopgui:WorkflowLog.Button.ClearLog",
+      image = "ui/images/delete.svg")
   public void clearLog() {
     if (workflowLogText != null && !workflowLogText.isDisposed()) {
       // add a CR to avoid fontStyle from getting lost on macos HOP-2583
-      if (OsHelper.isMac()) {
-        workflowLogText.setText(Const.CR);
-      } else {
-        workflowLogText.setText("");
-      }
+      String textToSet = OsHelper.isMac() ? Const.CR : "";
+      workflowLogText.setText(textToSet);
+    }
+    if (logBrowser != null) {
+      logBrowser.resetLogPosition();
     }
   }
 
@@ -188,7 +239,8 @@ public class HopGuiWorkflowLogDelegate {
       toolTip = "i18n:org.apache.hop.ui.hopgui:WorkflowLog.Button.LogCopyToClipboard",
       image = "ui/images/copy.svg")
   public void copyToClipboard() {
-    GuiResource.getInstance().toClipboard(workflowLogText.getText());
+    String text = workflowLogText.getText();
+    GuiResource.getInstance().toClipboard(text);
   }
 
   @GuiToolbarElement(
@@ -269,20 +321,119 @@ public class HopGuiWorkflowLogDelegate {
       image = "ui/images/pause.svg",
       separator = true)
   public void pauseLog() {
-    ToolItem item = toolBarWidgets.findToolItem(TOOLBAR_ICON_LOG_PAUSE_RESUME);
     if (logBrowser.isPaused()) {
       logBrowser.setPaused(false);
-      item.setImage(GuiResource.getInstance().getImageRun());
+      toolBarWidgets.setToolbarItemImage(TOOLBAR_ICON_LOG_PAUSE_RESUME, "ui/images/pause.svg");
     } else {
       logBrowser.setPaused(true);
-      item.setImage(GuiResource.getInstance().getImagePause());
+      toolBarWidgets.setToolbarItemImage(TOOLBAR_ICON_LOG_PAUSE_RESUME, "ui/images/run.svg");
     }
   }
 
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_INCREASE_FONT,
+      toolTip = "i18n:org.apache.hop.ui.hopgui:WorkflowLog.Button.IncreaseFont",
+      image = "ui/images/zoom-in.svg",
+      separator = true)
+  public void increaseFont() {
+    this.textZoom.increaseFont();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_DECREASE_FONT,
+      toolTip = "i18n:org.apache.hop.ui.hopgui:WorkflowLog.Button.DecreaseFont",
+      image = "ui/images/zoom-out.svg",
+      separator = false)
+  public void decreaseFont() {
+    this.textZoom.decreaseFont();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_RESET_FONT,
+      toolTip = "i18n:org.apache.hop.ui.hopgui:WorkflowLog.Button.ResetFont",
+      image = "ui/images/zoom-100.svg",
+      separator = false)
+  public void resetFont() {
+    this.textZoom.resetFont();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_FILTER_TEXT,
+      type = GuiToolbarElementType.TEXT,
+      label = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Text.Label",
+      toolTip = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Text.Tooltip",
+      separator = true)
+  public void filterTextChanged() {
+    applyLogFilterFromToolbar();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_FILTER_HIGHLIGHT,
+      type = GuiToolbarElementType.CHECKBOX,
+      label = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Highlight.Label",
+      toolTip = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Highlight.Tooltip")
+  public void filterHighlightChanged() {
+    applyLogFilterFromToolbar();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_FILTER_CASE_SENSITIVE,
+      type = GuiToolbarElementType.CHECKBOX,
+      label = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.CaseSensitive.Label",
+      toolTip = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.CaseSensitive.Tooltip")
+  public void filterCaseSensitiveChanged() {
+    applyLogFilterFromToolbar();
+  }
+
+  @GuiToolbarElement(
+      root = GUI_PLUGIN_TOOLBAR_PARENT_ID,
+      id = TOOLBAR_ICON_LOG_FILTER_EXCLUDE,
+      type = GuiToolbarElementType.CHECKBOX,
+      label = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Exclude.Label",
+      toolTip = "i18n:org.apache.hop.ui.hopgui:LogBrowser.Filter.Exclude.Tooltip")
+  public void filterExcludeChanged() {
+    applyLogFilterFromToolbar();
+  }
+
+  private void applyLogFilterFromToolbar() {
+    if (logBrowser == null || toolBarWidgets == null) {
+      return;
+    }
+
+    String filter = "";
+    Control filterControl = toolBarWidgets.getControlForMenu(TOOLBAR_ICON_LOG_FILTER_TEXT);
+    if (filterControl instanceof Text textWidget && !textWidget.isDisposed()) {
+      filter = Const.NVL(textWidget.getText(), "").trim();
+    }
+
+    boolean highlight = isToolbarCheckboxSelected(TOOLBAR_ICON_LOG_FILTER_HIGHLIGHT);
+    boolean caseSensitive = isToolbarCheckboxSelected(TOOLBAR_ICON_LOG_FILTER_CASE_SENSITIVE);
+    boolean exclude = isToolbarCheckboxSelected(TOOLBAR_ICON_LOG_FILTER_EXCLUDE);
+
+    // Without highlight (and without exclude), only matching lines remain in the log view.
+    logBrowser.setFilter(filter, highlight, caseSensitive, exclude);
+    logBrowser.refreshFilteredView();
+  }
+
+  private boolean isToolbarCheckboxSelected(String id) {
+    Control control = toolBarWidgets.getControlForMenu(id);
+    if (control instanceof Button button && !button.isDisposed()) {
+      return button.getSelection();
+    }
+    return false;
+  }
+
   public boolean hasSelectedText() {
-    return workflowLogText != null
-        && !workflowLogText.isDisposed()
-        && StringUtils.isNotEmpty(workflowLogText.getSelectionText());
+    if (workflowLogText == null || workflowLogText.isDisposed()) {
+      return false;
+    }
+    return StringUtils.isNotEmpty(workflowLogText.getSelectionText());
   }
 
   public void copySelected() {

@@ -19,9 +19,7 @@ package org.apache.hop.pipeline.transforms.kafka.producer;
 
 import com.google.common.collect.ImmutableMap;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.Props;
 import org.apache.hop.core.exception.HopTransformException;
@@ -32,6 +30,7 @@ import org.apache.hop.i18n.BaseMessages;
 import org.apache.hop.pipeline.PipelineMeta;
 import org.apache.hop.pipeline.transforms.kafka.shared.KafkaDialogHelper;
 import org.apache.hop.pipeline.transforms.kafka.shared.KafkaFactory;
+import org.apache.hop.pipeline.transforms.kafka.shared.KafkaOption;
 import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.dialog.BaseDialog;
 import org.apache.hop.ui.core.dialog.ErrorDialog;
@@ -56,7 +55,6 @@ import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Listener;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.TableItem;
-import org.eclipse.swt.widgets.Text;
 
 public class KafkaProducerOutputDialog extends BaseTransformDialog {
 
@@ -69,22 +67,21 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
 
   private final KafkaFactory kafkaFactory = KafkaFactory.defaultFactory();
 
-  private static final int SHELL_MIN_WIDTH = 527;
-  private static final int SHELL_MIN_HEIGHT = 569;
-
   private final KafkaProducerOutputMeta meta;
   private ModifyListener lsMod;
 
   private TextVar wClientId;
   private ComboVar wTopic;
+  private Button wTopicInField;
+  private Label wlTopicField;
+  private ComboVar wTopicField;
   private ComboVar wKeyField;
   private ComboVar wMessageField;
+  private ComboVar wHeadersField;
   private TableView optionsTable;
   private CTabFolder wTabFolder;
 
   private TextVar wBootstrapServers;
-  private final int middle = props.getMiddlePct();
-  private final int margin = PropsUi.getMargin();
 
   public KafkaProducerOutputDialog(
       Shell parent,
@@ -97,76 +94,22 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
 
   @Override
   public String open() {
-    Shell parent = getParent();
+    createShell(BaseMessages.getString(PKG, "KafkaProducerOutputDialog.Shell.Title"));
+
+    buildButtonBar().ok(e -> ok()).cancel(e -> cancel()).build();
+
     changed = meta.hasChanged();
-
     lsMod = e -> meta.setChanged();
-
-    shell = new Shell(parent, SWT.DIALOG_TRIM | SWT.MIN | SWT.MAX | SWT.RESIZE);
-    PropsUi.setLook(shell);
-    setShellImage(shell, meta);
-    shell.setMinimumSize(SHELL_MIN_WIDTH, SHELL_MIN_HEIGHT);
-    shell.setText(BaseMessages.getString(PKG, "KafkaProducerOutputDialog.Shell.Title"));
-
-    FormLayout formLayout = new FormLayout();
-    formLayout.marginWidth = 15;
-    formLayout.marginHeight = 15;
-    shell.setLayout(formLayout);
-
-    wlTransformName = new Label(shell, SWT.RIGHT);
-    wlTransformName.setText(
-        BaseMessages.getString(PKG, "KafkaProducerOutputDialog.TransformName.Label"));
-    PropsUi.setLook(wlTransformName);
-    fdlTransformName = new FormData();
-    fdlTransformName.left = new FormAttachment(0, 0);
-    fdlTransformName.top = new FormAttachment(0, 0);
-    fdlTransformName.right = new FormAttachment(middle, -margin);
-    wlTransformName.setLayoutData(fdlTransformName);
-
-    wTransformName = new Text(shell, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
-    wTransformName.setText(transformName);
-    PropsUi.setLook(wTransformName);
-    wTransformName.addModifyListener(lsMod);
-    fdTransformName = new FormData();
-    fdTransformName.left = new FormAttachment(wlTransformName, margin);
-    fdTransformName.right = new FormAttachment(100, 0);
-    fdTransformName.top = new FormAttachment(wlTransformName, 0, SWT.CENTER);
-    wTransformName.setLayoutData(fdTransformName);
-
-    Label topSeparator = new Label(shell, SWT.HORIZONTAL | SWT.SEPARATOR);
-    FormData fdSpacer = new FormData();
-    fdSpacer.height = 2;
-    fdSpacer.left = new FormAttachment(0, 0);
-    fdSpacer.top = new FormAttachment(wTransformName, 15);
-    fdSpacer.right = new FormAttachment(100, 0);
-    topSeparator.setLayoutData(fdSpacer);
 
     // Start of tabbed display
     wTabFolder = new CTabFolder(shell, SWT.BORDER);
     PropsUi.setLook(wTabFolder, Props.WIDGET_STYLE_TAB);
     wTabFolder.setUnselectedCloseVisible(true);
 
-    wOk = new Button(shell, SWT.PUSH);
-    wOk.setText(BaseMessages.getString(PKG, "System.Button.OK"));
-    wOk.addListener(SWT.Selection, e -> ok());
-    wCancel = new Button(shell, SWT.PUSH);
-    wCancel.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
-    wCancel.addListener(SWT.Selection, e -> cancel());
-    positionBottomButtons(shell, new Button[] {wOk, wCancel}, PropsUi.getMargin(), null);
-
-    Label bottomSeparator = new Label(shell, SWT.HORIZONTAL | SWT.SEPARATOR);
-    PropsUi.setLook(bottomSeparator);
-    FormData fdBottomSeparator = new FormData();
-    fdBottomSeparator.height = 2;
-    fdBottomSeparator.left = new FormAttachment(0, 0);
-    fdBottomSeparator.bottom = new FormAttachment(wCancel, -15);
-    fdBottomSeparator.right = new FormAttachment(100, 0);
-    bottomSeparator.setLayoutData(fdBottomSeparator);
-
     FormData fdTabFolder = new FormData();
     fdTabFolder.left = new FormAttachment(0, 0);
-    fdTabFolder.top = new FormAttachment(topSeparator, 15);
-    fdTabFolder.bottom = new FormAttachment(bottomSeparator, -15);
+    fdTabFolder.top = new FormAttachment(wSpacer, margin);
+    fdTabFolder.bottom = new FormAttachment(wOk, -margin);
     fdTabFolder.right = new FormAttachment(100, 0);
     wTabFolder.setLayoutData(fdTabFolder);
 
@@ -178,7 +121,6 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
     meta.setChanged(changed);
 
     wTabFolder.setSelection(0);
-
     BaseDialog.defaultShellHandling(shell, c -> ok(), c -> cancel());
 
     return transformName;
@@ -266,12 +208,60 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
               kafkaDialogHelper.clusterNameChanged(event);
             });
 
+    Label wlTopicInField = new Label(wSetupComp, SWT.RIGHT);
+    PropsUi.setLook(wlTopicInField);
+    wlTopicInField.setText(BaseMessages.getString(PKG, "KafkaProducerOutputDialog.TopicInField"));
+    FormData fdlTopicInField = new FormData();
+    fdlTopicInField.left = new FormAttachment(0, 0);
+    fdlTopicInField.top = new FormAttachment(wTopic, margin);
+    fdlTopicInField.right = new FormAttachment(middle, -margin);
+    wlTopicInField.setLayoutData(fdlTopicInField);
+
+    wTopicInField = new Button(wSetupComp, SWT.CHECK);
+    PropsUi.setLook(wTopicInField);
+    FormData fdTopicInField = new FormData();
+    fdTopicInField.left = new FormAttachment(wlTopicInField, margin);
+    fdTopicInField.top = new FormAttachment(wlTopicInField, 0, SWT.CENTER);
+    fdTopicInField.right = new FormAttachment(100, 0);
+    wTopicInField.setLayoutData(fdTopicInField);
+    wTopicInField.addListener(
+        SWT.Selection,
+        e -> {
+          meta.setChanged();
+          enableFields();
+        });
+
+    wlTopicField = new Label(wSetupComp, SWT.RIGHT);
+    PropsUi.setLook(wlTopicField);
+    wlTopicField.setText(BaseMessages.getString(PKG, "KafkaProducerOutputDialog.TopicField"));
+    FormData fdlTopicField = new FormData();
+    fdlTopicField.left = new FormAttachment(0, 0);
+    fdlTopicField.top = new FormAttachment(wTopicInField, margin);
+    fdlTopicField.right = new FormAttachment(middle, -margin);
+    wlTopicField.setLayoutData(fdlTopicField);
+
+    wTopicField = new ComboVar(variables, wSetupComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    PropsUi.setLook(wTopicField);
+    wTopicField.addModifyListener(lsMod);
+    FormData fdTopicField = new FormData();
+    fdTopicField.left = new FormAttachment(wlTopicField, margin);
+    fdTopicField.top = new FormAttachment(wlTopicField, 0, SWT.CENTER);
+    fdTopicField.right = new FormAttachment(100, 0);
+    wTopicField.setLayoutData(fdTopicField);
+    wTopicField
+        .getCComboWidget()
+        .addListener(
+            SWT.FocusIn,
+            e ->
+                KafkaDialogHelper.populateFieldsList(
+                    variables, pipelineMeta, wTopicField, transformName));
+
     Label wlKeyField = new Label(wSetupComp, SWT.RIGHT);
     PropsUi.setLook(wlKeyField);
     wlKeyField.setText(BaseMessages.getString(PKG, "KafkaProducerOutputDialog.KeyField"));
     FormData fdlKeyField = new FormData();
     fdlKeyField.left = new FormAttachment(0, 0);
-    fdlKeyField.top = new FormAttachment(wTopic, margin);
+    fdlKeyField.top = new FormAttachment(wTopicField, margin);
     fdlKeyField.right = new FormAttachment(middle, -margin);
     wlKeyField.setLayoutData(fdlKeyField);
 
@@ -311,6 +301,31 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
                 variables, pipelineMeta, wMessageField, transformName);
     wMessageField.getCComboWidget().addListener(SWT.FocusIn, lsMessageFocus);
 
+    Label wlHeadersField = new Label(wSetupComp, SWT.RIGHT);
+    PropsUi.setLook(wlHeadersField);
+    wlHeadersField.setText(BaseMessages.getString(PKG, "KafkaProducerOutputDialog.HeadersField"));
+    FormData fdlHeadersField = new FormData();
+    fdlHeadersField.left = new FormAttachment(0, 0);
+    fdlHeadersField.top = new FormAttachment(wMessageField, margin);
+    fdlHeadersField.right = new FormAttachment(middle, -margin);
+    wlHeadersField.setLayoutData(fdlHeadersField);
+
+    wHeadersField = new ComboVar(variables, wSetupComp, SWT.SINGLE | SWT.LEFT | SWT.BORDER);
+    PropsUi.setLook(wHeadersField);
+    wHeadersField.addModifyListener(lsMod);
+    FormData fdHeadersField = new FormData();
+    fdHeadersField.left = new FormAttachment(wlHeadersField, margin);
+    fdHeadersField.top = new FormAttachment(wlHeadersField, 0, SWT.CENTER);
+    fdHeadersField.right = new FormAttachment(100, 0);
+    wHeadersField.setLayoutData(fdHeadersField);
+    wHeadersField
+        .getCComboWidget()
+        .addListener(
+            SWT.FocusIn,
+            e ->
+                KafkaDialogHelper.populateFieldsList(
+                    variables, pipelineMeta, wHeadersField, transformName));
+
     FormData fdSetupComp = new FormData();
     fdSetupComp.left = new FormAttachment(0, 0);
     fdSetupComp.top = new FormAttachment(0, 0);
@@ -348,16 +363,14 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
   private void buildOptionsTable(Composite parentWidget) {
     ColumnInfo[] columns = getOptionsColumns();
 
-    if (meta.getConfig().isEmpty()) {
+    if (meta.getOptions().isEmpty()) {
       // initial call
       List<String> list = KafkaDialogHelper.getProducerAdvancedConfigOptionNames();
-      Map<String, String> advancedConfig = new LinkedHashMap<>();
       for (String item : list) {
-        advancedConfig.put(item, DEFAULT_OPTION_VALUES.getOrDefault(item, ""));
+        meta.getOptions().add(new KafkaOption(item, DEFAULT_OPTION_VALUES.getOrDefault(item, "")));
       }
-      meta.setConfig(advancedConfig);
     }
-    int fieldCount = meta.getConfig().size();
+    int fieldCount = meta.getOptions().size();
 
     optionsTable =
         new TableView(
@@ -415,10 +428,10 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
 
   private void populateOptionsData() {
     int rowIndex = 0;
-    for (Map.Entry<String, String> entry : meta.getConfig().entrySet()) {
+    for (KafkaOption option : meta.getOptions()) {
       TableItem key = optionsTable.getTable().getItem(rowIndex++);
-      key.setText(1, entry.getKey());
-      key.setText(2, entry.getValue());
+      key.setText(1, Const.NVL(option.getProperty(), ""));
+      key.setText(2, Const.NVL(option.getValue(), ""));
     }
     optionsTable.optimizeTableView();
   }
@@ -427,19 +440,34 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
     wBootstrapServers.setText(Const.NVL(meta.getDirectBootstrapServers(), ""));
     wClientId.setText(Const.NVL(meta.getClientId(), ""));
     wTopic.setText(Const.NVL(meta.getTopic(), ""));
+    wTopicInField.setSelection(meta.isTopicInField());
+    wTopicField.setText(Const.NVL(meta.getTopicField(), ""));
     wKeyField.setText(Const.NVL(meta.getKeyField(), ""));
     wMessageField.setText(Const.NVL(meta.getMessageField(), ""));
+    wHeadersField.setText(Const.NVL(meta.getHeadersField(), ""));
 
     populateOptionsData();
+    enableFields();
   }
 
-  private boolean checkIfFieldExists(String fieldName) {
+  /**
+   * The topic is either a fixed name or read from a stream field, never both, so only the relevant
+   * widget stays enabled.
+   */
+  private void enableFields() {
+    boolean topicInField = wTopicInField.getSelection();
+    wTopic.setEnabled(!topicInField);
+    wlTopicField.setEnabled(topicInField);
+    wTopicField.setEnabled(topicInField);
+  }
+
+  private boolean checkMissingField(String fieldName) {
     boolean fieldFound = false;
     try {
       IRowMeta r = pipelineMeta.getPrevTransformFields(variables, transformName);
       String[] fieldNames = r.getFieldNames();
-      for (int count = 0; count < fieldNames.length; count++) {
-        if (fieldName.equals(fieldNames[count])) {
+      for (String name : fieldNames) {
+        if (fieldName.equals(name)) {
           fieldFound = true;
           break;
         }
@@ -451,7 +479,7 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
           BaseMessages.getString(PKG, "KafkaProducerOutputDialog.FailedToGetFields.DialogMessage"),
           ke);
     }
-    return fieldFound;
+    return !fieldFound;
   }
 
   private void cancel() {
@@ -475,7 +503,35 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
     meta.setDirectBootstrapServers(wBootstrapServers.getText());
     meta.setClientId(wClientId.getText());
     meta.setTopic(wTopic.getText());
-    if (!Utils.isEmpty(wKeyField.getText()) && !checkIfFieldExists(wKeyField.getText())) {
+
+    if (wTopicInField.getSelection()) {
+      if (Utils.isEmpty(wTopicField.getText())) {
+        MessageBox mb = new MessageBox(shell, SWT.OK | SWT.ICON_ERROR);
+        mb.setMessage(
+            BaseMessages.getString(PKG, "KafkaProducerOutputDialog.TopicFieldMandatory.Message"));
+        mb.setText(
+            BaseMessages.getString(PKG, CONST_KAFKA_PRODUCER_OUTPUT_DIALOG_FIELD_NOT_EXISTS_TITLE));
+        mb.open();
+        return;
+      }
+      if (checkMissingField(wTopicField.getText())) {
+        MessageBox mb = new MessageBox(shell, SWT.OK | SWT.ICON_ERROR);
+        mb.setMessage(
+            BaseMessages.getString(
+                PKG,
+                "KafkaProducerOutputDialog.TopicFieldNotExists.Message",
+                wTopicField.getText()));
+        mb.setText(
+            BaseMessages.getString(PKG, CONST_KAFKA_PRODUCER_OUTPUT_DIALOG_FIELD_NOT_EXISTS_TITLE));
+        mb.open();
+        return;
+      }
+    }
+
+    meta.setTopicInField(wTopicInField.getSelection());
+    meta.setTopicField(wTopicField.getText());
+
+    if (!Utils.isEmpty(wKeyField.getText()) && checkMissingField(wKeyField.getText())) {
       MessageBox mb = new MessageBox(shell, SWT.OK | SWT.ICON_ERROR);
       mb.setMessage(
           BaseMessages.getString(
@@ -497,7 +553,7 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
       return;
     }
 
-    if (!checkIfFieldExists(wMessageField.getText())) {
+    if (checkMissingField(wMessageField.getText())) {
       MessageBox mb = new MessageBox(shell, SWT.OK | SWT.ICON_ERROR);
       mb.setMessage(
           BaseMessages.getString(
@@ -511,7 +567,22 @@ public class KafkaProducerOutputDialog extends BaseTransformDialog {
     }
 
     meta.setMessageField(wMessageField.getText());
-    meta.setConfig(KafkaDialogHelper.getConfig(optionsTable));
+
+    if (!Utils.isEmpty(wHeadersField.getText()) && checkMissingField(wHeadersField.getText())) {
+      MessageBox mb = new MessageBox(shell, SWT.OK | SWT.ICON_ERROR);
+      mb.setMessage(
+          BaseMessages.getString(
+              PKG,
+              "KafkaProducerOutputDialog.HeadersFieldNotExists.Message",
+              wHeadersField.getText()));
+      mb.setText(
+          BaseMessages.getString(PKG, CONST_KAFKA_PRODUCER_OUTPUT_DIALOG_FIELD_NOT_EXISTS_TITLE));
+      mb.open();
+      return;
+    }
+
+    meta.setHeadersField(wHeadersField.getText());
+    meta.setOptions(KafkaDialogHelper.getConfig(optionsTable));
 
     transformName = wTransformName.getText();
 

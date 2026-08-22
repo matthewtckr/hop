@@ -18,38 +18,39 @@
 package org.apache.hop.pipeline.transforms.csvinput;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
-import org.apache.hop.core.file.TextFileInputField;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.PipelineTestingUtil;
 import org.apache.hop.pipeline.transforms.mock.TransformMockHelper;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class CsvInputRowNumberTest extends CsvInputUnitTestBase {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+class CsvInputRowNumberTest extends CsvInputUnitTestBase {
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
   private CsvInput csvInput;
   private TransformMockHelper<CsvInputMeta, CsvInputData> transformMockHelper;
 
-  @Before
-  public void setUp() throws Exception {
+  @BeforeEach
+  void setUp() throws Exception {
     transformMockHelper =
         TransformMockUtil.getTransformMockHelper(
             CsvInputMeta.class, CsvInputData.class, "CsvInputRowNumberTest");
   }
 
-  @After
-  public void cleanUp() {
+  @AfterEach
+  void cleanUp() {
     transformMockHelper.cleanUp();
   }
 
   @Test
-  public void hasNotEnclosures_HasNotNewLine() throws Exception {
-    File tmp = createTestFile("utf-8", "a,b\na,");
+  void hasNotEnclosures_HasNotNewLine() throws Exception {
+    File tmp = createTestFile(StandardCharsets.UTF_8, "a,b\na,");
     try {
       doTest(tmp);
     } finally {
@@ -83,7 +84,7 @@ public class CsvInputRowNumberTest extends CsvInputUnitTestBase {
   }
 
   @Override
-  CsvInputMeta createMeta(File file, TextFileInputField[] fields) {
+  CsvInputMeta createMeta(File file, CsvInputField[] fields) {
     CsvInputMeta meta = super.createMeta(file, fields);
     meta.setRowNumField("rownum");
     return meta;

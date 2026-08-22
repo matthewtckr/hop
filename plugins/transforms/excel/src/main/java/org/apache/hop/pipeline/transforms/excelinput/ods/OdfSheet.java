@@ -77,10 +77,8 @@ public class OdfSheet implements IKSheet {
     int cellsLen = cells.getLength();
     for (int j = 0; j < cellsLen; j++) { // iterate over cells
       Node cell = cells.item(j);
-      if (cell instanceof TableTableCellElement) {
-        if (cell.hasChildNodes()) {
-          return false;
-        }
+      if (cell instanceof TableTableCellElement && cell.hasChildNodes()) {
+        return false;
       }
     }
     return true;
@@ -138,6 +136,13 @@ public class OdfSheet implements IKSheet {
 
   @Override
   public IKCell getCell(int colnr, int rownr) {
+    // Never ask ODFDOM for a cell outside of the sheet: it silently grows the table to fit and
+    // that forces every repeated (empty) row of the sheet to be materialized. Spreadsheets
+    // typically declare their trailing empty rows as a single row repeated a million times, so
+    // reading one cell past the last column would hang for a very long time.
+    if (colnr < 0 || rownr < 0 || colnr >= roughNrOfCols || rownr >= nrOfRows) {
+      return null;
+    }
     OdfTableCell cell = table.getCellByPosition(colnr, rownr);
     if (cell == null) {
       return null;

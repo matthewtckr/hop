@@ -60,18 +60,6 @@ public class StringCutMeta extends BaseTransformMeta<StringCut, StringCutData> {
     fields = new ArrayList<>();
   }
 
-  public StringCutMeta(StringCutMeta obj) {
-    fields = new ArrayList<>();
-    for (StringCutField field : obj.fields) {
-      this.fields.add(new StringCutField(field));
-    }
-  }
-
-  @Override
-  public Object clone() {
-    return new StringCutMeta(this);
-  }
-
   /**
    * Gets fields
    *
@@ -97,10 +85,10 @@ public class StringCutMeta extends BaseTransformMeta<StringCut, StringCutData> {
       IVariables variables,
       IHopMetadataProvider metadataProvider)
       throws HopTransformException {
-    for (int i = 0; i < fields.size(); i++) {
+    for (StringCutField field : fields) {
       IValueMeta v;
-      String fieldOutStream = fields.get(i).getFieldOutStream();
-      String fieldInStream = fields.get(i).getFieldInStream();
+      String fieldOutStream = field.getFieldOutStream();
+      String fieldInStream = field.getFieldInStream();
       if (!Utils.isEmpty(fieldOutStream)) {
         v = new ValueMetaString(variables.resolve(fieldOutStream));
         v.setLength(100, -1);

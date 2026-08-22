@@ -18,7 +18,7 @@
  */
 
 def AGENT_LABEL = env.AGENT_LABEL ?: 'ubuntu'
-def JDK_NAME = env.JDK_NAME ?: 'jdk_17_latest'
+def JDK_NAME = env.JDK_NAME ?: 'jdk_21_latest'
 def MAVEN_NAME = env.MAVEN_NAME ?: 'maven_3_latest'
 
 def MAVEN_PARAMS = "-T 2 -U -B -e -fae -V -Dmaven.compiler.fork=true -Dsurefire.rerunFailingTestsCount=2 -DSkipTestContainers=true"
@@ -103,14 +103,23 @@ pipeline {
                 dir("local-snapshots-dir/") {
                     deleteDir()
                 }
-
-                sh "mvn $MAVEN_PARAMS -DaltDeploymentRepository=snapshot-repo::default::file:./local-snapshots-dir clean deploy"
+                sh "xvfb-run -a --server-args='-screen 0 1280x1024x24' mvn $MAVEN_PARAMS -DaltDeploymentRepository=snapshot-repo::default::file:./local-snapshots-dir clean deploy"
             }
             post {
                 always {
                     junit(testResults: '**/surefire-reports/*.xml', allowEmptyResults: true)
                     junit(testResults: '**/failsafe-reports/*.xml', allowEmptyResults: true)
+                    archiveArtifacts(artifacts: '**/screenshots/**', allowEmptyArchive: true)
                 }
+            }
+        }
+        stage('Assembly size check') {
+            when {
+                  anyOf { changeset pattern: "^(?!docs).*^(?!integration-tests).*" , comparator: "REGEXP" ; equals expected: true, actual: params.FORCE_BUILD }
+                }
+            steps {
+                // ASF Artifactory rejects packages over ~850MB; fail early with margin.
+                sh "./tools/check-assembly-size.sh"
             }
         }
         stage('Unzip Apache Hop'){
@@ -119,6 +128,8 @@ pipeline {
                 }
             steps{
                 sh "unzip ./assemblies/client/target/hop-client-*.zip -d ./assemblies/client/target/"
+                // Optional Wave 1 plugins are marketplace-only; install into the extracted client for IT/Docker
+                sh "./tools/install-wave1-plugins.sh ./assemblies/client/target/hop"
                 sh "unzip ./assemblies/web/target/hop.war -d ./assemblies/web/target/webapp"
             }
         }
@@ -159,9 +170,9 @@ pipeline {
                     //TODO We may never create final/latest version using CI/CD as we need to follow manual apache release process with signing
                     sh "docker buildx create --name hop --use"
                     //Base docker image
-                    sh "docker buildx build --platform linux/amd64,linux/arm64 . -f docker/Dockerfile.web -t ${DOCKER_REPO_WEB}:${env.POM_VERSION} -t ${DOCKER_REPO_WEB}:Development --push"
+                    sh "docker buildx build --platform linux/amd64,linux/arm64 . -f docker/web.Dockerfile -t ${DOCKER_REPO_WEB}:${env.POM_VERSION} -t ${DOCKER_REPO_WEB}:Development --push"
                     //Image including fat-jar
-                    sh "docker buildx build  --build-arg HOP_WEB_VERSION=Development --platform linux/amd64,linux/arm64 . -f docker/Dockerfile.web-fatjar -t ${DOCKER_REPO_WEB}:${env.POM_VERSION}-beam -t ${DOCKER_REPO_WEB}:Development-beam --push"
+                    sh "docker buildx build  --build-arg HOP_WEB_VERSION=Development --platform linux/amd64,linux/arm64 . -f docker/web-fatjar.Dockerfile -t ${DOCKER_REPO_WEB}:${env.POM_VERSION}-beam -t ${DOCKER_REPO_WEB}:Development-beam --push"
                     sh "docker buildx rm hop"
                   }
             }
@@ -177,7 +188,7 @@ pipeline {
                 withDockerRegistry([ credentialsId: "dockerhub-hop", url: "" ]) {
                     //TODO We may never create final/latest version using CI/CD as we need to follow manual apache release process with signing
                     sh "docker buildx create --name hop --use"
-                    sh "docker buildx build --platform linux/amd64,linux/arm64 . -f docker/Dockerfile.dataflowTemplate -t ${DOCKER_REPO_DATAFLOWTEMPLATE}:${env.POM_VERSION} -t ${DOCKER_REPO_DATAFLOWTEMPLATE}:Development --push"
+                    sh "docker buildx build --platform linux/amd64,linux/arm64 . -f docker/dataflowTemplate.Dockerfile -t ${DOCKER_REPO_DATAFLOWTEMPLATE}:${env.POM_VERSION} -t ${DOCKER_REPO_DATAFLOWTEMPLATE}:Development --push"
                     sh "docker buildx rm hop"
                   }
             }

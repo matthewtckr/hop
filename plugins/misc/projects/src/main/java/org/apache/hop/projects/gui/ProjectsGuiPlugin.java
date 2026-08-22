@@ -25,16 +25,18 @@ import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.Collections;
 import java.util.Date;
 import java.util.GregorianCalendar;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.IRunnableWithProgress;
@@ -49,48 +51,62 @@ import org.apache.hop.core.gui.plugin.toolbar.GuiToolbarElementType;
 import org.apache.hop.core.logging.ILogChannel;
 import org.apache.hop.core.logging.LogChannel;
 import org.apache.hop.core.metadata.SerializableMetadataProvider;
+import org.apache.hop.core.util.TranslateUtil;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.DescribedVariable;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.core.variables.Variables;
 import org.apache.hop.core.vfs.HopVfs;
 import org.apache.hop.history.AuditEvent;
+import org.apache.hop.history.AuditList;
 import org.apache.hop.history.AuditManager;
 import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.metadata.api.HopMetadata;
+import org.apache.hop.metadata.api.IHopMetadata;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.metadata.api.IHopMetadataSerializer;
 import org.apache.hop.pipeline.config.PipelineRunConfiguration;
 import org.apache.hop.pipeline.engines.local.LocalPipelineRunConfiguration;
 import org.apache.hop.projects.config.ProjectsConfig;
+import org.apache.hop.projects.config.ProjectsConfigOptionPlugin;
 import org.apache.hop.projects.config.ProjectsConfigSingleton;
 import org.apache.hop.projects.environment.LifecycleEnvironment;
 import org.apache.hop.projects.environment.LifecycleEnvironmentDialog;
 import org.apache.hop.projects.project.Project;
 import org.apache.hop.projects.project.ProjectConfig;
 import org.apache.hop.projects.project.ProjectDialog;
+import org.apache.hop.projects.security.ProjectsAccessControl;
+import org.apache.hop.projects.security.ProjectsSecurityTab;
 import org.apache.hop.projects.util.ProjectsUtil;
+import org.apache.hop.ui.core.FormDataBuilder;
 import org.apache.hop.ui.core.PropsUi;
 import org.apache.hop.ui.core.bus.HopGuiEvents;
 import org.apache.hop.ui.core.dialog.BaseDialog;
 import org.apache.hop.ui.core.dialog.ErrorDialog;
 import org.apache.hop.ui.core.dialog.MessageBox;
 import org.apache.hop.ui.core.dialog.ProgressMonitorDialog;
+import org.apache.hop.ui.core.gui.GuiMenuWidgets;
 import org.apache.hop.ui.core.gui.GuiResource;
 import org.apache.hop.ui.core.gui.GuiToolbarWidgets;
 import org.apache.hop.ui.core.gui.HopNamespace;
 import org.apache.hop.ui.core.vfs.HopVfsFileDialog;
 import org.apache.hop.ui.core.widget.FileTree;
 import org.apache.hop.ui.hopgui.HopGui;
+import org.apache.hop.ui.hopgui.perspective.execution.ExecutionPerspective;
+import org.apache.hop.ui.hopgui.perspective.explorer.ExplorerPerspective;
 import org.apache.hop.ui.pipeline.dialog.PipelineExecutionConfigurationDialog;
+import org.apache.hop.ui.pipeline.transform.BaseTransformDialog;
 import org.apache.hop.workflow.config.WorkflowRunConfiguration;
 import org.apache.hop.workflow.engines.local.LocalWorkflowRunConfiguration;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.layout.GridData;
-import org.eclipse.swt.layout.GridLayout;
+import org.eclipse.swt.graphics.Point;
+import org.eclipse.swt.graphics.Rectangle;
+import org.eclipse.swt.layout.FormLayout;
 import org.eclipse.swt.widgets.Button;
-import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Label;
+import org.eclipse.swt.widgets.Menu;
+import org.eclipse.swt.widgets.MenuItem;
 import org.eclipse.swt.widgets.Shell;
 
 @GuiPlugin
@@ -98,17 +114,31 @@ public class ProjectsGuiPlugin {
 
   public static final Class<?> PKG = ProjectsGuiPlugin.class; // i18n
 
-  public static final String ID_TOOLBAR_PROJECT_LABEL = "toolbar-40000-project-label";
-  public static final String ID_TOOLBAR_PROJECT_COMBO = "toolbar-40010-project-list";
-  public static final String ID_TOOLBAR_PROJECT_EDIT = "toolbar-40020-project-edit";
-  public static final String ID_TOOLBAR_PROJECT_ADD = "toolbar-40030-project-add";
-  public static final String ID_TOOLBAR_PROJECT_DELETE = "toolbar-40040-project-delete";
+  private static final String LAST_USED_PROJECTS_AUDIT_TYPE = "last-projects";
+  private static final int LAST_USED_PROJECTS_MAX_ENTRIES = 15;
 
-  public static final String ID_TOOLBAR_ENVIRONMENT_LABEL = "toolbar-50000-environment-label";
-  public static final String ID_TOOLBAR_ENVIRONMENT_COMBO = "toolbar-50010-environment-list";
-  public static final String ID_TOOLBAR_ENVIRONMENT_EDIT = "toolbar-50020-environment-edit";
-  public static final String ID_TOOLBAR_ENVIRONMENT_ADD = "toolbar-50030-environment-add";
-  public static final String ID_TOOLBAR_ENVIRONMENT_DELETE = "toolbar-50040-environment-delete";
+  public static final String ID_TOOLBAR_ITEM_PROJECT = "toolbar-item-10000-project";
+  public static final String ID_CONTEXT_MENU_PROJECT = "context-menu-project";
+  public static final String ID_CONTEXT_MENU_PROJECT_ADD = "context-menu-project-40010-add";
+  public static final String ID_CONTEXT_MENU_PROJECT_ADD_FROM_VC =
+      "context-menu-project-40011-add-from-vc";
+  public static final String ID_CONTEXT_MENU_PROJECT_ADD_FROM_EXISTING =
+      "context-menu-project-40012-add-from-existing";
+  public static final String ID_CONTEXT_MENU_PROJECT_ADD_FROM_TEMPLATE =
+      "context-menu-project-40013-add-from-template";
+  public static final String ID_CONTEXT_MENU_PROJECT_EDIT = "context-menu-project-40020-edit";
+  public static final String ID_CONTEXT_MENU_PROJECT_DELETE = "context-menu-project-40030-delete";
+
+  public static final String ID_TOOLBAR_ITEM_ENVIRONMENT = "toolbar-item-20000-environment";
+  public static final String ID_CONTEXT_MENU_ENVIRONMENT = "context-menu-environment";
+  public static final String ID_CONTEXT_MENU_ENVIRONMENT_ADD = "context-menu-environment-50010-add";
+  public static final String ID_CONTEXT_MENU_ENVIRONMENT_EDIT =
+      "context-menu-environment-50020-edit";
+  public static final String ID_CONTEXT_MENU_ENVIRONMENT_DUPLICATE =
+      "context-menu-environment-50030-duplicate";
+
+  public static final String ID_CONTEXT_MENU_ENVIRONMENT_DELETE =
+      "context-menu-environment-50040-delete";
 
   public static final String ID_MAIN_MENU_PROJECT_EXPORT = "10055-menu-file-export-to-svg";
 
@@ -117,8 +147,9 @@ public class ProjectsGuiPlugin {
       "0005-navigate-project-home"; // right next to Home button
 
   FileTree tree;
+  private static List<String> lastUsedProjects;
 
-  /** Automatically instantiated when the toolbar widgets etc need it */
+  /** Automatically instantiated when the toolbar widgets need it */
   public ProjectsGuiPlugin() {
     // Do nothing
   }
@@ -127,6 +158,21 @@ public class ProjectsGuiPlugin {
       String projectName, Project project, LifecycleEnvironment environment) throws HopException {
     try {
       HopGui hopGui = HopGui.getInstance();
+
+      // Hop Web RBAC: project access rules (Configuration → Security → Projects)
+      if (!ProjectsAccessControl.isProjectAllowed(projectName)) {
+        MessageBox box = new MessageBox(hopGui.getShell(), SWT.OK | SWT.ICON_WARNING);
+        box.setText(
+            BaseMessages.getString(
+                ProjectsSecurityTab.class, "ProjectsSecurityTab.AccessDenied.Title"));
+        box.setMessage(
+            BaseMessages.getString(
+                ProjectsSecurityTab.class,
+                "ProjectsSecurityTab.AccessDenied.Message",
+                projectName));
+        box.open();
+        return;
+      }
 
       // Before we switch the namespace in HopGui, save the state of the perspectives
       //
@@ -139,9 +185,25 @@ public class ProjectsGuiPlugin {
         return;
       }
 
-      // Close's all
+      // Save execution perspective state (toolbar filters + open tabs) under the current project
+      // namespace before closing tabs / switching namespace.
+      //
+      ExecutionPerspective.getInstance().saveState();
 
+      // Save explorer layout (split panes, panel visibility) while tabs are still open so the
+      // restored layout matches what the user had before the switch (issue #7692 / #6708).
+      //
+      ExplorerPerspective.getInstance().saveExplorerStateOnShutdown();
+
+      // Close's all (including execution information tabs)
+      //
       hopGui.fileDelegate.closeAllFiles();
+
+      // Clear all terminal tabs (saves current project's terminals first)
+      //
+      if (hopGui.getTerminalPanel() != null) {
+        hopGui.getTerminalPanel().clearAllTerminals();
+      }
 
       // This is called only in Hop GUI so we want to start with a new set of variables
       // It avoids variables from one project showing up in another
@@ -180,14 +242,6 @@ public class ProjectsGuiPlugin {
         }
       }
 
-      // We need to change the currently set variables in the newly loaded files
-      //
-      hopGui.setVariables(variables);
-
-      // Re-open last open files for the namespace
-      //
-      hopGui.auditDelegate.openLastFiles();
-
       // Clear last used, fill it with something useful.
       //
       IVariables hopGuiVariables = Variables.getADefaultVariableSpace();
@@ -199,42 +253,66 @@ public class ProjectsGuiPlugin {
         }
       }
 
+      // Re-open last open files for the namespace after HopGui variables are final.
+      // Run synchronously so tabs are restored before ProjectActivated listeners refresh the
+      // explorer layout (async restore raced with layout apply after #6708, issue #7692).
+      //
+      hopGui.auditDelegate.openLastFiles();
+
+      // Restore terminal tabs for the new project (per-project terminals)
+      //
+      if (hopGui.getTerminalPanel() != null && hopGui.getProps().openLastFile()) {
+        hopGui.getTerminalPanel().restoreTerminals();
+      }
+
       // Refresh the currently active file
       //
-      hopGui.getActivePerspective().getActiveFileTypeHandler().updateGui();
+      hopGui.getActiveFileTypeHandler().updateGui();
 
-      // Update the toolbar combos
+      // Remember the last used projects for the toolbar
       //
-      ProjectsGuiPlugin.selectProjectInList(projectName);
-      ProjectsGuiPlugin.selectEnvironmentInList(environment == null ? null : environment.getName());
+      rememberLastUsedProjects(projectName);
 
-      // Also add this as an event so we know what the project usage history is
+      // Update the toolbar items
       //
-      AuditEvent prjUsedEvent =
-          new AuditEvent(
-              ProjectsUtil.STRING_PROJECTS_AUDIT_GROUP,
-              ProjectsUtil.STRING_PROJECT_AUDIT_TYPE,
-              projectName,
-              "open",
-              new Date());
-      AuditManager.getActive().storeEvent(prjUsedEvent);
+      updateProjectToolItem(projectName);
+      updateEnvironmentToolItem(environmentName);
 
-      // Now use that event to refresh the list...
+      // Also add this as an event so we know what the project usage history is.
+      // Failures must not block enabling the project (audit folder permission issues in Hop Web).
       //
-      refreshProjectsList();
-      ProjectsGuiPlugin.selectProjectInList(projectName);
-
-      if (environment != null) {
-        // Also add this as an event so we know what the project usage history is
-        //
-        AuditEvent envUsedEvent =
+      try {
+        AuditEvent prjUsedEvent =
             new AuditEvent(
                 ProjectsUtil.STRING_PROJECTS_AUDIT_GROUP,
-                ProjectsUtil.STRING_ENVIRONMENT_AUDIT_TYPE,
-                environment.getName(),
+                ProjectsUtil.STRING_PROJECT_AUDIT_TYPE,
+                projectName,
                 "open",
                 new Date());
-        AuditManager.getActive().storeEvent(envUsedEvent);
+        AuditManager.getActive().storeEvent(prjUsedEvent);
+
+        if (environment != null) {
+          AuditEvent envUsedEvent =
+              new AuditEvent(
+                  ProjectsUtil.STRING_PROJECTS_AUDIT_GROUP,
+                  ProjectsUtil.STRING_ENVIRONMENT_AUDIT_TYPE,
+                  environmentName,
+                  "open",
+                  new Date());
+          AuditManager.getActive().storeEvent(envUsedEvent);
+        }
+      } catch (Exception e) {
+        hopGui
+            .getLog()
+            .logError(
+                "Unable to store project/environment audit events (continuing): " + e.getMessage());
+      }
+
+      // Restore the state of the execution perspective as well
+      //
+      ExecutionPerspective.getInstance().restoreState();
+      if (ExecutionPerspective.getInstance().isActive()) {
+        ExecutionPerspective.getInstance().refresh();
       }
 
       // Send out an event notifying that a new project is activated...
@@ -254,83 +332,273 @@ public class ProjectsGuiPlugin {
       // Reset VFS filesystem to load additional configurations
       HopVfs.reset();
 
+      // Finally, warn about metadata elements in this project which we can't load.
+      // They're ignored so the project itself opens just fine.
+      //
+      reportUnloadableMetadata(hopGui);
     } catch (Exception e) {
+      MissingProjectInfo missing = extractMissingProjectInfo(e);
+      if (missing != null) {
+        String displayName = missing.projectName != null ? missing.projectName : projectName;
+        MessageBox box = new MessageBox(HopGui.getInstance().getShell(), SWT.OK | SWT.ICON_WARNING);
+        box.setMessage(
+            "Project '"
+                + displayName
+                + "' could not be loaded because "
+                + missing.path
+                + " no longer exists.\n\nYou can update the path in the Project configuration.");
+        box.setText("Project not available");
+        box.open();
+        selectProjectInUiOnly(projectName);
+        return;
+      }
       throw new HopException("Error enabling project '" + projectName + "' in HopGui", e);
     }
   }
 
-  private static Combo getProjectsCombo() {
-    Control control =
-        HopGui.getInstance()
-            .getMainToolbarWidgets()
-            .getWidgetsMap()
-            .get(ProjectsGuiPlugin.ID_TOOLBAR_PROJECT_COMBO);
-    if (control instanceof Combo combo) {
-      return combo;
+  /**
+   * Metadata elements which can't be loaded (a missing plugin, invalid JSON, ...) are ignored when
+   * we load a project. We check for those here and show one dialog listing all of them so the user
+   * knows which elements are not available and why.
+   *
+   * @param hopGui the Hop GUI instance with the metadata provider of the project
+   */
+  private static void reportUnloadableMetadata(HopGui hopGui) {
+    List<String> problems = new ArrayList<>();
+
+    IHopMetadataProvider metadataProvider = hopGui.getMetadataProvider();
+    for (Class<IHopMetadata> metadataClass : metadataProvider.getMetadataClasses()) {
+      try {
+        IHopMetadataSerializer<IHopMetadata> serializer =
+            metadataProvider.getSerializer(metadataClass);
+        HopMetadata annotation = metadataClass.getAnnotation(HopMetadata.class);
+        String typeName =
+            annotation == null
+                ? metadataClass.getSimpleName()
+                : TranslateUtil.translate(annotation.name(), metadataClass);
+
+        for (String name : serializer.listObjectNames()) {
+          try {
+            serializer.load(name);
+          } catch (Exception e) {
+            hopGui
+                .getLog()
+                .logError("Error loading " + typeName + " metadata element '" + name + "'", e);
+            problems.add(
+                "  - "
+                    + typeName
+                    + " : "
+                    + name
+                    + Const.CR
+                    + "      "
+                    + Const.getRootCauseMessage(e)
+                    + Const.CR);
+          }
+        }
+      } catch (Exception e) {
+        // Checking for problems shouldn't cause any of its own: just log it and move on.
+        //
+        hopGui
+            .getLog()
+            .logError("Error checking metadata elements of type " + metadataClass.getName(), e);
+      }
+    }
+
+    if (problems.isEmpty()) {
+      return;
+    }
+
+    StringBuilder message =
+        new StringBuilder(
+            BaseMessages.getString(PKG, "ProjectGuiPlugin.MetadataNotLoaded.Dialog.Message"));
+    message.append(Const.CR).append(Const.CR);
+    problems.forEach(message::append);
+    message
+        .append(Const.CR)
+        .append(BaseMessages.getString(PKG, "ProjectGuiPlugin.MetadataNotLoaded.Dialog.Hint"));
+
+    MessageBox box = new MessageBox(hopGui.getActiveShell(), SWT.OK | SWT.ICON_WARNING);
+    box.setText(BaseMessages.getString(PKG, "ProjectGuiPlugin.MetadataNotLoaded.Dialog.Header"));
+    box.setMessage(message.toString());
+    box.setMinimumSize(500, -1);
+    box.open();
+  }
+
+  /** Result when the failure is due to a project home folder that does not exist. */
+  public static class MissingProjectInfo {
+    public final String projectName;
+    public final String path;
+
+    public MissingProjectInfo(String projectName, String path) {
+      this.projectName = projectName;
+      this.path = path;
+    }
+  }
+
+  /**
+   * Extracts the project name and path from an exception when the failure is due to "folder does
+   * not exist". Returns null if this is not a missing-folder error.
+   */
+  public static MissingProjectInfo extractMissingProjectInfo(Throwable t) {
+    Pattern withName =
+        Pattern.compile(
+            "Project '([^']+)' home folder '([^']+)' does not exist", Pattern.CASE_INSENSITIVE);
+    Pattern legacy =
+        Pattern.compile("Project home folder '([^']+)' does not exist", Pattern.CASE_INSENSITIVE);
+    while (t != null) {
+      String msg = t.getMessage();
+      if (msg != null) {
+        Matcher matcher = withName.matcher(msg);
+        if (matcher.find()) {
+          return new MissingProjectInfo(matcher.group(1), matcher.group(2));
+        }
+        matcher = legacy.matcher(msg);
+        if (matcher.find()) {
+          return new MissingProjectInfo(null, matcher.group(1));
+        }
+      }
+      t = t.getCause();
     }
     return null;
   }
 
-  private static Combo getEnvironmentsCombo() {
-    Control control =
-        HopGui.getInstance()
-            .getMainToolbarWidgets()
-            .getWidgetsMap()
-            .get(ProjectsGuiPlugin.ID_TOOLBAR_ENVIRONMENT_COMBO);
-    if (control instanceof Combo combo) {
-      return combo;
+  /**
+   * Extracts the project home path from an exception when the failure is due to "folder does not
+   * exist". Returns the path for use in a message, or null if this is not a missing-folder error.
+   */
+  public static String extractMissingProjectPath(Throwable t) {
+    MissingProjectInfo info = extractMissingProjectInfo(t);
+    return info != null ? info.path : null;
+  }
+
+  public static void updateProjectToolItem(String projectName) {
+    GuiToolbarWidgets statusWidgets = HopGui.getInstance().getStatusToolbarWidgets();
+    if (projectName == null || StringUtils.isEmpty(projectName)) {
+      statusWidgets.setToolbarItemText(ID_TOOLBAR_ITEM_PROJECT, "");
+      statusWidgets.setToolbarItemToolTip(
+          ID_TOOLBAR_ITEM_PROJECT,
+          BaseMessages.getString(PKG, "HopGui.Toolbar.Project.Select.Tooltip"));
+      HopNamespace.setNamespace(HopGui.DEFAULT_HOP_GUI_NAMESPACE);
+      return;
     }
-    return null;
-  }
-
-  public static void refreshProjectsList() {
-    HopGui.getInstance().getMainToolbarWidgets().refreshComboItemList(ID_TOOLBAR_PROJECT_COMBO);
-  }
-
-  public static void selectProjectInList(String name) {
-    GuiToolbarWidgets toolbarWidgets = HopGui.getInstance().getMainToolbarWidgets();
     ProjectsConfig config = ProjectsConfigSingleton.getConfig();
+    ProjectConfig projectConfig = config.findProjectConfig(projectName);
+    if (projectConfig != null) {
+      String projectHome = projectConfig.getProjectHome();
+      if (StringUtils.isNotEmpty(projectHome)) {
+        statusWidgets.setToolbarItemText(ID_TOOLBAR_ITEM_PROJECT, projectName);
+        statusWidgets.setToolbarItemToolTip(
+            ID_TOOLBAR_ITEM_PROJECT,
+            BaseMessages.getString(
+                PKG,
+                "HopGui.Toolbar.Project.Tooltip",
+                projectName,
+                projectHome,
+                projectConfig.getConfigFilename()));
+      } else {
+        statusWidgets.setToolbarItemText(ID_TOOLBAR_ITEM_PROJECT, projectName);
+        statusWidgets.setToolbarItemToolTip(
+            ID_TOOLBAR_ITEM_PROJECT, projectName + " (path not set - use Edit to configure)");
+      }
+    }
+  }
 
-    toolbarWidgets.selectComboItem(ID_TOOLBAR_PROJECT_COMBO, name);
-    Combo combo = getProjectsCombo();
-    if (combo != null) {
-      ProjectConfig projectConfig = config.findProjectConfig(name);
-      if (projectConfig != null) {
-        String projectHome = projectConfig.getProjectHome();
-        if (StringUtils.isNotEmpty(projectHome)) {
-          combo.setToolTipText(
-              BaseMessages.getString(
-                  PKG,
-                  "ProjectGuiPlugin.SelectProject.Tooltip",
-                  name,
-                  projectHome,
-                  projectConfig.getConfigFilename()));
+  /**
+   * Selects a project in the UI only (toolbar + namespace) without loading it. Use when the project
+   * failed to load so the user can still Edit or Delete it.
+   */
+  private static void selectProjectInUiOnly(String projectName) {
+    if (StringUtils.isEmpty(projectName)) {
+      return;
+    }
+    GuiToolbarWidgets statusWidgets = HopGui.getInstance().getStatusToolbarWidgets();
+    statusWidgets.setToolbarItemText(ID_TOOLBAR_ITEM_PROJECT, projectName);
+    statusWidgets.setToolbarItemToolTip(
+        ID_TOOLBAR_ITEM_PROJECT,
+        projectName + " (could not be loaded - use Edit to fix the path, or Delete to remove)");
+    HopNamespace.setNamespace(projectName);
+    updateEnvironmentToolItem("");
+  }
+
+  private static void updateEnvironmentToolItem(String environmentName) {
+    GuiToolbarWidgets statusWidgets = HopGui.getInstance().getStatusToolbarWidgets();
+    if (Utils.isEmpty(environmentName)) {
+      statusWidgets.setToolbarItemText(ID_TOOLBAR_ITEM_ENVIRONMENT, "");
+      statusWidgets.setToolbarItemToolTip(
+          ID_TOOLBAR_ITEM_ENVIRONMENT,
+          BaseMessages.getString(PKG, "HopGui.Toolbar.Environment.Select.Tooltip"));
+      return;
+    }
+
+    ProjectsConfig config = ProjectsConfigSingleton.getConfig();
+    LifecycleEnvironment environment = config.findEnvironment(environmentName);
+    if (environment != null) {
+      statusWidgets.setToolbarItemText(ID_TOOLBAR_ITEM_ENVIRONMENT, environmentName);
+      statusWidgets.setToolbarItemToolTip(
+          ID_TOOLBAR_ITEM_ENVIRONMENT,
+          BaseMessages.getString(
+              PKG,
+              "HopGui.Toolbar.Environment.Tooltip",
+              environmentName,
+              environment.getProjectName(),
+              environment.getPurpose()));
+    }
+  }
+
+  public static List<String> getLastUsedProjects() {
+    // Initialize the list of last used projects (defensive: one failing entry does not break the
+    // list)
+    if (lastUsedProjects == null) {
+      List<String> allProjectNames = ProjectsConfigSingleton.getConfig().listProjectConfigNames();
+      lastUsedProjects = new LinkedList<>();
+      if (allProjectNames == null) {
+        allProjectNames = new ArrayList<>();
+      }
+      try {
+        AuditList auditList =
+            AuditManager.getActive()
+                .retrieveList(HopGui.DEFAULT_HOP_GUI_NAMESPACE, LAST_USED_PROJECTS_AUDIT_TYPE);
+
+        if (auditList != null && auditList.getNames() != null) {
+          for (String name : auditList.getNames()) {
+            if (StringUtils.isNotEmpty(name) && allProjectNames.contains(name)) {
+              lastUsedProjects.add(name);
+            }
+          }
+        }
+      } catch (Exception e) {
+        LogChannel.GENERAL.logError("Error loading last used projects", e);
+        int end = Math.min(LAST_USED_PROJECTS_MAX_ENTRIES, allProjectNames.size());
+        if (end > 0) {
+          lastUsedProjects.addAll(allProjectNames.subList(0, end));
         }
       }
     }
+
+    return lastUsedProjects;
   }
 
-  public static void refreshEnvironmentsList() {
-    HopGui.getInstance().getMainToolbarWidgets().refreshComboItemList(ID_TOOLBAR_ENVIRONMENT_COMBO);
-  }
+  /** Remember the last used projects */
+  public static void rememberLastUsedProjects(String projectName) {
 
-  public static void selectEnvironmentInList(String name) {
-    GuiToolbarWidgets toolbarWidgets = HopGui.getInstance().getMainToolbarWidgets();
+    // Initialize
+    getLastUsedProjects();
 
-    toolbarWidgets.selectComboItem(ID_TOOLBAR_ENVIRONMENT_COMBO, name);
-    Combo combo = getEnvironmentsCombo();
-    if (combo != null) {
-      ProjectsConfig config = ProjectsConfigSingleton.getConfig();
-      LifecycleEnvironment environment = config.findEnvironment(name);
-      if (environment != null) {
-        combo.setToolTipText(
-            BaseMessages.getString(
-                PKG,
-                "ProjectGuiPlugin.FindEnvironment.Tooltip",
-                name,
-                environment.getProjectName(),
-                environment.getPurpose()));
-      }
+    // Keep only a limited number of last-used projects
+    lastUsedProjects.remove(projectName);
+    lastUsedProjects.addFirst(projectName);
+    if (lastUsedProjects.size() > LAST_USED_PROJECTS_MAX_ENTRIES) {
+      lastUsedProjects = lastUsedProjects.subList(0, LAST_USED_PROJECTS_MAX_ENTRIES);
+    }
+
+    // Write the audit list of last used projects
+    try {
+      AuditList auditList = new AuditList(lastUsedProjects);
+      AuditManager.getActive()
+          .storeList(HopGui.DEFAULT_HOP_GUI_NAMESPACE, LAST_USED_PROJECTS_AUDIT_TYPE, auditList);
+    } catch (Exception e) {
+      LogChannel.GENERAL.logError(
+          "Error writing list of last used projects " + LAST_USED_PROJECTS_AUDIT_TYPE, e);
     }
   }
 
@@ -355,36 +623,62 @@ public class ProjectsGuiPlugin {
     if (projectConfig == null) {
       throw new HopException("The project with name '" + projectName + "' could not be found");
     }
-    Project project = projectConfig.loadProject(variables);
-
-    enableHopGuiProject(projectName, project, null);
+    try {
+      Project project = projectConfig.loadProject(variables);
+      enableHopGuiProject(projectName, project, null);
+    } catch (Exception e) {
+      MissingProjectInfo missing = extractMissingProjectInfo(e);
+      if (missing != null) {
+        String displayName = missing.projectName != null ? missing.projectName : projectName;
+        MessageBox box = new MessageBox(hopGui.getShell(), SWT.OK | SWT.ICON_WARNING);
+        box.setMessage(
+            "Project '"
+                + displayName
+                + "' could not be loaded because "
+                + missing.path
+                + " no longer exists.\n\nYou can update the path in the Project configuration.");
+        box.setText("Project not available");
+        box.open();
+        selectProjectInUiOnly(projectName);
+        return;
+      }
+      throw new HopException("Error enabling project '" + projectName + "'", e);
+    }
   }
 
-  @GuiToolbarElement(
-      root = HopGui.ID_MAIN_TOOLBAR,
-      id = ID_TOOLBAR_PROJECT_LABEL,
-      type = GuiToolbarElementType.LABEL,
-      label = "i18n::HopGui.Toolbar.Project.Label",
-      toolTip = "i18n::HopGui.Toolbar.Project.Tooltip",
-      separator = true)
+  @GuiMenuElement(
+      root = ID_CONTEXT_MENU_PROJECT,
+      parentId = ID_CONTEXT_MENU_PROJECT,
+      id = ID_CONTEXT_MENU_PROJECT_EDIT,
+      label = "i18n::HopGui.Toolbar.Project.Edit.Label",
+      toolTip = "i18n::HopGui.Toolbar.Project.Edit.Tooltip",
+      image = "ui/images/edit.svg")
   public void editProject() {
     HopGui hopGui = HopGui.getInstance();
-    Combo combo = getProjectsCombo();
-    if (combo == null) {
-      return;
-    }
+    // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+    String projectName =
+        hopGui.getStatusToolbarWidgets().getToolbarItemText(ID_TOOLBAR_ITEM_PROJECT);
+
     ProjectsConfig config = ProjectsConfigSingleton.getConfig();
-
-    String projectName = combo.getText();
-
     ProjectConfig projectConfig = config.findProjectConfig(projectName);
     if (projectConfig == null) {
       return;
     }
 
     try {
-      Project project = projectConfig.loadProject(hopGui.getVariables());
-      String projectFolder = projectConfig.getProjectHome();
+      Project project;
+      try {
+        project = projectConfig.loadProject(hopGui.getVariables());
+      } catch (Exception loadEx) {
+        MissingProjectInfo missing = extractMissingProjectInfo(loadEx);
+        if (missing != null) {
+          // Don't show error again - it was already shown when switching to this project.
+          // Open dialog with empty project so user can fix the path.
+          project = new Project();
+        } else {
+          throw loadEx;
+        }
+      }
 
       ProjectDialog projectDialog =
           new ProjectDialog(
@@ -392,32 +686,33 @@ public class ProjectsGuiPlugin {
       if (projectDialog.open() != null) {
         config.addProjectConfig(projectConfig);
 
-        // Project's home changed. Update reference in hop-config.json
-        if (!projectFolder.equals(projectConfig.getProjectHome())) {
-          // Refresh project reference in hop-config.json
-          HopConfig.getInstance().saveToFile();
-        }
-
         if (!projectName.equals(projectConfig.getProjectName())) {
           // Project got renamed
           projectName = projectConfig.getProjectName();
-          // Refresh project reference in hop-config.json
-          HopConfig.getInstance().saveToFile();
         }
 
-        project.saveToFile();
-        refreshProjectsList();
-        selectProjectInList(projectName);
+        // Persist project registration (name, home, config path, read-only) in hop-config.json
+        HopConfig.getInstance().saveToFile();
+
+        // Do not write project-config.json for read-only projects (archives, HTTP, ...).
+        //
+        if (!projectConfig.isReadOnly()) {
+          project.saveToFile();
+        }
+        updateProjectToolItem(projectName);
 
         if (projectDialog.isNeedingProjectRefresh()) {
           if (askAboutProjectRefresh(hopGui)) {
             // Try to stick to the same environment if we have one selected...
             //
-            LifecycleEnvironment environment = null;
-            Combo environmentsCombo = getEnvironmentsCombo();
-            if (environmentsCombo != null) {
-              environment = config.findEnvironment(environmentsCombo.getText());
-            }
+            String environmentName =
+                HopGui.getInstance()
+                    .getStatusToolbarWidgets()
+                    .getToolbarItemText(ID_TOOLBAR_ITEM_ENVIRONMENT);
+            LifecycleEnvironment environment =
+                StringUtils.isNotEmpty(environmentName)
+                    ? config.findEnvironment(environmentName)
+                    : null;
             enableHopGuiProject(projectConfig.getProjectName(), project, environment);
           }
 
@@ -436,7 +731,7 @@ public class ProjectsGuiPlugin {
     }
   }
 
-  private boolean askAboutProjectRefresh(HopGui hopGui) {
+  private static boolean askAboutProjectRefresh(HopGui hopGui) {
     MessageBox box = new MessageBox(hopGui.getShell(), SWT.ICON_QUESTION | SWT.YES | SWT.NO);
     box.setText(BaseMessages.getString(PKG, "ProjectGuiPlugin.ReloadProject.Dialog.Header"));
     box.setMessage(BaseMessages.getString(PKG, "ProjectGuiPlugin.ReloadProject.Dialog.Message"));
@@ -444,47 +739,237 @@ public class ProjectsGuiPlugin {
     return (answer & SWT.YES) != 0;
   }
 
-  @GuiToolbarElement(
-      root = HopGui.ID_MAIN_TOOLBAR,
-      id = ID_TOOLBAR_PROJECT_COMBO,
-      type = GuiToolbarElementType.COMBO,
-      comboValuesMethod = "getProjectsList",
-      extraWidth = 200,
-      toolTip = "i18n::HopGui.Toolbar.ProjectsList.Tooltip",
-      readOnly = true)
-  public void selectProject() {
+  /**
+   * Called after system (described) variables were saved in the configuration perspective. Offers
+   * to reload the active project so open files, metadata and layered project/environment variables
+   * pick up the new hop-config values without a full GUI restart (issue #2293).
+   */
+  public static void reloadAfterSystemVariablesSaved() {
+    if (!ProjectsConfigSingleton.getConfig().isEnabled()) {
+      return;
+    }
+
     HopGui hopGui = HopGui.getInstance();
     ProjectsConfig config = ProjectsConfigSingleton.getConfig();
 
-    Combo projectsCombo = getProjectsCombo();
-    Combo environmentsCombo = getEnvironmentsCombo();
-
-    if (projectsCombo == null) {
-      return;
+    String projectName = HopNamespace.getNamespace();
+    if (StringUtils.isEmpty(projectName) || HopGui.DEFAULT_HOP_GUI_NAMESPACE.equals(projectName)) {
+      // Fall back to the toolbar label when namespace is not a real project.
+      //
+      if (hopGui.getStatusToolbarWidgets() != null) {
+        projectName = hopGui.getStatusToolbarWidgets().getToolbarItemText(ID_TOOLBAR_ITEM_PROJECT);
+      }
     }
-    String projectName = projectsCombo.getText();
-
-    if (config.isEnvironmentsForActiveProject() && StringUtils.isEmpty(projectName)) {
-      // list all environments and select the first one if we don't have a project selected
-      List<String> allEnvironments = config.listEnvironmentNames();
-      environmentsCombo.setItems(allEnvironments.toArray(new String[allEnvironments.size()]));
-      selectEnvironmentInList(allEnvironments.get(0));
+    if (StringUtils.isEmpty(projectName)) {
       return;
     }
 
     ProjectConfig projectConfig = config.findProjectConfig(projectName);
+    if (projectConfig == null) {
+      return;
+    }
 
-    if (config.isEnvironmentsForActiveProject()) {
-      // get the environments for the selected project.
-      if (environmentsCombo != null) {
-        List<String> projectEnvironments = config.listEnvironmentNamesForProject(projectName);
-        environmentsCombo.setItems(
-            projectEnvironments.toArray(new String[projectEnvironments.size()]));
+    if (!askAboutProjectRefresh(hopGui)) {
+      return;
+    }
+
+    try {
+      String environmentName = null;
+      if (hopGui.getStatusToolbarWidgets() != null) {
+        environmentName =
+            hopGui.getStatusToolbarWidgets().getToolbarItemText(ID_TOOLBAR_ITEM_ENVIRONMENT);
       }
-    } else {
-      List<String> projectEnvironments = config.listEnvironmentNames();
-      environmentsCombo.setItems(
-          projectEnvironments.toArray(new String[projectEnvironments.size()]));
+      LifecycleEnvironment environment =
+          StringUtils.isNotEmpty(environmentName) ? config.findEnvironment(environmentName) : null;
+
+      Project project = projectConfig.loadProject(hopGui.getVariables());
+      if (project != null) {
+        enableHopGuiProject(projectName, project, environment);
+      }
+    } catch (Exception e) {
+      new ErrorDialog(
+          hopGui.getActiveShell(),
+          BaseMessages.getString(PKG, "ProjectGuiPlugin.EditProject.Error.Dialog.Header"),
+          BaseMessages.getString(
+              PKG, "ProjectGuiPlugin.EditProject.Error.Dialog.Message", projectName),
+          e);
+    }
+  }
+
+  @GuiToolbarElement(
+      root = HopGui.ID_STATUS_TOOLBAR,
+      id = ID_TOOLBAR_ITEM_PROJECT,
+      type = GuiToolbarElementType.BUTTON,
+      image = "project.svg",
+      toolTip = "i18n::HopGui.Toolbar.Project.Tooltip")
+  public void showProjectContextMenu() {
+    Control control =
+        HopGui.getInstance().getStatusToolbarWidgets().getControlForMenu(ID_TOOLBAR_ITEM_PROJECT);
+    if (control != null && !control.isDisposed()) {
+      Rectangle rect = control.getBounds();
+      int menuGap = 6;
+      Point location =
+          control.getParent().toDisplay(new Point(rect.x, rect.y + rect.height + menuGap));
+      Menu menu = createProjectContextMenu();
+      menu.setLocation(location);
+      menu.setVisible(true);
+    }
+  }
+
+  private Menu createProjectContextMenu() {
+    Shell shell = HopGui.getInstance().getActiveShell();
+    Menu menu = new Menu(shell, SWT.POP_UP);
+
+    // Create context menu...
+    //
+    GuiMenuWidgets menuWidgets = new GuiMenuWidgets();
+    menuWidgets.registerGuiPluginObject(this);
+    menuWidgets.createMenuWidgets(ID_CONTEXT_MENU_PROJECT, shell, menu);
+
+    // Enable menus if a project is active.
+    // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+    String projectText =
+        HopGui.getInstance().getStatusToolbarWidgets().getToolbarItemText(ID_TOOLBAR_ITEM_PROJECT);
+    boolean enabled = !"".equals(projectText);
+    menuWidgets.enableMenuItem(ID_CONTEXT_MENU_PROJECT_EDIT, enabled);
+    menuWidgets.enableMenuItem(ID_CONTEXT_MENU_PROJECT_DELETE, enabled);
+
+    new MenuItem(menu, SWT.SEPARATOR);
+
+    // Display the last-used projects
+    List<String> names = new ArrayList<>(getLastUsedProjects());
+
+    // If the user prefers to display in alphabetical order
+    if (ProjectsConfigOptionPlugin.getInstance().getSortByNameLastUsedProjects()) {
+      names.sort(String::compareToIgnoreCase);
+    }
+
+    String currentProjectName = HopNamespace.getNamespace();
+
+    int count = 0;
+    for (String name : names) {
+      MenuItem item = new MenuItem(menu, SWT.NONE);
+      item.setText(name);
+      item.addListener(SWT.Selection, e -> selectProject(name));
+      if (currentProjectName.equals(name)) {
+        item.setImage(GuiResource.getInstance().getImageCheck());
+      }
+      if (++count == LAST_USED_PROJECTS_MAX_ENTRIES) break;
+    }
+
+    // Add a menu to open a dialog to select it
+    new MenuItem(menu, SWT.SEPARATOR);
+    MenuItem item = new MenuItem(menu, SWT.PUSH);
+    item.setText(BaseMessages.getString(PKG, "HopGui.Toolbar.Project.Select.Tooltip"));
+    item.addListener(SWT.Selection, e -> selectProject());
+
+    return menu;
+  }
+
+  private Menu createEnvironmentContextMenu() {
+    Shell shell = HopGui.getInstance().getActiveShell();
+    Menu menu = new Menu(shell, SWT.POP_UP);
+
+    // Create context menu...
+    //
+    GuiMenuWidgets menuWidgets = new GuiMenuWidgets();
+    menuWidgets.registerGuiPluginObject(this);
+    menuWidgets.createMenuWidgets(ID_CONTEXT_MENU_ENVIRONMENT, shell, menu);
+
+    // Enable menus if an environment is active.
+    // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+    String environmentText =
+        HopGui.getInstance()
+            .getStatusToolbarWidgets()
+            .getToolbarItemText(ID_TOOLBAR_ITEM_ENVIRONMENT);
+    boolean enabled = !"".equals(environmentText);
+    menuWidgets.enableMenuItem(ID_CONTEXT_MENU_ENVIRONMENT_EDIT, enabled);
+    menuWidgets.enableMenuItem(ID_CONTEXT_MENU_ENVIRONMENT_DUPLICATE, enabled);
+    menuWidgets.enableMenuItem(ID_CONTEXT_MENU_ENVIRONMENT_DELETE, enabled);
+
+    new MenuItem(menu, SWT.SEPARATOR);
+
+    // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+    String currentProjectName =
+        HopGui.getInstance().getStatusToolbarWidgets().getToolbarItemText(ID_TOOLBAR_ITEM_PROJECT);
+    String currentEnvironmentName =
+        HopGui.getInstance()
+            .getStatusToolbarWidgets()
+            .getToolbarItemText(ID_TOOLBAR_ITEM_ENVIRONMENT);
+
+    // Display list of environments
+    //
+    ProjectsConfig config = ProjectsConfigSingleton.getConfig();
+    List<String> names = config.listEnvironmentNames();
+    for (String name : names) {
+
+      // Exclude environment linked to another project
+      LifecycleEnvironment environment = config.findEnvironment(name);
+      if (environment != null
+          && (Utils.isEmpty(environment.getProjectName())
+              || currentProjectName.equals(environment.getProjectName()))) {
+        // Create a final copy of the name variable for the lambda closure
+        // This is critical for RAP/web compatibility - each menu item needs its own copy
+        final String environmentName = name;
+        MenuItem item = new MenuItem(menu, SWT.NONE);
+        item.setText(environmentName);
+        // Match projects exactly - use addListener with lambda (projects work this way)
+        item.addListener(SWT.Selection, e -> selectEnvironment(environmentName));
+        if (currentEnvironmentName.equals(environmentName)) {
+          item.setImage(GuiResource.getInstance().getImageCheck());
+        }
+      }
+    }
+
+    return menu;
+  }
+
+  @GuiToolbarElement(
+      root = HopGui.ID_STATUS_TOOLBAR,
+      id = ID_TOOLBAR_ITEM_ENVIRONMENT,
+      type = GuiToolbarElementType.BUTTON,
+      image = "environment.svg",
+      toolTip = "i18n::HopGui.Toolbar.Environment.Tooltip")
+  public void showEnvironmentContextMenu() {
+    Control control =
+        HopGui.getInstance()
+            .getStatusToolbarWidgets()
+            .getControlForMenu(ID_TOOLBAR_ITEM_ENVIRONMENT);
+    if (control != null && !control.isDisposed()) {
+      Rectangle rect = control.getBounds();
+      int menuGap = 6;
+      Point location =
+          control.getParent().toDisplay(new Point(rect.x, rect.y + rect.height + menuGap));
+      Menu menu = createEnvironmentContextMenu();
+      menu.setLocation(location);
+      menu.setVisible(true);
+    }
+  }
+
+  public void selectProject() {
+    HopGui hopGui = HopGui.getInstance();
+    SelectProjectsDialog dialog =
+        new SelectProjectsDialog(hopGui.getActiveShell(), hopGui.getVariables());
+    String name = dialog.open();
+    if (name != null) {
+      selectProject(name);
+    }
+  }
+
+  public void selectProject(String projectName) {
+    HopGui hopGui = HopGui.getInstance();
+
+    ProjectsConfig config = ProjectsConfigSingleton.getConfig();
+    if (config.isEnvironmentsForActiveProject() && StringUtils.isEmpty(projectName)) {
+      // list all environments and select the first one if we don't have a project selected
+      List<String> allEnvironments = config.listEnvironmentNames();
+      updateEnvironmentToolItem(allEnvironments.getFirst());
+      return;
+    }
+
+    ProjectConfig projectConfig = config.findProjectConfig(projectName);
+    if (projectConfig == null) {
+      return;
     }
 
     // What is the last used environment?
@@ -526,12 +1011,12 @@ public class ProjectsGuiPlugin {
       LogChannel.UI.logError("Error reading the last used environment from the audit logs", e);
     }
 
-    // If there is no recent usage select the first environment.
+    // If there is no recent usage, select the first environment.
     //
     if (environment == null) {
       List<LifecycleEnvironment> environments = config.findEnvironmentsOfProject(projectName);
       if (!environments.isEmpty()) {
-        environment = environments.get(0);
+        environment = environments.getFirst();
       }
     }
 
@@ -543,6 +1028,21 @@ public class ProjectsGuiPlugin {
         hopGui.getLog().logError("Unable to find project '" + projectName + "'");
       }
     } catch (Exception e) {
+      MissingProjectInfo missing = extractMissingProjectInfo(e);
+      if (missing != null) {
+        String displayName = missing.projectName != null ? missing.projectName : projectName;
+        MessageBox box = new MessageBox(hopGui.getShell(), SWT.OK | SWT.ICON_WARNING);
+        box.setMessage(
+            "Project '"
+                + displayName
+                + "' could not be loaded because "
+                + missing.path
+                + " no longer exists.\n\nYou can update the path in the Project configuration.");
+        box.setText("Project not available");
+        box.open();
+        selectProjectInUiOnly(projectName);
+        return;
+      }
       new ErrorDialog(
           hopGui.getActiveShell(),
           BaseMessages.getString(PKG, "ProjectGuiPlugin.ChangeProject.Error.Dialog.Header"),
@@ -552,21 +1052,82 @@ public class ProjectsGuiPlugin {
     }
   }
 
-  @GuiToolbarElement(
-      root = HopGui.ID_MAIN_TOOLBAR,
-      id = ID_TOOLBAR_PROJECT_EDIT,
-      toolTip = "i18n::HopGui.Toolbar.Project.Edit.Tooltip",
-      image = "project-edit.svg")
-  public void editSelectedProject() {
-    editProject();
+  @GuiMenuElement(
+      root = ID_CONTEXT_MENU_PROJECT,
+      parentId = ID_CONTEXT_MENU_PROJECT,
+      id = ID_CONTEXT_MENU_PROJECT_ADD,
+      label = "i18n::HopGui.Toolbar.Project.Add.Label",
+      toolTip = "i18n::HopGui.Toolbar.Project.Add.Tooltip",
+      image = "ui/images/add.svg")
+  public void addProjectMenu() {
+    // Cascade menu - no action, submenu opens on hover
   }
 
-  @GuiToolbarElement(
-      root = HopGui.ID_MAIN_TOOLBAR,
-      id = ID_TOOLBAR_PROJECT_ADD,
-      toolTip = "i18n::HopGui.Toolbar.Project.Add.Tooltip",
-      image = "project-add.svg")
-  public void addNewProject() {
+  @GuiMenuElement(
+      root = ID_CONTEXT_MENU_PROJECT,
+      parentId = ID_CONTEXT_MENU_PROJECT_ADD,
+      id = ID_CONTEXT_MENU_PROJECT_ADD_FROM_VC,
+      label = "i18n::HopGui.Toolbar.Project.Add.FromVersionControl.Label",
+      toolTip = "i18n::HopGui.Toolbar.Project.Add.FromVersionControl.Tooltip")
+  public void addProjectFromVersionControl() {
+    addProjectFromVersionControlInternal();
+  }
+
+  @GuiMenuElement(
+      root = ID_CONTEXT_MENU_PROJECT,
+      parentId = ID_CONTEXT_MENU_PROJECT_ADD,
+      id = ID_CONTEXT_MENU_PROJECT_ADD_FROM_EXISTING,
+      label = "i18n::HopGui.Toolbar.Project.Add.FromExisting.Label",
+      toolTip = "i18n::HopGui.Toolbar.Project.Add.FromExisting.Tooltip")
+  public void addProjectFromExistingSources() {
+    addProjectFromExistingSourcesInternal();
+  }
+
+  private void addProjectFromVersionControlInternal() {
+    try {
+      HopGui hopGui = HopGui.getInstance();
+      if (hopGui == null) {
+        LogChannel.GENERAL.logError("HopGui is not available");
+        return;
+      }
+      Shell shell = hopGui.getActiveShell();
+      if (shell == null) {
+        shell = hopGui.getShell();
+      }
+      if (shell == null) {
+        org.eclipse.swt.widgets.Display display = org.eclipse.swt.widgets.Display.getCurrent();
+        if (display != null) {
+          shell = display.getActiveShell();
+        }
+      }
+      if (shell == null || shell.isDisposed()) {
+        LogChannel.GENERAL.logError(
+            "No valid shell available for dialog. HopGui may not be fully initialized.");
+        return;
+      }
+      IVariables variables = hopGui.getVariables();
+      if (variables == null) {
+        variables = Variables.getADefaultVariableSpace();
+      }
+      CloneFromVersionControlDialog dialog = new CloneFromVersionControlDialog(shell, variables);
+      dialog.open();
+    } catch (Exception e) {
+      LogChannel.GENERAL.logError("Error opening 'Add project from version control' dialog", e);
+      HopGui hopGui = HopGui.getInstance();
+      if (hopGui != null) {
+        Shell shell = hopGui.getShell();
+        if (shell != null && !shell.isDisposed()) {
+          new ErrorDialog(
+              shell,
+              BaseMessages.getString(PKG, "ProjectGuiPlugin.AddProject.Error.Dialog.Header"),
+              BaseMessages.getString(PKG, "ProjectGuiPlugin.AddProject.Error.Dialog.Message"),
+              e);
+        }
+      }
+    }
+  }
+
+  private void addProjectFromExistingSourcesInternal() {
     HopGui hopGui = HopGui.getInstance();
     IVariables variables = hopGui.getVariables();
 
@@ -587,15 +1148,19 @@ public class ProjectsGuiPlugin {
         config.addProjectConfig(projectConfig);
         HopConfig.getInstance().saveToFile();
 
-        // Save the project-config.json file as well in the project itself
+        // Save or load the project-config.json in the project itself.
+        // Read-only projects (archives, HTTP, ...) never write the config file: it must already
+        // exist (validated in the project dialog).
         //
         FileObject configFile =
             HopVfs.getFileObject(projectConfig.getActualProjectConfigFilename(variables));
-        if (!configFile.exists()) {
-          // Create the empty configuration file if it does not exists
+        if (projectConfig.isReadOnly()) {
+          project.readFromFile();
+        } else if (!configFile.exists()) {
+          // Create the empty configuration file if it does not exist
           project.saveToFile();
         } else {
-          // If projects exists load configuration
+          // If project already exists load configuration
           MessageBox box = new MessageBox(hopGui.getActiveShell(), SWT.ICON_QUESTION | SWT.OK);
           box.setText(BaseMessages.getString(PKG, "ProjectGuiPlugin.ProjectExists.Dialog.Header"));
           box.setMessage(
@@ -605,82 +1170,87 @@ public class ProjectsGuiPlugin {
           project.readFromFile();
         }
 
-        refreshProjectsList();
-        selectProjectInList(projectName);
+        updateProjectToolItem(projectName);
 
         enableHopGuiProject(projectName, project, null);
 
-        // Now see if these project contains any local run configurations.
-        // If not we can add those automatically
+        // Do not create local run configurations inside a read-only project (would try to write
+        // metadata).
         //
-        // First pipeline
-        //
-        IHopMetadataSerializer<PipelineRunConfiguration> prcSerializer =
-            hopGui.getMetadataProvider().getSerializer(PipelineRunConfiguration.class);
-        List<PipelineRunConfiguration> pipelineRunConfigs = prcSerializer.loadAll();
-        boolean localFound = false;
-        for (PipelineRunConfiguration pipelineRunConfig : pipelineRunConfigs) {
-          if (pipelineRunConfig.getEngineRunConfiguration()
-              instanceof LocalPipelineRunConfiguration) {
-            localFound = true;
-            break;
+        if (!projectConfig.isReadOnly()) {
+          // Now see if these project contains any local run configurations.
+          // If not we can add those automatically
+          //
+          // First pipeline
+          //
+          IHopMetadataSerializer<PipelineRunConfiguration> prcSerializer =
+              hopGui.getMetadataProvider().getSerializer(PipelineRunConfiguration.class);
+          List<PipelineRunConfiguration> pipelineRunConfigs = prcSerializer.loadAll();
+          boolean localFound = false;
+          for (PipelineRunConfiguration pipelineRunConfig : pipelineRunConfigs) {
+            if (pipelineRunConfig.getEngineRunConfiguration()
+                instanceof LocalPipelineRunConfiguration) {
+              localFound = true;
+              break;
+            }
           }
-        }
-        if (!localFound) {
-          PipelineExecutionConfigurationDialog.createLocalPipelineConfiguration(
-              hopGui.getShell(), prcSerializer);
-        }
+          if (!localFound) {
+            PipelineExecutionConfigurationDialog.createLocalPipelineConfiguration(
+                hopGui.getShell(), prcSerializer);
+          }
 
-        // Then the local workflow run configuration
-        //
-        IHopMetadataSerializer<WorkflowRunConfiguration> wrcSerializer =
-            hopGui.getMetadataProvider().getSerializer(WorkflowRunConfiguration.class);
-        localFound = false;
-        List<WorkflowRunConfiguration> workflowRunConfigs = wrcSerializer.loadAll();
-        for (WorkflowRunConfiguration workflowRunConfig : workflowRunConfigs) {
-          if (workflowRunConfig.getEngineRunConfiguration()
-              instanceof LocalWorkflowRunConfiguration) {
-            localFound = true;
-            break;
+          // Then the local workflow run configuration
+          //
+          IHopMetadataSerializer<WorkflowRunConfiguration> wrcSerializer =
+              hopGui.getMetadataProvider().getSerializer(WorkflowRunConfiguration.class);
+          localFound = false;
+          List<WorkflowRunConfiguration> workflowRunConfigs = wrcSerializer.loadAll();
+          for (WorkflowRunConfiguration workflowRunConfig : workflowRunConfigs) {
+            if (workflowRunConfig.getEngineRunConfiguration()
+                instanceof LocalWorkflowRunConfiguration) {
+              localFound = true;
+              break;
+            }
           }
-        }
-        if (!localFound) {
+          if (!localFound) {
+            MessageBox box =
+                new MessageBox(
+                    HopGui.getInstance().getShell(), SWT.YES | SWT.NO | SWT.ICON_QUESTION);
+            box.setText(
+                BaseMessages.getString(PKG, "ProjectGuiPlugin.LocalWFRunConfig.Dialog.Header"));
+            box.setMessage(
+                BaseMessages.getString(PKG, "ProjectGuiPlugin.LocalWFRunConfig.Dialog.Message"));
+            int answer = box.open();
+            if ((answer & SWT.YES) != 0) {
+              LocalWorkflowRunConfiguration localWorkflowRunConfiguration =
+                  new LocalWorkflowRunConfiguration();
+              localWorkflowRunConfiguration.setEnginePluginId("Local");
+              WorkflowRunConfiguration local =
+                  new WorkflowRunConfiguration(
+                      "local",
+                      BaseMessages.getString(
+                          PKG, "ProjectGuiPlugin.LocalWFRunConfigDescription.Text"),
+                      null,
+                      localWorkflowRunConfiguration,
+                      true);
+              wrcSerializer.save(local);
+            }
+          }
+
+          // Ask to put the project in a lifecycle environment
+          //
           MessageBox box =
               new MessageBox(HopGui.getInstance().getShell(), SWT.YES | SWT.NO | SWT.ICON_QUESTION);
-          box.setText(
-              BaseMessages.getString(PKG, "ProjectGuiPlugin.LocalWFRunConfig.Dialog.Header"));
+          box.setText(BaseMessages.getString(PKG, "ProjectGuiPlugin.Lifecycle.Dialog.Header"));
           box.setMessage(
-              BaseMessages.getString(PKG, "ProjectGuiPlugin.LocalWFRunConfig.Dialog.Message"));
+              BaseMessages.getString(PKG, "ProjectGuiPlugin.Lifecycle.Dialog.Message1")
+                  + Const.CR
+                  + BaseMessages.getString(PKG, "ProjectGuiPlugin.Lifecycle.Dialog.Message2"));
           int answer = box.open();
           if ((answer & SWT.YES) != 0) {
-            LocalWorkflowRunConfiguration localWorkflowRunConfiguration =
-                new LocalWorkflowRunConfiguration();
-            localWorkflowRunConfiguration.setEnginePluginId("Local");
-            WorkflowRunConfiguration local =
-                new WorkflowRunConfiguration(
-                    "local",
-                    BaseMessages.getString(
-                        PKG, "ProjectGuiPlugin.LocalWFRunConfigDescription.Text"),
-                    null,
-                    localWorkflowRunConfiguration,
-                    true);
-            wrcSerializer.save(local);
+
+            addNewEnvironment();
           }
-        }
-
-        // Ask to put the project in a lifecycle environment
-        //
-        MessageBox box =
-            new MessageBox(HopGui.getInstance().getShell(), SWT.YES | SWT.NO | SWT.ICON_QUESTION);
-        box.setText(BaseMessages.getString(PKG, "ProjectGuiPlugin.Lifecycle.Dialog.Header"));
-        box.setMessage(
-            BaseMessages.getString(PKG, "ProjectGuiPlugin.Lifecycle.Dialog.Message1")
-                + Const.CR
-                + BaseMessages.getString(PKG, "ProjectGuiPlugin.Lifecycle.Dialog.Message2"));
-        int answer = box.open();
-        if ((answer & SWT.YES) != 0) {
-
-          addNewEnvironment();
         }
       }
 
@@ -693,40 +1263,52 @@ public class ProjectsGuiPlugin {
     }
   }
 
-  @GuiToolbarElement(
-      root = HopGui.ID_MAIN_TOOLBAR,
-      id = ID_TOOLBAR_PROJECT_DELETE,
+  @GuiMenuElement(
+      root = ID_CONTEXT_MENU_PROJECT,
+      parentId = ID_CONTEXT_MENU_PROJECT,
+      id = ID_CONTEXT_MENU_PROJECT_DELETE,
+      label = "i18n::HopGui.Toolbar.Project.Delete.Label",
       toolTip = "i18n::HopGui.Toolbar.Project.Delete.Tooltip",
-      image = "project-delete.svg")
-  public void deleteSelectedProject() {
-    Combo combo = getProjectsCombo();
-    if (combo == null) {
-      return;
-    }
-    String projectName = combo.getText();
+      image = "ui/images/delete.svg")
+  public void deleteProject() {
+    // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+    String projectName =
+        HopGui.getInstance().getStatusToolbarWidgets().getToolbarItemText(ID_TOOLBAR_ITEM_PROJECT);
+    deleteRegisteredProject(HopGui.getInstance().getShell(), projectName);
+  }
+
+  /**
+   * Delete a project registration by name (confirmation + parent-project checks). Used by the
+   * toolbar delete action and the projects browser dialog.
+   *
+   * @param parentShell parent for confirmation/error dialogs (must be the active modal dialog when
+   *     called from SelectProjectsDialog, otherwise message boxes appear behind it)
+   * @param projectName name of the project to remove from hop-config
+   * @return true if the project was removed
+   */
+  public boolean deleteRegisteredProject(Shell parentShell, String projectName) {
     if (StringUtils.isEmpty(projectName)) {
-      return;
+      return false;
     }
+    Shell shell = parentShell != null ? parentShell : HopGui.getInstance().getShell();
     ProjectsConfig config = ProjectsConfigSingleton.getConfig();
 
     ProjectConfig currentProjectConfig = config.findProjectConfig(projectName);
     if (currentProjectConfig == null) {
-      return;
+      return false;
     }
 
     String projectHome = currentProjectConfig.getProjectHome();
     String configFilename = currentProjectConfig.getConfigFilename();
 
     try {
-
       List<String> refs = ProjectsUtil.getParentProjectReferences(projectName);
 
       if (refs.isEmpty()) {
-        performProjectDeletion(projectName, config, projectHome, configFilename);
+        return performProjectDeletion(shell, projectName, config, projectHome, configFilename);
       } else {
         String prjReferences = String.join(",", refs);
-        MessageBox box =
-            new MessageBox(HopGui.getInstance().getShell(), SWT.OK | SWT.ICON_INFORMATION);
+        MessageBox box = new MessageBox(shell, SWT.OK | SWT.ICON_INFORMATION);
         box.setText(
             BaseMessages.getString(
                 PKG, "ProjectGuiPlugin.DeleteProject.ProjectReferencedAsParent.Header"));
@@ -739,21 +1321,33 @@ public class ProjectsGuiPlugin {
                 + BaseMessages.getString(
                     PKG, "ProjectGuiPlugin.DeleteProject.ProjectReferencedAsParent.Message2"));
         box.open();
+        return false;
       }
     } catch (Exception e) {
       new ErrorDialog(
-          HopGui.getInstance().getShell(),
+          shell,
           BaseMessages.getString(PKG, "ProjectGuiPlugin.DeleteProject.Dialog.Header"),
           BaseMessages.getString(
               PKG, "ProjectGuiPlugin.DeleteProject.Error.Dialog.Message", projectName),
           e);
+      return false;
     }
   }
 
-  private void performProjectDeletion(
-      String projectName, ProjectsConfig config, String projectHome, String configFilename) {
-    MessageBox box =
-        new MessageBox(HopGui.getInstance().getShell(), SWT.YES | SWT.NO | SWT.ICON_QUESTION);
+  /**
+   * Confirm and remove a project registration from hop-config (does not delete files on disk).
+   *
+   * @param parentShell parent for confirmation/error dialogs
+   * @return true if the project was removed
+   */
+  public boolean performProjectDeletion(
+      Shell parentShell,
+      String projectName,
+      ProjectsConfig config,
+      String projectHome,
+      String configFilename) {
+    Shell shell = parentShell != null ? parentShell : HopGui.getInstance().getShell();
+    MessageBox box = new MessageBox(shell, SWT.YES | SWT.NO | SWT.ICON_QUESTION);
     box.setText(BaseMessages.getString(PKG, "ProjectGuiPlugin.DeleteProject.Dialog.Header"));
     box.setMessage(
         BaseMessages.getString(PKG, "ProjectGuiPlugin.DeleteProject.Dialog.Message1", projectName)
@@ -769,47 +1363,47 @@ public class ProjectsGuiPlugin {
         config.removeProjectConfig(projectName);
         ProjectsConfigSingleton.saveConfig();
 
-        refreshProjectsList();
         if (StringUtils.isEmpty(config.getDefaultProject())) {
-          selectProjectInList(null);
+          updateProjectToolItem(null);
         } else {
-          selectProjectInList(config.getDefaultProject());
+          updateProjectToolItem(config.getDefaultProject());
         }
+        return true;
       } catch (Exception e) {
         new ErrorDialog(
-            HopGui.getInstance().getShell(),
+            shell,
             BaseMessages.getString(PKG, "ProjectGuiPlugin.DeleteProject.Error.Dialog.Header"),
             BaseMessages.getString(
                 PKG, "ProjectGuiPlugin.DeleteProject.Error.Dialog.Message", projectName),
             e);
       }
     }
+    return false;
   }
 
-  @GuiToolbarElement(
-      root = HopGui.ID_MAIN_TOOLBAR,
-      id = ID_TOOLBAR_ENVIRONMENT_LABEL,
-      type = GuiToolbarElementType.LABEL,
-      label = "i18n::HopGui.Toolbar.Environment.Label",
-      toolTip = "i18n::HopGui.Toolbar.Environment.Tooltip",
-      separator = true)
+  @GuiMenuElement(
+      root = ID_CONTEXT_MENU_ENVIRONMENT,
+      parentId = ID_CONTEXT_MENU_ENVIRONMENT,
+      id = ID_CONTEXT_MENU_ENVIRONMENT_EDIT,
+      label = "i18n::HopGui.Toolbar.Environment.Edit.Label",
+      toolTip = "i18n::HopGui.Toolbar.Environment.Edit.Tooltip",
+      image = "ui/images/edit.svg")
   public void editEnvironment() {
-    HopGui hopGui = HopGui.getInstance();
-    Combo combo = getEnvironmentsCombo();
-    if (combo == null) {
-      return;
-    }
     ProjectsConfig config = ProjectsConfigSingleton.getConfig();
-
-    String environmentName = combo.getText();
-    if (StringUtils.isEmpty(environmentName)) {
-      return;
-    }
+    // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+    String environmentName =
+        HopGui.getInstance()
+            .getStatusToolbarWidgets()
+            .getToolbarItemText(ID_TOOLBAR_ITEM_ENVIRONMENT);
     LifecycleEnvironment environment = config.findEnvironment(environmentName);
-    if (environment == null) {
-      return;
+    if (environment != null) {
+      this.editEnvironment(environment);
     }
+  }
 
+  public void editEnvironment(LifecycleEnvironment environment) {
+    HopGui hopGui = HopGui.getInstance();
+    ProjectsConfig config = ProjectsConfigSingleton.getConfig();
     try {
       LifecycleEnvironmentDialog dialog =
           new LifecycleEnvironmentDialog(
@@ -818,9 +1412,7 @@ public class ProjectsGuiPlugin {
         config.addEnvironment(environment);
         ProjectsConfigSingleton.saveConfig();
 
-        refreshEnvironmentsList();
-
-        selectEnvironmentInList(environmentName);
+        updateEnvironmentToolItem(environment.getName());
       }
 
       // A refresh of the project and environment is likely needed
@@ -829,34 +1421,19 @@ public class ProjectsGuiPlugin {
       if (dialog.isNeedingEnvironmentRefresh() && askAboutProjectRefresh(hopGui)) {
         // Refresh the loaded environment
         //
-        selectEnvironment();
+        selectEnvironment(environment.getName());
       }
     } catch (Exception e) {
       new ErrorDialog(
           hopGui.getActiveShell(),
           BaseMessages.getString(PKG, "ProjectGuiPlugin.EditEnvironment.Error.Dialog.Header"),
           BaseMessages.getString(
-              PKG, "ProjectGuiPlugin.EditEnvironment.Error.Dialog.Message", environmentName),
+              PKG, "ProjectGuiPlugin.EditEnvironment.Error.Dialog.Message", environment.getName()),
           e);
     }
   }
 
-  @GuiToolbarElement(
-      root = HopGui.ID_MAIN_TOOLBAR,
-      id = ID_TOOLBAR_ENVIRONMENT_COMBO,
-      type = GuiToolbarElementType.COMBO,
-      comboValuesMethod = "getEnvironmentsList",
-      extraWidth = 200,
-      toolTip = "i18n::HopGui.Toolbar.EnvironmentsList.Tooltip",
-      readOnly = true)
-  public void selectEnvironment() {
-    HopGui hopGui = HopGui.getInstance();
-    Combo envCombo = getEnvironmentsCombo();
-    if (envCombo == null) {
-      return;
-    }
-
-    String environmentName = envCombo.getText();
+  public void selectEnvironment(String environmentName) {
     if (StringUtils.isEmpty(environmentName)) {
       return;
     }
@@ -865,22 +1442,27 @@ public class ProjectsGuiPlugin {
     if (environment == null) {
       return;
     }
-    if (StringUtils.isEmpty(environment.getProjectName())) {
-      return;
+    String projectName = environment.getProjectName();
+    if (StringUtils.isEmpty(projectName)) {
+      // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+      projectName =
+          HopGui.getInstance()
+              .getStatusToolbarWidgets()
+              .getToolbarItemText(ID_TOOLBAR_ITEM_PROJECT);
     }
-    ProjectConfig projectConfig = config.findProjectConfig(environment.getProjectName());
+    ProjectConfig projectConfig = config.findProjectConfig(projectName);
     if (projectConfig == null) {
       return;
     }
 
     try {
-      Project project = projectConfig.loadProject(hopGui.getVariables());
+      Project project = projectConfig.loadProject(HopGui.getInstance().getVariables());
       if (project != null) {
         enableHopGuiProject(projectConfig.getProjectName(), project, environment);
       }
     } catch (Exception e) {
       new ErrorDialog(
-          hopGui.getActiveShell(),
+          HopGui.getInstance().getActiveShell(),
           BaseMessages.getString(PKG, "ProjectGuiPlugin.ChangeEnvironment.Error.Dialog.Header"),
           BaseMessages.getString(
               PKG, "ProjectGuiPlugin.ChangeEnvironment.Error.Dialog.Message", environmentName),
@@ -888,25 +1470,22 @@ public class ProjectsGuiPlugin {
     }
   }
 
-  @GuiToolbarElement(
-      root = HopGui.ID_MAIN_TOOLBAR,
-      id = ID_TOOLBAR_ENVIRONMENT_EDIT,
-      toolTip = "i18n::HopGui.Toolbar.Environment.Edit.Tooltip",
-      image = "environment-edit.svg")
-  public void editSelectedEnvironment() {
-    editEnvironment();
-  }
-
-  @GuiToolbarElement(
-      root = HopGui.ID_MAIN_TOOLBAR,
-      id = ID_TOOLBAR_ENVIRONMENT_ADD,
+  @GuiMenuElement(
+      root = ID_CONTEXT_MENU_ENVIRONMENT,
+      parentId = ID_CONTEXT_MENU_ENVIRONMENT,
+      id = ID_CONTEXT_MENU_ENVIRONMENT_ADD,
+      label = "i18n::HopGui.Toolbar.Environment.Add.Label",
       toolTip = "i18n::HopGui.Toolbar.Environment.Add.Tooltip",
-      image = "environment-add.svg")
+      image = "ui/images/add.svg")
   public void addNewEnvironment() {
     HopGui hopGui = HopGui.getInstance();
     try {
       ProjectsConfig config = ProjectsConfigSingleton.getConfig();
-      String projectName = getProjectsCombo().getText(); // The default is the active project
+      // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+      String projectName =
+          HopGui.getInstance()
+              .getStatusToolbarWidgets()
+              .getToolbarItemText(ID_TOOLBAR_ITEM_PROJECT); // The default is the active project
 
       LifecycleEnvironment environment =
           new LifecycleEnvironment(null, "", projectName, new ArrayList<>());
@@ -918,8 +1497,7 @@ public class ProjectsGuiPlugin {
         config.addEnvironment(environment);
         ProjectsConfigSingleton.saveConfig();
 
-        refreshEnvironmentsList();
-        selectEnvironmentInList(environmentName);
+        updateEnvironmentToolItem(environmentName);
 
         ProjectConfig projectConfig = config.findProjectConfig(projectName);
         if (projectConfig != null) {
@@ -936,18 +1514,44 @@ public class ProjectsGuiPlugin {
     }
   }
 
-  @GuiToolbarElement(
-      root = HopGui.ID_MAIN_TOOLBAR,
-      id = ID_TOOLBAR_ENVIRONMENT_DELETE,
-      toolTip = "i18n::HopGui.Toolbar.Environment.Delete.Tooltip",
-      image = "environment-delete.svg")
-  public void deleteSelectedEnvironment() {
-    HopGui hopGui = HopGui.getInstance();
-    Combo combo = getEnvironmentsCombo();
-    if (combo == null) {
+  @GuiMenuElement(
+      root = ID_CONTEXT_MENU_ENVIRONMENT,
+      parentId = ID_CONTEXT_MENU_ENVIRONMENT,
+      id = ID_CONTEXT_MENU_ENVIRONMENT_DUPLICATE,
+      label = "i18n::HopGui.Toolbar.Environment.Duplicate.Label",
+      toolTip = "i18n::HopGui.Toolbar.Environment.Duplicate.Tooltip",
+      image = "ui/images/duplicate.svg")
+  public void duplicateEnvironment() {
+    ProjectsConfig config = ProjectsConfigSingleton.getConfig();
+    // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+    String environmentName =
+        HopGui.getInstance()
+            .getStatusToolbarWidgets()
+            .getToolbarItemText(ID_TOOLBAR_ITEM_ENVIRONMENT);
+    LifecycleEnvironment environment = config.findEnvironment(environmentName);
+    if (environment == null) {
       return;
     }
-    String environmentName = combo.getText();
+
+    LifecycleEnvironment newEnvironment = new LifecycleEnvironment(environment);
+    newEnvironment.setName(null);
+    this.editEnvironment(newEnvironment);
+  }
+
+  @GuiMenuElement(
+      root = ID_CONTEXT_MENU_ENVIRONMENT,
+      parentId = ID_CONTEXT_MENU_ENVIRONMENT,
+      id = ID_CONTEXT_MENU_ENVIRONMENT_DELETE,
+      label = "i18n::HopGui.Toolbar.Environment.Delete.Label",
+      toolTip = "i18n::HopGui.Toolbar.Environment.Delete.Tooltip",
+      image = "ui/images/delete.svg")
+  public void deleteEnvironment() {
+    HopGui hopGui = HopGui.getInstance();
+    // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+    String environmentName =
+        HopGui.getInstance()
+            .getStatusToolbarWidgets()
+            .getToolbarItemText(ID_TOOLBAR_ITEM_ENVIRONMENT);
     if (StringUtils.isEmpty(environmentName)) {
       return;
     }
@@ -959,8 +1563,7 @@ public class ProjectsGuiPlugin {
       return;
     }
 
-    MessageBox box =
-        new MessageBox(HopGui.getInstance().getShell(), SWT.YES | SWT.NO | SWT.ICON_QUESTION);
+    MessageBox box = new MessageBox(hopGui.getShell(), SWT.YES | SWT.NO | SWT.ICON_QUESTION);
     box.setText(BaseMessages.getString(PKG, "ProjectGuiPlugin.DeleteEnvironment.Dialog.Header"));
     box.setMessage(
         BaseMessages.getString(
@@ -973,20 +1576,24 @@ public class ProjectsGuiPlugin {
     int answer = box.open();
     if ((answer & SWT.YES) != 0) {
       try {
-        String projectName = getProjectsCombo().getText(); // The default is the active project
+        // Use getToolbarItemText() for RAP compatibility (text is stored in Label, not ToolItem)
+        String projectName =
+            HopGui.getInstance()
+                .getStatusToolbarWidgets()
+                .getToolbarItemText(ID_TOOLBAR_ITEM_PROJECT); // The default is the active project
         ProjectConfig projectConfig = config.findProjectConfig(projectName);
         Project project = projectConfig.loadProject(hopGui.getVariables());
 
         config.removeEnvironment(environmentName);
         ProjectsConfigSingleton.saveConfig();
 
-        refreshEnvironmentsList();
-        selectEnvironmentInList(null);
-        enableHopGuiProject(
-            projectName, project, null); // Reload the project to clear current variables
+        updateEnvironmentToolItem(null);
+
+        // Reload the project to clear current variables
+        enableHopGuiProject(projectName, project, null);
       } catch (Exception e) {
         new ErrorDialog(
-            HopGui.getInstance().getShell(),
+            hopGui.getShell(),
             BaseMessages.getString(PKG, "ProjectGuiPlugin.DeleteEnvironment.Error.Dialog.Header"),
             BaseMessages.getString(
                 PKG, "ProjectGuiPlugin.DeleteEnvironment.Error.Dialog.Message", environmentName),
@@ -996,7 +1603,7 @@ public class ProjectsGuiPlugin {
   }
 
   /**
-   * Called by the Combo in the toolbar
+   * Called by the menu in the toolbar
    *
    * @param log the current logchannel
    * @param metadataProvider
@@ -1007,10 +1614,8 @@ public class ProjectsGuiPlugin {
       throws Exception {
     List<String> names = ProjectsConfigSingleton.getConfig().listProjectConfigNames();
     Map<String, Date> lastUsedMap = new HashMap<>();
-    names.stream()
-        .forEach(
-            name ->
-                lastUsedMap.put(name, new GregorianCalendar(1900, Calendar.JANUARY, 1).getTime()));
+    names.forEach(
+        name -> lastUsedMap.put(name, new GregorianCalendar(1900, Calendar.JANUARY, 1).getTime()));
 
     // Get the list of events from the Audit Manager...
     //
@@ -1028,8 +1633,7 @@ public class ProjectsGuiPlugin {
 
     // Reverse sort by last used date of a project...
     //
-    Collections.sort(
-        names,
+    names.sort(
         (name1, name2) -> {
           int cmp = -lastUsedMap.get(name1).compareTo(lastUsedMap.get(name2));
           if (cmp == 0) {
@@ -1042,7 +1646,7 @@ public class ProjectsGuiPlugin {
   }
 
   /**
-   * Called by the environments Combo in the toolbar
+   * Called by the environment menu in the toolbar
    *
    * @param log
    * @param metadataProvider
@@ -1051,7 +1655,7 @@ public class ProjectsGuiPlugin {
     return ProjectsConfigSingleton.getConfig().listEnvironmentNames();
   }
 
-  // Add an e button to the file dialog browser toolbar
+  // Add a "Navigate to project home" button to the file dialog browser toolbar
   //
   @GuiToolbarElement(
       root = NAVIGATE_TOOLBAR_PARENT_ID,
@@ -1100,12 +1704,8 @@ public class ProjectsGuiPlugin {
     if (zipFilename == null) {
       return;
     }
-
-    Combo combo = getProjectsCombo();
-    if (combo == null) {
-      return;
-    }
-    String projectName = combo.getText();
+    String projectName =
+        HopGui.getInstance().getStatusToolbarWidgets().getToolbarItemText(ID_TOOLBAR_ITEM_PROJECT);
     if (StringUtils.isEmpty(projectName)) {
       return;
     }
@@ -1115,6 +1715,7 @@ public class ProjectsGuiPlugin {
 
     AtomicBoolean includeVariables = new AtomicBoolean(true);
     AtomicBoolean includeMetadata = new AtomicBoolean(true);
+    AtomicBoolean exportAsIs = new AtomicBoolean(false);
     AtomicBoolean cancel = new AtomicBoolean(true);
 
     // After getting the filename we create a tree dialog to select the items you wish to include in
@@ -1123,55 +1724,17 @@ public class ProjectsGuiPlugin {
       Shell treeShell =
           new Shell(
               shell, SWT.DIALOG_TRIM | SWT.RESIZE | SWT.MIN | SWT.MAX | SWT.APPLICATION_MODAL);
-      PropsUi.setLook(treeShell);
+      treeShell.setText(BaseMessages.getString(PKG, "HopGui.FileMenu.Project.Export.Label"));
       treeShell.setImage(GuiResource.getInstance().getImageHopUi());
+      treeShell.setMinimumSize(500, 300);
       PropsUi.setLook(treeShell);
-      treeShell.setMinimumSize(500, 200);
 
-      GridLayout layout = new GridLayout();
-      layout.numColumns = 4;
-      treeShell.setLayout(layout);
+      FormLayout formLayout = new FormLayout();
+      formLayout.marginWidth = PropsUi.getFormMargin();
+      formLayout.marginHeight = PropsUi.getFormMargin();
+      treeShell.setLayout(formLayout);
 
-      tree = new FileTree(treeShell, HopVfs.getFileObject(projectHome), projectName);
-      GridData gd = new GridData(GridData.FILL_BOTH);
-      gd.horizontalSpan = 4;
-      gd.heightHint = 300;
-      gd.horizontalIndent = 10;
-      tree.setLayoutData(gd);
-
-      Label separator = new Label(treeShell, SWT.SEPARATOR | SWT.SHADOW_OUT | SWT.HORIZONTAL);
-      GridData gdSeparator = new GridData(SWT.FILL, SWT.CENTER, true, false);
-      gdSeparator.horizontalSpan = 4;
-      separator.setLayoutData(gdSeparator);
-
-      Button btnIncludeVariables = new Button(treeShell, SWT.CHECK);
-      btnIncludeVariables.setSelection(true);
-      btnIncludeVariables.addListener(
-          SWT.Selection, event -> includeVariables.set(btnIncludeVariables.getSelection()));
-      GridData gdBtnIncludeVariables = new GridData(GridData.HORIZONTAL_ALIGN_BEGINNING);
-      gdBtnIncludeVariables.horizontalIndent = 10;
-      btnIncludeVariables.setLayoutData(gdBtnIncludeVariables);
-      Label lblIncludeVariables = new Label(treeShell, SWT.NONE);
-      lblIncludeVariables.setText(
-          BaseMessages.getString(PKG, "ProjectGuiPlugin.IncludeVariables.Label"));
-      GridData gdLblIncludeVariables = new GridData(GridData.FILL_HORIZONTAL);
-      gdLblIncludeVariables.horizontalSpan = 3;
-      lblIncludeVariables.setLayoutData(gdLblIncludeVariables);
-
-      Button btnIncludeMetadata = new Button(treeShell, SWT.CHECK);
-      btnIncludeMetadata.setSelection(true);
-      btnIncludeMetadata.addListener(
-          SWT.Selection, event -> includeMetadata.set(btnIncludeMetadata.getSelection()));
-      GridData gdBtnIncludeMetadata = new GridData(GridData.HORIZONTAL_ALIGN_BEGINNING);
-      gdBtnIncludeMetadata.horizontalIndent = 10;
-      btnIncludeMetadata.setLayoutData(gdBtnIncludeMetadata);
-      Label lblIncludeMetadata = new Label(treeShell, SWT.NONE);
-      lblIncludeMetadata.setText(
-          BaseMessages.getString(PKG, "ProjectGuiPlugin.IncludeMetadata.Label"));
-      GridData gdLblIncludeMetadata = new GridData(GridData.FILL_HORIZONTAL);
-      gdLblIncludeMetadata.horizontalSpan = 3;
-      lblIncludeMetadata.setLayoutData(gdLblIncludeMetadata);
-
+      // Some buttons at the bottom
       Button okButton = new Button(treeShell, SWT.PUSH);
       okButton.setText(BaseMessages.getString(PKG, "System.Button.OK"));
       okButton.addListener(
@@ -1180,20 +1743,96 @@ public class ProjectsGuiPlugin {
             cancel.set(false);
             treeShell.dispose();
           });
-      GridData gdBtnOk = new GridData(GridData.HORIZONTAL_ALIGN_BEGINNING);
-      gdBtnOk.horizontalSpan = 2;
-      gdBtnOk.widthHint = 100;
-      okButton.setLayoutData(gdBtnOk);
-      treeShell.setDefaultButton(okButton);
 
       Button cancelButton = new Button(treeShell, SWT.PUSH);
       cancelButton.setText(BaseMessages.getString(PKG, "System.Button.Cancel"));
       cancelButton.addListener(SWT.Selection, event -> treeShell.dispose());
-      GridData gdBtCancel = new GridData(GridData.HORIZONTAL_ALIGN_BEGINNING);
-      gdBtCancel.horizontalSpan = 2;
-      gdBtCancel.widthHint = 100;
-      cancelButton.setLayoutData(gdBtCancel);
+      BaseTransformDialog.positionBottomButtons(
+          shell, new Button[] {okButton, cancelButton}, PropsUi.getMargin(), null);
 
+      Label separator = new Label(treeShell, SWT.SEPARATOR | SWT.HORIZONTAL);
+      separator.setLayoutData(
+          new FormDataBuilder()
+              .left()
+              .fullWidth()
+              .bottom(okButton, -2 * PropsUi.getMargin())
+              .result());
+
+      Button btnIncludeVariables = new Button(treeShell, SWT.CHECK);
+      PropsUi.setLook(btnIncludeVariables);
+      btnIncludeVariables.setText(
+          BaseMessages.getString(PKG, "ProjectGuiPlugin.IncludeVariables.Label"));
+      btnIncludeVariables.setSelection(true);
+      btnIncludeVariables.addListener(
+          SWT.Selection, event -> includeVariables.set(btnIncludeVariables.getSelection()));
+      btnIncludeVariables.setLayoutData(
+          new FormDataBuilder().fullWidth().bottom(separator, -PropsUi.getMargin()).result());
+
+      // Bottom → top: metadata, as-is, variables, file tree
+      //
+      Button btnIncludeMetadata = new Button(treeShell, SWT.CHECK);
+      PropsUi.setLook(btnIncludeMetadata);
+      btnIncludeMetadata.setText(
+          BaseMessages.getString(PKG, "ProjectGuiPlugin.IncludeMetadata.Label"));
+      btnIncludeMetadata.setSelection(true);
+      btnIncludeMetadata.setLayoutData(
+          new FormDataBuilder()
+              .fullWidth()
+              .bottom(btnIncludeVariables, -2 * PropsUi.getMargin())
+              .result());
+      btnIncludeMetadata.addListener(
+          SWT.Selection, event -> includeMetadata.set(btnIncludeMetadata.getSelection()));
+
+      Button btnExportAsIs = new Button(treeShell, SWT.CHECK);
+      PropsUi.setLook(btnExportAsIs);
+      btnExportAsIs.setText(BaseMessages.getString(PKG, "ProjectGuiPlugin.ExportAsIs.Label"));
+      btnExportAsIs.setToolTipText(
+          BaseMessages.getString(PKG, "ProjectGuiPlugin.ExportAsIs.Tooltip"));
+      btnExportAsIs.setSelection(false);
+      btnExportAsIs.setLayoutData(
+          new FormDataBuilder()
+              .fullWidth()
+              .bottom(btnIncludeMetadata, -PropsUi.getMargin())
+              .result());
+
+      // Remember selections so we can restore them when "export as-is" is turned off.
+      AtomicBoolean savedIncludeVariables = new AtomicBoolean(true);
+      AtomicBoolean savedIncludeMetadata = new AtomicBoolean(true);
+      btnExportAsIs.addListener(
+          SWT.Selection,
+          event -> {
+            boolean asIs = btnExportAsIs.getSelection();
+            exportAsIs.set(asIs);
+            if (asIs) {
+              savedIncludeVariables.set(btnIncludeVariables.getSelection());
+              savedIncludeMetadata.set(btnIncludeMetadata.getSelection());
+              btnIncludeVariables.setSelection(false);
+              btnIncludeMetadata.setSelection(false);
+              includeVariables.set(false);
+              includeMetadata.set(false);
+              btnIncludeVariables.setEnabled(false);
+              btnIncludeMetadata.setEnabled(false);
+            } else {
+              btnIncludeVariables.setEnabled(true);
+              btnIncludeMetadata.setEnabled(true);
+              btnIncludeVariables.setSelection(savedIncludeVariables.get());
+              btnIncludeMetadata.setSelection(savedIncludeMetadata.get());
+              includeVariables.set(savedIncludeVariables.get());
+              includeMetadata.set(savedIncludeMetadata.get());
+            }
+          });
+
+      tree = new FileTree(treeShell, HopVfs.getFileObject(projectHome), projectName);
+      tree.setLayoutData(
+          new FormDataBuilder()
+              .top()
+              .fullWidth()
+              .bottom(btnExportAsIs, -PropsUi.getMargin())
+              .result());
+
+      BaseTransformDialog.setSize(treeShell);
+
+      treeShell.setDefaultButton(okButton);
       treeShell.pack();
       treeShell.open();
 
@@ -1212,80 +1851,101 @@ public class ProjectsGuiPlugin {
             try {
               monitor.setTaskName(
                   BaseMessages.getString(PKG, "ProjectGuiPlugin.ZipDirectory.Taskname.Text"));
-              HashMap<String, String> variablesMap = new HashMap<>();
+              boolean asIs = exportAsIs.get();
 
-              for (String name : variables.getVariableNames()) {
-                if (!name.contains("java.")
-                    && !name.contains("user.")
-                    && !name.contains("sun.")
-                    && !name.contains("os.")
-                    && !name.contains("file.")
-                    && !name.contains("jdk.")
-                    && !name.contains("http.")
-                    && !name.contains("path.")
-                    && !name.contains("ftp.")
-                    && !name.contains("line.")
-                    && !name.contains("awt.")
-                    && !name.equals("HOP_METADATA_FOLDER")
-                    && !name.contains("HOP_ENVIRONMENT_NAME")
-                    && !name.contains("HOP_AUDIT_FOLDER")
-                    && !name.contains("HOP_CONFIG_FOLDER")
-                    && !name.contains("PROJECT_HOME")
-                    && !name.contains("HOP_PROJECTS")
-                    && !name.contains("HOP_PLATFORM_OS")
-                    && !name.contains("HOP_PROJECT_NAME")
-                    && !name.contains("HOP_SERVER_URL")) {
-                  String value = variables.getVariable(name);
-                  variablesMap.put(name, value);
-                }
-              }
-              ObjectMapper objectMapper = new ObjectMapper();
-              String variablesJson = objectMapper.writeValueAsString(variablesMap);
-
-              SerializableMetadataProvider metadataProvider =
-                  new SerializableMetadataProvider(hopGui.getMetadataProvider());
-              String metadataJson = metadataProvider.toJson();
-
-              OutputStream outputStream = HopVfs.getOutputStream(zipFilename, false);
+              FileObject zipFile = HopVfs.getFileObject(zipFilename);
+              OutputStream outputStream = HopVfs.getOutputStream(zipFile, false);
               ZipOutputStream zos = new ZipOutputStream(outputStream);
               FileObject projectDirectory = HopVfs.getFileObject(projectHome);
-              String projectHomeFolder =
-                  HopVfs.getFileObject(projectHome).getParent().getName().getURI();
+              // As-is: strip project home so entries land at the zip root (compatible with
+              // zip:file://…!/ read-only project open). Normal: strip parent so entries are under
+              // {projectName}/…
+              String stripBase =
+                  asIs
+                      ? projectDirectory.getName().getURI()
+                      : projectDirectory.getParent().getName().getURI();
 
+              // Includes selected files and dependencies
               if (!tree.getFileObjects().isEmpty()) {
                 for (FileObject fileObject : tree.getFileObjects()) {
-                  zipFile(
-                      fileObject,
-                      fileObject.getName().getURI(),
-                      zos,
-                      projectHomeFolder,
-                      zipFilename);
+                  // To prevent the zip file from including itself
+                  if (zipFile.equals(fileObject)) {
+                    continue;
+                  }
+                  monitor.subTask(fileObject.getName().getURI());
+                  zipFile(fileObject, fileObject.getName().getURI(), zos, stripBase);
                 }
-              } else {
-                return;
               }
-              zipFile(
-                  HopVfs.getFileObject(
-                      Const.HOP_CONFIG_FOLDER + Const.FILE_SEPARATOR + Const.HOP_CONFIG),
-                  projectDirectory.getName().getBaseName()
-                      + Const.FILE_SEPARATOR
-                      + Const.HOP_CONFIG,
-                  zos,
-                  projectHomeFolder,
-                  zipFilename);
-              if (includeVariables.get()) {
-                zipString(
-                    variablesJson, "variables.json", zos, projectDirectory.getName().getBaseName());
+
+              // Sidecars only for the classic (non as-is) export format
+              if (!asIs) {
+                HashMap<String, String> variablesMap = new HashMap<>();
+
+                for (String name : variables.getVariableNames()) {
+                  if (!name.contains("java.")
+                      && !name.contains("user.")
+                      && !name.contains("sun.")
+                      && !name.contains("os.")
+                      && !name.contains("file.")
+                      && !name.contains("jdk.")
+                      && !name.contains("http.")
+                      && !name.contains("path.")
+                      && !name.contains("ftp.")
+                      && !name.contains("line.")
+                      && !name.contains("awt.")
+                      && !name.equals("HOP_METADATA_FOLDER")
+                      && !name.contains("HOP_ENVIRONMENT_NAME")
+                      && !name.contains("HOP_AUDIT_FOLDER")
+                      && !name.contains("HOP_CONFIG_FOLDER")
+                      && !name.contains("PROJECT_HOME")
+                      && !name.contains("PARENT_PROJECT_NAME")
+                      && !name.contains("HOP_PROJECTS")
+                      && !name.contains("HOP_PLATFORM_OS")
+                      && !name.contains("HOP_PROJECT_NAME")
+                      && !name.contains("HOP_SERVER_URL")) {
+                    String value = variables.getVariable(name);
+                    variablesMap.put(name, value);
+                  }
+                }
+                ObjectMapper objectMapper = new ObjectMapper();
+                String variablesJson = objectMapper.writeValueAsString(variablesMap);
+
+                SerializableMetadataProvider metadataProvider =
+                    new SerializableMetadataProvider(hopGui.getMetadataProvider());
+                String metadataJson = metadataProvider.toJson();
+
+                // Includes config file
+                zipFile(
+                    HopVfs.getFileObject(
+                        Const.HOP_CONFIG_FOLDER + Const.FILE_SEPARATOR + Const.HOP_CONFIG),
+                    projectDirectory.getName().getBaseName()
+                        + Const.FILE_SEPARATOR
+                        + Const.HOP_CONFIG,
+                    zos,
+                    stripBase);
+
+                // Includes variables
+                if (includeVariables.get()) {
+                  zipString(
+                      variablesJson,
+                      "variables.json",
+                      zos,
+                      projectDirectory.getName().getBaseName());
+                }
+
+                // Includes metadata
+                if (includeMetadata.get()) {
+                  zipString(
+                      metadataJson, "metadata.json", zos, projectDirectory.getName().getBaseName());
+                }
               }
-              if (includeMetadata.get()) {
-                zipString(
-                    metadataJson, "metadata.json", zos, projectDirectory.getName().getBaseName());
-              }
+
               zos.close();
               outputStream.close();
-              monitor.done();
             } catch (Exception e) {
               throw new InvocationTargetException(e, "Error zipping project: " + e.getMessage());
+            } finally {
+              monitor.done();
             }
           };
 
@@ -1311,58 +1971,74 @@ public class ProjectsGuiPlugin {
   }
 
   /**
+   * Build a zip entry path by stripping a base URI/path prefix from an absolute file URI.
+   *
+   * @param absoluteUri absolute file URI or path
+   * @param stripBase URI/path prefix to remove (project home or its parent)
+   * @return relative zip entry path without a leading slash
+   */
+  static String relativeZipPath(String absoluteUri, String stripBase) {
+    if (absoluteUri == null) {
+      return "";
+    }
+    String path = absoluteUri;
+    if (StringUtils.isNotEmpty(stripBase)) {
+      String base = stripBase;
+      // Normalize trailing slashes so file://…/project and file://…/project/ both strip cleanly
+      while (base.endsWith("/")) {
+        base = base.substring(0, base.length() - 1);
+      }
+      if (path.startsWith(base)) {
+        path = path.substring(base.length());
+      } else {
+        path = path.replace(stripBase, "");
+      }
+    }
+    while (path.startsWith("/")) {
+      path = path.substring(1);
+    }
+    return path;
+  }
+
+  /**
    * Add file Object to zip file
    *
    * @param fileToZip the file to add
    * @param filename destination filename
    * @param zipOutputStream zip output stream to append the file to
    * @param projectHomeParent project home folder to be stripped from the base path
-   * @param zipFilename name of the destination zip file
    * @throws IOException when failing to add a file to the zip
    */
   public void zipFile(
       FileObject fileToZip,
       String filename,
       ZipOutputStream zipOutputStream,
-      String projectHomeParent,
-      String zipFilename)
+      String projectHomeParent)
       throws IOException {
     if (fileToZip.isHidden()) {
       return;
     }
+
+    // Build relative filename
+    filename = relativeZipPath(filename, projectHomeParent);
+
+    zipOutputStream.putNextEntry(new ZipEntry(filename));
     if (fileToZip.isFolder()) {
-      if (filename.endsWith("/")) {
-        zipOutputStream.putNextEntry(new ZipEntry(filename.replaceAll(projectHomeParent, "")));
-        zipOutputStream.closeEntry();
-      } else {
-        zipOutputStream.putNextEntry(
-            new ZipEntry(filename.replaceAll(projectHomeParent, "") + "/"));
-        zipOutputStream.closeEntry();
-      }
-      FileObject[] children = fileToZip.getChildren();
-      for (FileObject childFile : children) {
-        if (childFile.equals(zipFilename)) {
-          return;
-        }
+      zipOutputStream.closeEntry();
+      for (FileObject childFile : fileToZip.getChildren()) {
         zipFile(
             childFile,
+            // Pass already-relative path so nested calls do not re-strip incorrectly
             filename + "/" + childFile.getName().getBaseName(),
             zipOutputStream,
-            projectHomeParent,
-            zipFilename);
+            "");
       }
-      return;
+    } else {
+      InputStream fis = HopVfs.getInputStream(fileToZip);
+      fis.transferTo(zipOutputStream);
+      fis.close();
+      zipOutputStream.closeEntry();
     }
-    InputStream fis = HopVfs.getInputStream(fileToZip);
-    ZipEntry zipEntry = new ZipEntry(filename.replaceAll(projectHomeParent, ""));
-    zipOutputStream.putNextEntry(zipEntry);
-    byte[] bytes = new byte[1024];
-    int length;
-    while ((length = fis.read(bytes)) >= 0) {
-      zipOutputStream.write(bytes, 0, length);
-    }
-    zipOutputStream.closeEntry();
-    fis.close();
   }
 
   /**

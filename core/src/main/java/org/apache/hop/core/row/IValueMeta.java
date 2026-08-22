@@ -61,8 +61,6 @@ import org.w3c.dom.Node;
  *
  * <p><b>Apache Hop Field Type / Java Mapping</b>
  *
- * <p>
- *
  * <Table border="1">
  * <caption>Java mappings</caption>
  * <tr>
@@ -125,8 +123,6 @@ import org.w3c.dom.Node;
  *
  * <p>In addition to the data type of a field, the storage type (getStorageType()/setStorageType())
  * is used to interpret the actual field value in a row array.
- *
- * <p>
  *
  * <Table border="1">
  * <caption>Storage mappings</caption>
@@ -198,6 +194,9 @@ public interface IValueMeta extends Cloneable {
 
   /** Value type indicating that the value contains an Avro Record */
   int TYPE_AVRO = 20;
+
+  /** Value type indicating that the value contains an UUID */
+  int TYPE_UUID = 32;
 
   /** The Constant typeCodes. */
   String[] typeCodes =
@@ -283,22 +282,16 @@ public interface IValueMeta extends Cloneable {
     BOTH("both", BaseMessages.getString(PKG, "ValueMeta.TrimType.Both"), TRIM_TYPE_BOTH);
 
     /**
-     * -- GETTER -- Gets code
-     *
      * @return value of code
      */
     @Getter private final String code;
 
     /**
-     * -- GETTER -- Gets description
-     *
      * @return value of description
      */
     @Getter private final String description;
 
     /**
-     * -- GETTER -- Gets type
-     *
      * @return value of type
      */
     @Getter private final int type;
@@ -344,7 +337,13 @@ public interface IValueMeta extends Cloneable {
     try {
       return typeCodes[type];
     } catch (Exception e) {
-      return "unknown/illegal";
+      // consult plugin registry
+      try {
+        String pluginType = ValueMetaFactory.getValueMetaName(type);
+        return pluginType.equals("-") ? "unknown/illegal" : pluginType;
+      } catch (Exception ignore) {
+        return "unknown/illegal";
+      }
     }
   }
 
@@ -992,6 +991,13 @@ public interface IValueMeta extends Cloneable {
   boolean isNumeric();
 
   /**
+   * Checks whether this Value is Json
+   *
+   * @return true if the value is Json
+   */
+  boolean isJson();
+
+  /**
    * Return the type of a value in a textual form: "String", "Number", "Integer", "Boolean", "Date",
    * ...
    *
@@ -1277,7 +1283,12 @@ public interface IValueMeta extends Cloneable {
    * @param lazyConversion use lazy conversion
    * @return The value metadata if this value should handle the SQL type at the specified index.
    * @throws HopDatabaseException In case something went wrong.
+   * @deprecated Superseded by {@link org.apache.hop.core.database.types.StandardJdbcTypeMapper},
+   *     which carries the single copy of these rules. This is one of three implementations that had
+   *     drifted apart; callers will be migrated to the mapper and this method removed in a later
+   *     release.
    */
+  @Deprecated(since = "2.20")
   IValueMeta getValueFromSqlType(
       IVariables variables,
       DatabaseMeta databaseMeta,
@@ -1299,7 +1310,11 @@ public interface IValueMeta extends Cloneable {
    * @param variables
    * @param databaseMeta the database metadata to reference capabilities and so on.
    * @param rs A ResultSet from getColumns, positioned correctly on a column to read.
+   * @deprecated Superseded by {@link org.apache.hop.core.database.types.StandardJdbcTypeMapper}.
+   *     This mapping had no callers left in Hop and had drifted from the one the engine actually
+   *     uses; use the mapper instead.
    */
+  @Deprecated(since = "2.20")
   IValueMeta getMetadataPreview(IVariables variables, DatabaseMeta databaseMeta, ResultSet rs)
       throws HopDatabaseException;
 

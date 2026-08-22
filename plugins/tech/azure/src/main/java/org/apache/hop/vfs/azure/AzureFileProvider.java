@@ -18,6 +18,8 @@
 
 package org.apache.hop.vfs.azure;
 
+import com.azure.identity.DefaultAzureCredential;
+import com.azure.identity.DefaultAzureCredentialBuilder;
 import com.azure.storage.common.StorageSharedKeyCredential;
 import com.azure.storage.file.datalake.DataLakeServiceClient;
 import com.azure.storage.file.datalake.DataLakeServiceClientBuilder;
@@ -25,7 +27,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Locale;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.commons.vfs2.Capability;
@@ -47,6 +49,9 @@ import org.apache.hop.vfs.azure.metadatatype.AzureMetadataType;
 
 public class AzureFileProvider extends AbstractOriginatingFileProvider {
 
+  // APPEND_CONTENT is required for append: without it commons-vfs2 rejects getOutputStream(true)
+  // with "does not support append mode". Data Lake Gen2 appends natively, see
+  // DataLakeAppendOutputStream.
   public static final Collection<Capability> capabilities =
       Collections.unmodifiableCollection(
           Arrays.asList(
@@ -59,7 +64,8 @@ public class AzureFileProvider extends AbstractOriginatingFileProvider {
               Capability.LIST_CHILDREN,
               Capability.READ_CONTENT,
               Capability.URI,
-              Capability.WRITE_CONTENT));
+              Capability.WRITE_CONTENT,
+              Capability.APPEND_CONTENT));
 
   public static final UserAuthenticationData.Type[] AUTHENTICATOR_TYPES =
       new UserAuthenticationData.Type[] {
@@ -111,6 +117,8 @@ public class AzureFileProvider extends AbstractOriginatingFileProvider {
       logger.info("Initialize Azure client");
 
       AzureFileName azureRootName = (AzureFileName) fileName;
+      DataLakeServiceClient serviceClient;
+
       if (azureMetadataType != null) {
 
         if (StringUtils.isEmpty(azureMetadataType.getStorageAccountName())) {
@@ -119,21 +127,66 @@ public class AzureFileProvider extends AbstractOriginatingFileProvider {
                   + azureMetadataType.getName()
                   + "\" is missing a storage account name");
         }
-        if (StringUtils.isEmpty(azureMetadataType.getStorageAccountKey())) {
-          throw new FileSystemException(
-              "Azure configuration \""
-                  + azureMetadataType.getName()
-                  + "\" is missing a storage account key");
-        }
 
         account = variables.resolve(azureMetadataType.getStorageAccountName());
-        key =
-            Encr.decryptPasswordOptionallyEncrypted(
-                variables.resolve(azureMetadataType.getStorageAccountKey()));
         endpoint =
             (!Utils.isEmpty(azureMetadataType.getStorageAccountEndpoint()))
                 ? variables.resolve(azureMetadataType.getStorageAccountEndpoint())
                 : String.format(Locale.ROOT, "https://%s.dfs.core.windows.net", account);
+
+        // Determine authentication type (default to "Key" for backward compatibility)
+        String authType = azureMetadataType.getAuthenticationType();
+        if (StringUtils.isEmpty(authType)) {
+          authType = "Key";
+        }
+
+        DataLakeServiceClientBuilder clientBuilder =
+            new DataLakeServiceClientBuilder().endpoint(endpoint);
+
+        if ("Managed Identity".equals(authType)) {
+          // Use Managed Identity authentication (supports Azure CLI, Managed Identity, etc.)
+          try {
+            DefaultAzureCredential credential = new DefaultAzureCredentialBuilder().build();
+            serviceClient = clientBuilder.credential(credential).buildClient();
+          } catch (Exception e) {
+            throw new FileSystemException(
+                "Failed to authenticate using Managed Identity. Please ensure you have: "
+                    + "1) Azure CLI installed and logged in (az login), OR "
+                    + "2) Running on Azure with Managed Identity enabled, OR "
+                    + "3) Environment variables configured (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET). "
+                    + "Also ensure your identity has proper permissions (e.g., 'Storage Blob Data Contributor' role) on the storage account.",
+                e);
+          }
+        } else if ("SAS Token".equals(authType)) {
+          // Use a shared access signature, which is scoped and time limited
+          if (StringUtils.isEmpty(azureMetadataType.getSasToken())) {
+            throw new FileSystemException(
+                "Azure configuration \""
+                    + azureMetadataType.getName()
+                    + "\" is missing a SAS token");
+          }
+
+          String sasToken =
+              Encr.decryptPasswordOptionallyEncrypted(
+                  variables.resolve(azureMetadataType.getSasToken()));
+
+          serviceClient = clientBuilder.sasToken(sasToken).buildClient();
+        } else {
+          // Use Key-based authentication
+          if (StringUtils.isEmpty(azureMetadataType.getStorageAccountKey())) {
+            throw new FileSystemException(
+                "Azure configuration \""
+                    + azureMetadataType.getName()
+                    + "\" is missing a storage account key");
+          }
+
+          key =
+              Encr.decryptPasswordOptionallyEncrypted(
+                  variables.resolve(azureMetadataType.getStorageAccountKey()));
+
+          StorageSharedKeyCredential storageCreds = new StorageSharedKeyCredential(account, key);
+          serviceClient = clientBuilder.credential(storageCreds).buildClient();
+        }
       } else {
         AzureConfig config = AzureConfigSingleton.getConfig();
 
@@ -153,16 +206,14 @@ public class AzureFileProvider extends AbstractOriginatingFileProvider {
             (!Utils.isEmpty(config.getEmulatorUrl()))
                 ? newVariables.resolve(config.getEmulatorUrl())
                 : String.format(Locale.ROOT, "https://%s.dfs.core.windows.net", account);
+
+        StorageSharedKeyCredential storageCreds = new StorageSharedKeyCredential(account, key);
+        serviceClient =
+            new DataLakeServiceClientBuilder()
+                .endpoint(endpoint)
+                .credential(storageCreds)
+                .buildClient();
       }
-
-      StorageSharedKeyCredential storageCreds = new StorageSharedKeyCredential(account, key);
-
-      DataLakeServiceClient serviceClient =
-          new DataLakeServiceClientBuilder()
-              .endpoint(endpoint)
-              .credential(storageCreds)
-              // .httpClient((HttpClient) client)
-              .buildClient();
 
       azureFileSystem =
           new AzureFileSystem(
@@ -171,6 +222,12 @@ public class AzureFileProvider extends AbstractOriginatingFileProvider {
               ((AzureFileName) fileName).getContainer(),
               fileSystemOptions,
               account);
+
+      if (azureMetadataType != null) {
+        String cacheTtlSeconds = variables.resolve(azureMetadataType.getCacheTtlSeconds());
+        long ttlMs = org.apache.hop.core.Const.toLong(cacheTtlSeconds, 10L) * 1000L;
+        azureFileSystem.setListCacheTtlMs(ttlMs);
+      }
 
     } finally {
       UserAuthenticatorUtils.cleanup(authData);

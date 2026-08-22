@@ -17,11 +17,14 @@
 
 package org.apache.hop.databases.firebird;
 
+import java.util.List;
 import org.apache.hop.core.Const;
 import org.apache.hop.core.database.BaseDatabaseMeta;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.database.DatabaseMetaPlugin;
+import org.apache.hop.core.database.DriverDownload;
 import org.apache.hop.core.database.IDatabase;
+import org.apache.hop.core.database.types.ColumnContext;
 import org.apache.hop.core.gui.plugin.GuiPlugin;
 import org.apache.hop.core.row.IValueMeta;
 
@@ -30,9 +33,16 @@ import org.apache.hop.core.row.IValueMeta;
     type = "FIREBIRD",
     typeDescription = "Firebird SQL",
     image = "firebird.svg",
-    documentationUrl = "/database/databases/firebird.html")
+    documentationUrl = "/database/databases/firebird.html",
+    classLoaderGroup = "firebird-db")
 @GuiPlugin(id = "GUI-FirebirdDatabaseMeta")
 public class FirebirdDatabaseMeta extends BaseDatabaseMeta implements IDatabase {
+
+  /** Firebird limits rows with FIRST, between SELECT and the column list. */
+  @Override
+  public String getLimitClausePrefix(int nrRows) {
+    return " FIRST " + nrRows;
+  }
 
   public static final String CONST_TIMESTAMP = "TIMESTAMP";
   public static final String CONST_SMALLINT = "SMALLINT";
@@ -65,6 +75,20 @@ public class FirebirdDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
   @Override
   public String getDriverClass() {
     return "org.firebirdsql.jdbc.FBDriver";
+  }
+
+  @Override
+  public DriverDownload getDriverDownload() {
+    return DriverDownload.builder()
+        .mavenCoordinate("org.firebirdsql.jdbc:jaybird")
+        .defaultVersion("6.0.5")
+        .licenseCategory("X")
+        .licenseName("LGPL-2.1")
+        .licenseUrl("https://github.com/FirebirdSQL/jaybird/blob/master/LICENSE")
+        .vendor("Firebird (Jaybird)")
+        .vendorUrl("https://firebirdsql.org/en/jdbc-driver/")
+        .excludes(List.of("org.jspecify:jspecify"))
+        .build();
   }
 
   @Override
@@ -115,7 +139,7 @@ public class FirebirdDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
     return "ALTER TABLE "
         + tableName
         + " ADD "
-        + getFieldDefinition(v, tk, pk, useAutoinc, true, false);
+        + getColumnDefinition(v, tk, pk, useAutoinc, true, false, ColumnContext.Purpose.ADD_COLUMN);
   }
 
   /**
@@ -137,7 +161,8 @@ public class FirebirdDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
         + " ALTER COLUMN "
         + v.getName()
         + " TYPE "
-        + getFieldDefinition(v, tk, pk, useAutoinc, false, false);
+        + getColumnDefinition(
+            v, tk, pk, useAutoinc, false, false, ColumnContext.Purpose.MODIFY_COLUMN);
   }
 
   @Override
@@ -176,31 +201,23 @@ public class FirebirdDatabaseMeta extends BaseDatabaseMeta implements IDatabase 
         ) {
           retval += "BIGINT NOT NULL PRIMARY KEY";
         } else {
-          if (type == IValueMeta.TYPE_INTEGER) {
-            // Integer values...
-            if (length < 5) {
-              retval += CONST_SMALLINT;
-            } else if (length < 10) {
-              retval += CONST_INTEGER;
-            } else {
-              retval += "BIGINT";
+          switch (type) {
+            case IValueMeta.TYPE_INTEGER -> {
+              if (length < 5) {
+                retval += CONST_SMALLINT;
+              } else if (length < 10) {
+                retval += CONST_INTEGER;
+              } else {
+                retval += "BIGINT";
+              }
             }
-          } else if (type == IValueMeta.TYPE_BIGNUMBER) {
-            // Fixed point value...
-            if (length < 1) {
-              // user configured no value for length. Use 16 digits, which is comparable to
-              // mantissa 2^53 of IEEE 754 binary64 "double".
-              length = 16;
+            case IValueMeta.TYPE_BIGNUMBER -> {
+              int len = (length < 1) ? 16 : length;
+              int p = (precision < 1) ? 16 : precision;
+
+              retval += "DECIMAL(" + len + "," + p + ")";
             }
-            if (precision < 1) {
-              // user configured no value for precision. Use 16 digits, which is comparable
-              // to IEEE 754 binary64 "double".
-              precision = 16;
-            }
-            retval += "DECIMAL(" + length + "," + precision + ")";
-          } else {
-            // Floating point value with double precision...
-            retval += "DOUBLE";
+            default -> retval += "DOUBLE";
           }
         }
         break;

@@ -17,15 +17,30 @@
 
 package org.apache.hop.pipeline.transforms.common;
 
+import java.util.List;
 import org.apache.commons.vfs2.FileObject;
+import org.apache.hop.core.exception.HopFileException;
+import org.apache.hop.core.exception.HopTransformException;
+import org.apache.hop.core.fileinput.InputFile;
+import org.apache.hop.core.gui.ITextFileInputField;
+import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.variables.IVariables;
+import org.apache.hop.metadata.api.IHopMetadataProvider;
 import org.apache.hop.pipeline.PipelineMeta;
+import org.apache.hop.pipeline.transform.TransformMeta;
+import org.apache.hop.pipeline.transforms.file.BaseFileErrorHandling;
 
 /**
  * A common interface for all metas aware of the csv input format, such as CSV Input and Text File
  * Input
  */
-public interface ICsvInputAwareMeta {
+public interface ICsvInputAwareMeta<T extends ITextFileInputField> {
+
+  String getFileType();
+
+  List<T> getInputFields();
+
+  List<InputFile> getInputFiles();
 
   String getDelimiter();
 
@@ -37,9 +52,23 @@ public interface ICsvInputAwareMeta {
 
   boolean isBreakInEnclosureAllowed();
 
+  /**
+   * When enabled, an empty field that is not enclosed (a;;b) is returned as null while an empty
+   * enclosed field (a;"";b) is returned as an empty string.
+   *
+   * @return true if empty values without enclosure have to be returned as null
+   */
+  default boolean isNullIfNotEnclosed() {
+    return false;
+  }
+
   int getFileFormatTypeNr();
 
   boolean hasHeader();
+
+  int getNrHeaderLines();
+
+  ICsvInputAwareMeta clone();
 
   /**
    * Returns a {@link FileObject} that corresponds to the first encountered input file. This object
@@ -48,5 +77,46 @@ public interface ICsvInputAwareMeta {
    * @param variables the {@link PipelineMeta}
    * @return null if the {@link FileObject} cannot be created.
    */
-  FileObject getHeaderFileObject(final IVariables variables);
+  FileObject getHeaderFileObject(final IVariables variables) throws HopFileException;
+
+  /**
+   * Gets the fields.
+   *
+   * @param inputRowMeta the input row meta that is modified in this method to reflect the output
+   *     row metadata of the transform
+   * @param name Name of the transform to use as input for the origin field in the values
+   * @param info Fields used as extra lookup information
+   * @param nextTransform the next transform that is targeted
+   * @param variables the variables The variable variables to use to replace variables
+   * @param metadataProvider the MetaStore to use to load additional external data or metadata
+   *     impacting the output fields
+   * @throws HopTransformException the hop transform exception
+   */
+  void getFields(
+      IRowMeta inputRowMeta,
+      String name,
+      IRowMeta[] info,
+      TransformMeta nextTransform,
+      IVariables variables,
+      IHopMetadataProvider metadataProvider)
+      throws HopTransformException;
+
+  /**
+   * @return Optional error handling metadata
+   */
+  BaseFileErrorHandling getErrorHandling();
+
+  String getErrorCountField();
+
+  String getErrorFieldsField();
+
+  String getErrorTextField();
+
+  boolean isErrorLineSkipped();
+
+  boolean isIncludeFilename();
+
+  boolean isIncludeRowNumber();
+
+  String getLength();
 }

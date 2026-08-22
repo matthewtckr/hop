@@ -26,6 +26,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.io.Serial;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
@@ -53,6 +54,7 @@ import org.apache.hop.core.Const;
 import org.apache.hop.core.database.Database;
 import org.apache.hop.core.database.DatabaseMeta;
 import org.apache.hop.core.exception.HopFileException;
+import org.apache.hop.core.exception.HopRuntimeException;
 import org.apache.hop.core.row.IRowMeta;
 import org.apache.hop.core.row.RowDataUtil;
 import org.apache.hop.core.row.ValueDataUtil;
@@ -74,9 +76,9 @@ import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
 import org.mozilla.javascript.WrappedException;
 
+@SuppressWarnings({"java:S1172", "java:S100"})
 public class ScriptValuesAddedFunctions extends ScriptableObject {
-
-  public static final long serialVersionUID = 1L;
+  @Serial private static final long serialVersionUID = 1L;
 
   public static final int STRING_FUNCTION = 0;
   public static final int NUMERIC_FUNCTION = 1;
@@ -92,7 +94,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   public static final String CONST_THE_FIRST_ARGUMENT_MUST_BE_A_NUMBER =
       "The first Argument must be a Number.";
 
-  public static String[] jsFunctionList = {
+  protected static final String[] jsFunctionList = {
     "appendToFile",
     "getPipelineName",
     "writeToLog",
@@ -188,8 +190,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   }
 
   // This is only used for reading, so no concurrency problems.
-  // todo: move in the real variables of the transform.
-
+  //
   // Functions to Add
   // date2num, num2date,
   // fisc_date, isNull
@@ -312,12 +313,11 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
         Calendar fisOffsetDate = Calendar.getInstance();
         startDate.setTime(dIn);
         Format dfFormatter = new SimpleDateFormat("dd.MM.yyyy");
-        String strOffsetDate =
-            Context.toString(argList[1]) + String.valueOf(startDate.get(Calendar.YEAR));
+        String strOffsetDate = Context.toString(argList[1]) + startDate.get(Calendar.YEAR);
         Date dOffset = (Date) dfFormatter.parseObject(strOffsetDate);
         fisOffsetDate.setTime(dOffset);
 
-        String strFisStartDate = "01.01." + String.valueOf(startDate.get(Calendar.YEAR) + 1);
+        String strFisStartDate = "01.01." + startDate.get(Calendar.YEAR) + 1;
         fisStartDate.setTime((Date) dfFormatter.parseObject(strFisStartDate));
         int iDaysToAdd =
             (int) ((startDate.getTimeInMillis() - fisOffsetDate.getTimeInMillis()) / 86400000);
@@ -340,21 +340,15 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
         ITransform scm = (ITransform) Context.jsToJava(scmO, ITransform.class);
         String strType = Context.toString(argList[0]).toLowerCase();
 
-        if (strType.equals("i")) {
-          return scm.getLinesInput();
-        } else if (strType.equals("o")) {
-          return scm.getLinesOutput();
-        } else if (strType.equals("r")) {
-          return scm.getLinesRead();
-        } else if (strType.equals("u")) {
-          return scm.getLinesUpdated();
-        } else if (strType.equals("w")) {
-          return scm.getLinesWritten();
-        } else if (strType.equals("e")) {
-          return scm.getLinesRejected();
-        } else {
-          return 0;
-        }
+        return switch (strType) {
+          case "i" -> scm.getLinesInput();
+          case "o" -> scm.getLinesOutput();
+          case "r" -> scm.getLinesRead();
+          case "u" -> scm.getLinesUpdated();
+          case "w" -> scm.getLinesWritten();
+          case "e" -> scm.getLinesRejected();
+          default -> 0;
+        };
       } catch (Exception e) {
         return 0;
       }
@@ -387,18 +381,13 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
 
             String strType = Context.toString(argList[0]).toLowerCase();
             String strMessage = Context.toString(argList[1]);
-            if (strType.equals("b")) {
-              scm.logBasic(strMessage);
-            } else if (strType.equals("d")) {
-              scm.logDebug(strMessage);
-            } else if (strType.equals("l")) {
-              scm.logDetailed(strMessage);
-            } else if (strType.equals("e")) {
-              scm.logError(strMessage);
-            } else if (strType.equals("m")) {
-              scm.logMinimal(strMessage);
-            } else if (strType.equals("r")) {
-              scm.logRowlevel(strMessage);
+            switch (strType) {
+              case "b" -> scm.logBasic(strMessage);
+              case "d" -> scm.logDebug(strMessage);
+              case "l" -> scm.logDetailed(strMessage);
+              case "e" -> scm.logError(strMessage);
+              case "m" -> scm.logMinimal(strMessage);
+              case "r" -> scm.logRowlevel(strMessage);
             }
           }
         } catch (Exception e) {
@@ -415,8 +404,8 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   }
 
   private static boolean isUndefined(Object[] argList, int[] iArrToCheck) {
-    for (int i = 0; i < iArrToCheck.length; i++) {
-      if (argList[iArrToCheck[i]].equals(Context.getUndefinedValue())) {
+    for (int j : iArrToCheck) {
+      if (argList[j].equals(Context.getUndefinedValue())) {
         return true;
       }
     }
@@ -428,8 +417,8 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   }
 
   private static boolean isNull(Object[] argList) {
-    for (int i = 0; i < argList.length; i++) {
-      if (argList[i] == null || argList[i].equals(null)) {
+    for (Object o : argList) {
+      if (o == null || o.equals(null)) {
         return true;
       }
     }
@@ -437,8 +426,8 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   }
 
   private static boolean isNull(Object[] argList, int[] iArrToCheck) {
-    for (int i = 0; i < iArrToCheck.length; i++) {
-      if (argList[iArrToCheck[i]] == null || argList[iArrToCheck[i]].equals(null)) {
+    for (int j : iArrToCheck) {
+      if (argList[j] == null || argList[j].equals(null)) {
         return true;
       }
     }
@@ -451,11 +440,11 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
     if (argList.length == 1) {
       try {
         if (isNull(argList[0])) {
-          return Double.valueOf(Double.NaN);
+          return Double.NaN;
         } else if (isUndefined(argList[0])) {
           return Context.getUndefinedValue();
         } else {
-          return Double.valueOf(Math.abs(Context.toNumber(argList[0])));
+          return Math.abs(Context.toNumber(argList[0]));
         }
       } catch (Exception e) {
         return null;
@@ -489,11 +478,11 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
     if (argList.length == 1) {
       try {
         if (isNull(argList[0])) {
-          return Double.valueOf(Double.NaN);
+          return Double.NaN;
         } else if (isUndefined(argList[0])) {
           return Context.getUndefinedValue();
         } else {
-          return Double.valueOf(Math.floor(Context.toNumber(argList[0])));
+          return Math.floor(Context.toNumber(argList[0]));
         }
       } catch (Exception e) {
         return null;
@@ -508,7 +497,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
     if (argList.length == 2) {
       try {
         if (isNull(argList[0])) {
-          return Double.valueOf(Double.NaN);
+          return Double.NaN;
         } else if (isUndefined(argList[0])) {
           return Context.getUndefinedValue();
         } else {
@@ -516,16 +505,13 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
           String strType = Context.toString(argList[1]).toLowerCase();
           Calendar startDate = Calendar.getInstance();
           startDate.setTime(dIn);
-          if (strType.equals("y")) {
-            return Double.valueOf(startDate.get(Calendar.DAY_OF_YEAR));
-          } else if (strType.equals("m")) {
-            return Double.valueOf(startDate.get(Calendar.DAY_OF_MONTH));
-          } else if (strType.equals("w")) {
-            return Double.valueOf(startDate.get(Calendar.DAY_OF_WEEK));
-          } else if (strType.equals("wm")) {
-            return Double.valueOf(startDate.get(Calendar.DAY_OF_WEEK_IN_MONTH));
-          }
-          return Double.valueOf(startDate.get(Calendar.DAY_OF_YEAR));
+          return switch (strType) {
+            case "y" -> Double.valueOf(startDate.get(Calendar.DAY_OF_YEAR));
+            case "m" -> Double.valueOf(startDate.get(Calendar.DAY_OF_MONTH));
+            case "w" -> Double.valueOf(startDate.get(Calendar.DAY_OF_WEEK));
+            case "wm" -> Double.valueOf(startDate.get(Calendar.DAY_OF_WEEK_IN_MONTH));
+            default -> Double.valueOf(startDate.get(Calendar.DAY_OF_YEAR));
+          };
         }
       } catch (Exception e) {
         return null;
@@ -564,53 +550,45 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   public static Object fireToDB(
       Context actualContext, Scriptable actualObject, Object[] argList, Function functionContext) {
 
-    Object oRC = new Object();
-    if (argList.length == 2) {
-      try {
-        Object scmO = actualObject.get(CONST_TRANSFORM, actualObject);
-        ScriptValues scm = (ScriptValues) Context.jsToJava(scmO, ScriptValues.class);
-        String strDBName = Context.toString(argList[0]);
-        String strSql = Context.toString(argList[1]);
-        DatabaseMeta databaseMeta =
-            DatabaseMeta.findDatabase(scm.getPipelineMeta().getDatabases(), strDBName);
-        if (databaseMeta == null) {
-          throw Context.reportRuntimeError("Database connection not found: " + strDBName);
-        }
-
-        // TODO: figure out how to set variables on the connection?
-        //
-        Database db = new Database(scm, Variables.getADefaultVariableSpace(), databaseMeta);
-        db.setQueryLimit(0);
-        try {
-          db.connect();
-
-          ResultSet rs = db.openQuery(strSql);
-          ResultSetMetaData resultSetMetaData = rs.getMetaData();
-          int columnCount = resultSetMetaData.getColumnCount();
-          if (rs != null) {
-            List<Object[]> list = new ArrayList<>();
-            while (rs.next()) {
-              Object[] objRow = new Object[columnCount];
-              for (int i = 0; i < columnCount; i++) {
-                objRow[i] = rs.getObject(i + 1);
-              }
-              list.add(objRow);
-            }
-            Object[][] resultArr = new Object[list.size()][];
-            list.toArray(resultArr);
-            db.disconnect();
-            return resultArr;
-          }
-        } catch (Exception er) {
-          throw Context.reportRuntimeError(er.toString());
-        }
-      } catch (Exception e) {
-        throw Context.reportRuntimeError(e.toString());
-      }
-    } else {
+    if (argList.length != 2) {
       throw Context.reportRuntimeError("The function call fireToDB requires 2 arguments.");
     }
-    return oRC;
+    try {
+      Object scmO = actualObject.get(CONST_TRANSFORM, actualObject);
+      ScriptValues scm = (ScriptValues) Context.jsToJava(scmO, ScriptValues.class);
+      String strDBName = Context.toString(argList[0]);
+      String strSql = Context.toString(argList[1]);
+      DatabaseMeta databaseMeta =
+          DatabaseMeta.findDatabase(scm.getPipelineMeta().getDatabases(), strDBName);
+      if (databaseMeta == null) {
+        throw Context.reportRuntimeError("Database connection not found: " + strDBName);
+      }
+
+      // TODO: figure out how to set variables on the connection?
+      //
+      try (Database db = new Database(scm, Variables.getADefaultVariableSpace(), databaseMeta)) {
+        db.setQueryLimit(0);
+        db.connect();
+
+        try (ResultSet rs = db.openQuery(strSql)) {
+          ResultSetMetaData resultSetMetaData = rs.getMetaData();
+          int columnCount = resultSetMetaData.getColumnCount();
+          List<Object[]> list = new ArrayList<>();
+          while (rs.next()) {
+            Object[] objRow = new Object[columnCount];
+            for (int i = 0; i < columnCount; i++) {
+              objRow[i] = rs.getObject(i + 1);
+            }
+            list.add(objRow);
+          }
+          Object[][] resultArr = new Object[list.size()][];
+          list.toArray(resultArr);
+          return resultArr;
+        }
+      }
+    } catch (Exception e) {
+      throw Context.reportRuntimeError(e.toString());
+    }
   }
 
   public static Object dateDiff(
@@ -618,7 +596,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
     if (argList.length == 3) {
       try {
         if (isNull(argList, new int[] {0, 1, 2})) {
-          return Double.valueOf(Double.NaN);
+          return Double.NaN;
         } else if (isUndefined(argList, new int[] {0, 1, 2})) {
           return Context.getUndefinedValue();
         } else {
@@ -648,43 +626,54 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
               startDate.getTimeInMillis()
                   + startDate.getTimeZone().getOffset(startDate.getTimeInMillis());
 
-          if (strType.equals("y")) {
-            return Double.valueOf(endDate.get(Calendar.YEAR) - startDate.get(Calendar.YEAR));
-          } else if (strType.equals("m")) {
-            int iMonthsToAdd = (endDate.get(Calendar.YEAR) - startDate.get(Calendar.YEAR)) * 12;
-            return Double.valueOf(
-                (endDate.get(Calendar.MONTH) - startDate.get(Calendar.MONTH)) + iMonthsToAdd);
-          } else if (strType.equals("d")) {
-            return Double.valueOf(((endL - startL) / 86400000));
-          } else if (strType.equals("wd")) {
-            int iOffset = -1;
-            if (endDate.before(startDate)) {
-              iOffset = 1;
+          switch (strType) {
+            case "y" -> {
+              return Double.valueOf(endDate.get(Calendar.YEAR) - startDate.get(Calendar.YEAR));
             }
-            while ((iOffset == 1 && endL < startL) || (iOffset == -1 && endL > startL)) {
-              int day = endDate.get(Calendar.DAY_OF_WEEK);
-              if ((day != Calendar.SATURDAY) && (day != Calendar.SUNDAY)) {
-                iRC++;
+            case "m" -> {
+              int iMonthsToAdd = (endDate.get(Calendar.YEAR) - startDate.get(Calendar.YEAR)) * 12;
+              return Double.valueOf(
+                  (endDate.get(Calendar.MONTH) - startDate.get(Calendar.MONTH)) + iMonthsToAdd);
+            }
+            case "d" -> {
+              return Double.valueOf(((endL - startL) / 86400000));
+            }
+            case "wd" -> {
+              int iOffset = -1;
+              if (endDate.before(startDate)) {
+                iOffset = 1;
               }
-              endDate.add(Calendar.DATE, iOffset);
-              endL =
-                  endDate.getTimeInMillis()
-                      + endDate.getTimeZone().getOffset(endDate.getTimeInMillis());
+              while ((iOffset == 1 && endL < startL) || (iOffset == -1 && endL > startL)) {
+                int day = endDate.get(Calendar.DAY_OF_WEEK);
+                if ((day != Calendar.SATURDAY) && (day != Calendar.SUNDAY)) {
+                  iRC++;
+                }
+                endDate.add(Calendar.DATE, iOffset);
+                endL =
+                    endDate.getTimeInMillis()
+                        + endDate.getTimeZone().getOffset(endDate.getTimeInMillis());
+              }
+              return Double.valueOf(iRC);
             }
-            return Double.valueOf(iRC);
-          } else if (strType.equals("w")) {
-            int iDays = (int) ((endL - startL) / 86400000);
-            return Double.valueOf(iDays / 7);
-          } else if (strType.equals("ms")) {
-            return Double.valueOf(endL - startL);
-          } else if (strType.equals("ss")) {
-            return Double.valueOf(((endL - startL) / 1000));
-          } else if (strType.equals("mi")) {
-            return Double.valueOf(((endL - startL) / 60000));
-          } else if (strType.equals("hh")) {
-            return Double.valueOf(((endL - startL) / 3600000));
-          } else {
-            return Double.valueOf(((endL - startL) / 86400000));
+            case "w" -> {
+              int iDays = (int) ((endL - startL) / 86400000);
+              return Double.valueOf(iDays / 7);
+            }
+            case "ms" -> {
+              return Double.valueOf(endL - startL);
+            }
+            case "ss" -> {
+              return Double.valueOf(((endL - startL) / 1000));
+            }
+            case "mi" -> {
+              return Double.valueOf(((endL - startL) / 60000));
+            }
+            case "hh" -> {
+              return Double.valueOf(((endL - startL) / 3600000));
+            }
+            default -> {
+              return Double.valueOf(((endL - startL) / 86400000));
+            }
           }
           /*
            * End Bugfix
@@ -738,31 +727,25 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
         int iValue = (int) Context.toNumber(argList[2]);
         Calendar cal = Calendar.getInstance();
         cal.setTime(dIn);
-        if (strType.equals("y")) {
-          cal.add(Calendar.YEAR, iValue);
-        } else if (strType.equals("m")) {
-          cal.add(Calendar.MONTH, iValue);
-        } else if (strType.equals("d")) {
-          cal.add(Calendar.DATE, iValue);
-        } else if (strType.equals("w")) {
-          cal.add(Calendar.WEEK_OF_YEAR, iValue);
-        } else if (strType.equals("wd")) {
-          int iOffset = 0;
-          while (iOffset < iValue) {
-            cal.add(Calendar.DATE, 1);
-            int day = cal.get(Calendar.DAY_OF_WEEK);
-            if ((day != Calendar.SATURDAY) && (day != Calendar.SUNDAY)) {
-              iOffset++;
+        switch (strType) {
+          case "y" -> cal.add(Calendar.YEAR, iValue);
+          case "m" -> cal.add(Calendar.MONTH, iValue);
+          case "d" -> cal.add(Calendar.DATE, iValue);
+          case "w" -> cal.add(Calendar.WEEK_OF_YEAR, iValue);
+          case "wd" -> {
+            int iOffset = 0;
+            while (iOffset < iValue) {
+              cal.add(Calendar.DATE, 1);
+              int day = cal.get(Calendar.DAY_OF_WEEK);
+              if ((day != Calendar.SATURDAY) && (day != Calendar.SUNDAY)) {
+                iOffset++;
+              }
             }
           }
-        } else if (strType.equals("hh")) {
-          cal.add(Calendar.HOUR, iValue);
-        } else if (strType.equals("mi")) {
-          cal.add(Calendar.MINUTE, iValue);
-        } else if (strType.equals("ss")) {
-          cal.add(Calendar.SECOND, iValue);
-        } else if (strType.equals("ms")) {
-          cal.add(Calendar.MILLISECOND, iValue);
+          case "hh" -> cal.add(Calendar.HOUR, iValue);
+          case "mi" -> cal.add(Calendar.MINUTE, iValue);
+          case "ss" -> cal.add(Calendar.SECOND, iValue);
+          case "ms" -> cal.add(Calendar.MILLISECOND, iValue);
         }
         return cal.getTime();
       } catch (Exception e) {
@@ -824,7 +807,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
     } else {
       throw Context.reportRuntimeError("The function call isCodepage requires 2 arguments.");
     }
-    return Boolean.valueOf(bRC);
+    return bRC;
   }
 
   public static String ltrim(
@@ -919,14 +902,14 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
     try {
       if (argList.length == 1) {
         if (isNull(argList[0])) {
-          return Double.valueOf(Double.NaN);
+          return Double.NaN;
         } else if (isUndefined(argList[0])) {
           return Context.getUndefinedValue();
         }
         Date dArg1 = (Date) Context.jsToJava(argList[0], Date.class);
         Calendar cal = Calendar.getInstance();
         cal.setTime(dArg1);
-        return Double.valueOf(cal.get(Calendar.YEAR));
+        return (double) cal.get(Calendar.YEAR);
       } else {
         throw Context.reportRuntimeError("The function call year requires 1 argument.");
       }
@@ -940,14 +923,14 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
     try {
       if (argList.length == 1) {
         if (isNull(argList[0])) {
-          return Double.valueOf(Double.NaN);
+          return Double.NaN;
         } else if (isUndefined(argList[0])) {
           return Context.getUndefinedValue();
         }
         Date dArg1 = (Date) Context.jsToJava(argList[0], Date.class);
         Calendar cal = Calendar.getInstance();
         cal.setTime(dArg1);
-        return Double.valueOf(cal.get(Calendar.MONTH));
+        return (double) cal.get(Calendar.MONTH);
       } else {
         throw Context.reportRuntimeError("The function call month requires 1 argument.");
       }
@@ -961,7 +944,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
     try {
       if (argList.length == 1) {
         if (isNull(argList[0])) {
-          return Double.valueOf(Double.NaN);
+          return Double.NaN;
         } else if (isUndefined(argList[0])) {
           return Context.getUndefinedValue();
         }
@@ -972,13 +955,13 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
         // Patch by Ingo Klose: calendar months start at 0 in java.
         int iMonth = cal.get(Calendar.MONTH);
         if (iMonth <= 2) {
-          return Double.valueOf(1);
+          return 1.0;
         } else if (iMonth <= 5) {
-          return Double.valueOf(2);
+          return 2.0;
         } else if (iMonth <= 8) {
-          return Double.valueOf(3);
+          return 3.0;
         } else {
-          return Double.valueOf(4);
+          return 4.0;
         }
       } else {
         throw Context.reportRuntimeError("The function call quarter requires 1 argument.");
@@ -993,14 +976,14 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
     try {
       if (argList.length == 1) {
         if (isNull(argList[0])) {
-          return Double.valueOf(Double.NaN);
+          return Double.NaN;
         } else if (isUndefined(argList[0])) {
           return Context.getUndefinedValue();
         }
         Date dArg1 = (Date) Context.jsToJava(argList[0], Date.class);
         Calendar cal = Calendar.getInstance();
         cal.setTime(dArg1);
-        return Double.valueOf(cal.get(Calendar.WEEK_OF_YEAR));
+        return (double) cal.get(Calendar.WEEK_OF_YEAR);
       } else {
         throw Context.reportRuntimeError("The function call week requires 1 argument.");
       }
@@ -1062,7 +1045,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
           return null;
         }
         File file = new File(Context.toString(argList[0]));
-        return Boolean.valueOf(file.isFile());
+        return file.isFile();
       } else {
         throw Context.reportRuntimeError("The function call fileExists requires 1 valid argument.");
       }
@@ -1303,11 +1286,11 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
         Pattern p = Pattern.compile(Context.toString(argList[i]));
         Matcher m = p.matcher(strToMatch);
         if (m.matches()) {
-          return Double.valueOf(i);
+          return (double) i;
         }
       }
     }
-    return Double.valueOf(-1);
+    return (double) -1;
   }
 
   public static String upper(
@@ -1439,7 +1422,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
       case 1:
         try {
           if (isNull(argList[0])) {
-            return Double.valueOf(Double.NaN);
+            return Double.NaN;
           } else if (isUndefined(argList[0])) {
             return Context.getUndefinedValue();
           }
@@ -1457,7 +1440,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
       case 2:
         try {
           if (isNull(argList, new int[] {0, 1})) {
-            return Double.valueOf(Double.NaN);
+            return Double.NaN;
           } else if (isUndefined(argList, new int[] {0, 1})) {
             return Context.getUndefinedValue();
           }
@@ -1468,7 +1451,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
           }
           DecimalFormat formatter = new DecimalFormat(sArg2);
           dRC = (formatter.parse(sArg1)).doubleValue();
-          return Double.valueOf(dRC);
+          return dRC;
         } catch (Exception e) {
           throw Context.reportRuntimeError(
               "Could not convert the String with the given format :" + e.getMessage());
@@ -1476,7 +1459,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
       case 3:
         try {
           if (isNull(argList, new int[] {0, 1, 2})) {
-            return Double.valueOf(Double.NaN);
+            return Double.NaN;
           } else if (isUndefined(argList, new int[] {0, 1, 2})) {
             return Context.getUndefinedValue();
           }
@@ -1488,7 +1471,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
                 new DecimalFormatSymbols(EnvUtil.createLocale(sArg3.toLowerCase()));
             DecimalFormat formatter = new DecimalFormat(sArg2, dfs);
             dRC = (formatter.parse(sArg1)).doubleValue();
-            return Double.valueOf(dRC);
+            return dRC;
           }
         } catch (Exception e) {
           throw Context.reportRuntimeError(e.getMessage());
@@ -1498,7 +1481,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
         throw Context.reportRuntimeError(
             "The function call str2num requires 1, 2, or 3 arguments.");
     }
-    return Double.valueOf(dRC);
+    return dRC;
   }
 
   public static Object isNum(
@@ -1616,7 +1599,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
                 mb.setText("alert");
                 int answer = mb.open();
                 if ((answer & SWT.CANCEL) != 0) {
-                  throw new RuntimeException("Alert dialog cancelled by user.");
+                  throw new HopRuntimeException("Alert dialog cancelled by user.");
                 }
               });
     }
@@ -1781,8 +1764,8 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   // Loading additional JS Files inside the JavaScriptCode
   public static void LoadScriptFile(
       Context actualContext, Scriptable actualObject, Object[] argList, Function functionContext) {
-    for (int i = 0; i < argList.length; i++) { // don't worry about "undefined" arguments
-      checkAndLoadJSFile(actualContext, actualObject, Context.toString(argList[i]));
+    for (Object o : argList) { // don't worry about "undefined" arguments
+      checkAndLoadJSFile(actualContext, actualObject, Context.toString(o));
     }
   }
 
@@ -1790,8 +1773,8 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   public static void LoadScriptFromTab(
       Context actualContext, Scriptable actualObject, Object[] argList, Function functionContext) {
     try {
-      for (int i = 0; i < argList.length; i++) { // don't worry about "undefined" arguments
-        String strToLoad = Context.toString(argList[i]);
+      for (Object o : argList) { // don't worry about "undefined" arguments
+        String strToLoad = Context.toString(o);
         String strScript = actualObject.get(strToLoad, actualObject).toString();
         actualContext.evaluateString(actualObject, strScript, "_" + strToLoad + "_", 0, null);
       }
@@ -1801,10 +1784,11 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   }
 
   // Print
+  @SuppressWarnings("java:S106")
   public static void print(
       Context actualContext, Scriptable actualObject, Object[] argList, Function functionContext) {
-    for (int i = 0; i < argList.length; i++) { // don't worry about "undefined" arguments
-      System.out.print(Context.toString(argList[i]));
+    for (Object o : argList) { // don't worry about "undefined" arguments
+      System.out.print(Context.toString(o));
     }
   }
 
@@ -1852,10 +1836,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
               + CONST_REASON
               + signal.getMessage()
               + "\")");
-    } catch (IOException signal) {
-      Context.reportError(
-          "Error while reading file \"" + fileName + CONST_REASON + signal.getMessage() + "\")");
-    } catch (HopFileException signal) {
+    } catch (IOException | HopFileException signal) {
       Context.reportError(
           "Error while reading file \"" + fileName + CONST_REASON + signal.getMessage() + "\")");
     } finally {
@@ -1954,20 +1935,16 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   }
 
   static VariableScope getVariableScope(String codeOfScope) {
-    switch (codeOfScope) {
-      case "s":
-        return VariableScope.SYSTEM;
-      case "r":
-        return VariableScope.ROOT;
-      case "p":
-        return VariableScope.PARENT;
-      case "g":
-        return VariableScope.GRAND_PARENT;
-      default:
-        throw Context.reportRuntimeError(
-            "The argument type of function call "
-                + "setVariable should either be \"s\", \"r\", \"p\", or \"g\".");
-    }
+    return switch (codeOfScope) {
+      case "s" -> VariableScope.SYSTEM;
+      case "r" -> VariableScope.ROOT;
+      case "p" -> VariableScope.PARENT;
+      case "g" -> VariableScope.GRAND_PARENT;
+      default ->
+          throw Context.reportRuntimeError(
+              "The argument type of function call "
+                  + "setVariable should either be \"s\", \"r\", \"p\", or \"g\".");
+    };
   }
 
   // Returning EnvironmentVar
@@ -2141,11 +2118,9 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
         try {
           fileObject = HopVfs.getFileObject(Context.toString(argList[0]));
           if (fileObject.exists()) {
-            if (fileObject.getType() == FileType.FILE) {
-              if (!fileObject.delete()) {
-                Context.reportRuntimeError(
-                    "We can not delete file [" + Context.toString(argList[0]) + "]!");
-              }
+            if (fileObject.getType() == FileType.FILE && !fileObject.delete()) {
+              Context.reportRuntimeError(
+                  "We can not delete file [" + Context.toString(argList[0]) + "]!");
             }
 
           } else {
@@ -2598,7 +2573,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
         // This is the truncation of a number...
         //
         Double dArg1 = (Double) Context.jsToJava(argList[0], Double.class);
-        return Double.valueOf(Math.floor(dArg1));
+        return Math.floor(dArg1);
 
       } else {
         throw Context.reportRuntimeError("The function call trunc requires 1 argument, a number.");
@@ -2642,23 +2617,23 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
     Calendar cal = Calendar.getInstance();
     cal.setTime(dArg1);
 
-    switch (level.intValue()) {
+    switch (level) {
         // MONTHS
       case 5:
         cal.set(Calendar.MONTH, 0);
-        // DAYS
+        // DAYS fall through
       case 4:
         cal.set(Calendar.DAY_OF_MONTH, 1);
-        // HOURS
+        // HOURS fall through
       case 3:
         cal.set(Calendar.HOUR_OF_DAY, 0);
-        // MINUTES
+        // MINUTES fall through
       case 2:
         cal.set(Calendar.MINUTE, 0);
-        // SECONDS
+        // SECONDS fall through
       case 1:
         cal.set(Calendar.SECOND, 0);
-        // MILI-SECONDS
+        // MILI-SECONDS fall through
       case 0:
         cal.set(Calendar.MILLISECOND, 0);
         break;
@@ -2696,7 +2671,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
               boolean destinationExists = fileDestination.exists();
               // Let's move the file...
               if ((destinationExists && overwrite) || !destinationExists) {
-                fileSource.moveTo(fileDestination);
+                HopVfs.moveFile(fileSource, fileDestination);
               }
             }
           } else {
@@ -2886,7 +2861,7 @@ public class ScriptValuesAddedFunctions extends ScriptableObject {
   public static String initCap(
       Context actualContext, Scriptable actualObject, Object[] argList, Function functionContext) {
     if (argList.length == 1) {
-      return ValueDataUtil.initCap(null, Context.toString(argList[0]));
+      return ValueDataUtil.initCap(Context.toString(argList[0]));
     } else {
       throw Context.reportRuntimeError("The function call initCap requires 1 argument.");
     }

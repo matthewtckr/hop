@@ -36,6 +36,8 @@ import org.apache.hop.core.util.StringUtil;
 import org.apache.hop.core.util.Utils;
 import org.apache.hop.core.variables.IVariables;
 import org.apache.hop.i18n.BaseMessages;
+import org.apache.hop.lineage.api.RelationalLineage;
+import org.apache.hop.lineage.model.RelationalIoOperation;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
@@ -49,11 +51,13 @@ import org.apache.hop.pipeline.transform.TransformMeta;
     image = "redshiftbulkloader.svg",
     name = "i18n::BaseTransform.TypeLongDesc.RedshiftBulkLoaderMessage",
     description = "i18n::BaseTransform.TypeTooltipDesc.RedshiftBulkLoaderMessage",
+    keywords = "redshift,aws,bulk,load,copy",
     categoryDescription = "i18n:org.apache.hop.pipeline.transform:BaseTransform.Category.Bulk",
     documentationUrl = "/pipeline/transforms/redshift-bulkloader.html",
     isIncludeJdbcDrivers = true,
     classLoaderGroup = "redshift",
     actionTransformTypes = {ActionTransformType.OUTPUT, ActionTransformType.RDBMS})
+@RelationalLineage(operation = RelationalIoOperation.WRITE)
 public class RedshiftBulkLoaderMeta
     extends BaseTransformMeta<RedshiftBulkLoader, RedshiftBulkLoaderData> {
   private static final Class<?> PKG = RedshiftBulkLoaderMeta.class;
@@ -195,11 +199,6 @@ public class RedshiftBulkLoaderMeta
     super(); // allocate BaseTransformMeta
 
     fields = new ArrayList<>();
-  }
-
-  @Override
-  public Object clone() {
-    return super.clone();
   }
 
   /**
@@ -632,8 +631,7 @@ public class RedshiftBulkLoaderMeta
                     }
                   } else {
                     // Specifying the column names explicitly
-                    for (int i = 0; i < fields.size(); i++) {
-                      RedshiftBulkLoaderField vbf = fields.get(i);
+                    for (RedshiftBulkLoaderField vbf : fields) {
                       int idx = prev.indexOfValue(vbf.getStreamField());
                       if (idx < 0) {
                         error_message += "\t\t" + vbf.getStreamField() + Const.CR;
@@ -705,7 +703,7 @@ public class RedshiftBulkLoaderMeta
                   transformMeta);
           remarks.add(cr);
         } finally {
-          db.disconnect();
+          db.close();
         }
       } else {
         CheckResult cr =
@@ -820,7 +818,7 @@ public class RedshiftBulkLoaderMeta
                 BaseMessages.getString(
                     PKG, "RedshiftBulkLoaderMeta.Error.ErrorConnecting", dbe.getMessage()));
           } finally {
-            db.disconnect();
+            db.close();
           }
         } else {
           retval.setError(BaseMessages.getString(PKG, "RedshiftBulkLoaderMeta.Error.NoTable"));
@@ -868,7 +866,7 @@ public class RedshiftBulkLoaderMeta
         throw new HopException(
             BaseMessages.getString(PKG, "RedshiftBulkLoaderMeta.Exception.ErrorGettingFields"), e);
       } finally {
-        db.disconnect();
+        db.close();
       }
     } else {
       throw new HopException(

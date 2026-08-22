@@ -23,16 +23,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
-import org.apache.commons.lang.builder.EqualsBuilder;
-import org.apache.hop.junit.rules.RestoreHopEngineEnvironment;
+import org.apache.commons.lang3.builder.EqualsBuilder;
+import org.apache.hop.junit.rules.RestoreHopEngineEnvironmentExtension;
 import org.apache.hop.pipeline.transforms.loadsave.validator.IFieldLoadSaveValidator;
 import org.apache.hop.pipeline.transforms.loadsave.validator.ListLoadSaveValidator;
 import org.apache.hop.workflow.action.loadsave.WorkflowActionLoadSaveTestSupport;
-import org.junit.ClassRule;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-public class ActionTruncateTablesLoadSaveTest
+class ActionTruncateTablesLoadSaveTest
     extends WorkflowActionLoadSaveTestSupport<ActionTruncateTables> {
-  @ClassRule public static RestoreHopEngineEnvironment env = new RestoreHopEngineEnvironment();
+  @RegisterExtension
+  static RestoreHopEngineEnvironmentExtension env = new RestoreHopEngineEnvironmentExtension();
 
   @Override
   protected Class<ActionTruncateTables> getActionClass() {
@@ -46,7 +47,7 @@ public class ActionTruncateTablesLoadSaveTest
 
   @Override
   protected Map<String, String> createGettersMap() {
-    return new HashMap<String, String>() {
+    return new HashMap<>() {
       {
         put("connection", "getConnection");
         put("arg_from_previous", "isArgFromPrevious");
@@ -57,7 +58,7 @@ public class ActionTruncateTablesLoadSaveTest
 
   @Override
   protected Map<String, String> createSettersMap() {
-    return new HashMap<String, String>() {
+    return new HashMap<>() {
       {
         put("connection", "setConnection");
         put("arg_from_previous", "setArgFromPrevious");
@@ -70,9 +71,7 @@ public class ActionTruncateTablesLoadSaveTest
   protected Map<String, IFieldLoadSaveValidator<?>> createAttributeValidatorsMap() {
     Map<String, IFieldLoadSaveValidator<?>> validators = new HashMap<>();
 
-    validators.put(
-        "items",
-        new ListLoadSaveValidator<TruncateTableItem>(new TruncateTableItemLoadSaveValidator()));
+    validators.put("items", new ListLoadSaveValidator<>(new TruncateTableItemLoadSaveValidator()));
 
     return validators;
   }

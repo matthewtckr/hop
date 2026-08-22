@@ -17,21 +17,26 @@
 
 package org.apache.hop.workflow.config;
 
+import java.util.Objects;
 import org.apache.hop.core.exception.HopException;
 import org.apache.hop.metadata.api.HopMetadata;
 import org.apache.hop.metadata.api.HopMetadataBase;
+import org.apache.hop.metadata.api.HopMetadataCategory;
 import org.apache.hop.metadata.api.HopMetadataProperty;
 import org.apache.hop.metadata.api.HopMetadataPropertyType;
 import org.apache.hop.metadata.api.IHopMetadata;
 import org.apache.hop.metadata.api.IHopMetadataProvider;
+import org.apache.hop.metadata.api.IHopMetadataSerializer;
 
 @HopMetadata(
     key = "workflow-run-configuration",
     name = "i18n::WorkflowRunConfiguration.name",
     description = "i18n::WorkflowRunConfiguration.description",
     image = "ui/images/workflow_run_config.svg",
+    category = HopMetadataCategory.RUN_CONFIG,
     documentationUrl = "/metadata-types/workflow-run-config.html",
-    hopMetadataPropertyType = HopMetadataPropertyType.WORKFLOW_RUN_CONFIG)
+    hopMetadataPropertyType = HopMetadataPropertyType.WORKFLOW_RUN_CONFIG,
+    supportsGlobalReplace = true)
 public class WorkflowRunConfiguration extends HopMetadataBase implements Cloneable, IHopMetadata {
 
   public static final String GUI_PLUGIN_ELEMENT_PARENT_ID =
@@ -39,9 +44,11 @@ public class WorkflowRunConfiguration extends HopMetadataBase implements Cloneab
 
   @HopMetadataProperty private String description;
 
-  @HopMetadataProperty private IWorkflowEngineRunConfiguration engineRunConfiguration;
+  @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.WORKFLOW_RUN_CONFIG)
+  private IWorkflowEngineRunConfiguration engineRunConfiguration;
 
-  @HopMetadataProperty private String executionInfoLocationName;
+  @HopMetadataProperty(hopMetadataPropertyType = HopMetadataPropertyType.EXEC_INFO_LOCATION)
+  private String executionInfoLocationName;
 
   @HopMetadataProperty protected boolean defaultSelection;
 
@@ -162,5 +169,27 @@ public class WorkflowRunConfiguration extends HopMetadataBase implements Cloneab
     }
 
     return null;
+  }
+
+  /**
+   * Clear the default flag on every workflow run configuration except the one named {@code
+   * keepName}, and save those updates. Ensures at most one default after the named configuration is
+   * saved as default.
+   *
+   * @param metadataProvider the metadata provider
+   * @param keepName name of the run configuration that should remain (or become) the default
+   * @throws HopException if metadata cannot be loaded or saved
+   */
+  public static void clearDefaultFlagFromOthers(
+      IHopMetadataProvider metadataProvider, String keepName) throws HopException {
+    IHopMetadataSerializer<WorkflowRunConfiguration> serializer =
+        metadataProvider.getSerializer(WorkflowRunConfiguration.class);
+    for (WorkflowRunConfiguration runConfiguration : serializer.loadAll()) {
+      if (runConfiguration.isDefaultSelection()
+          && !Objects.equals(runConfiguration.getName(), keepName)) {
+        runConfiguration.setDefaultSelection(false);
+        serializer.save(runConfiguration);
+      }
+    }
   }
 }

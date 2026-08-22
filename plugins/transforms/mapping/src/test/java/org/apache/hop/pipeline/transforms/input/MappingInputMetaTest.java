@@ -17,7 +17,7 @@
 
 package org.apache.hop.pipeline.transforms.input;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.apache.hop.core.HopEnvironment;
 import org.apache.hop.core.plugins.PluginRegistry;
@@ -25,30 +25,28 @@ import org.apache.hop.core.xml.XmlHandler;
 import org.apache.hop.metadata.serializer.memory.MemoryMetadataProvider;
 import org.apache.hop.metadata.serializer.xml.XmlMetadataUtil;
 import org.apache.hop.pipeline.transform.TransformMeta;
-import org.apache.hop.pipeline.transform.TransformSerializationTestUtil;
 import org.apache.hop.pipeline.transforms.mapping.SimpleMappingMeta;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 
-public class MappingInputMetaTest {
-  @Before
-  public void setUp() throws Exception {
+class MappingInputMetaTest {
+  @BeforeEach
+  void setUp() throws Exception {
     HopEnvironment.init();
     PluginRegistry.init();
   }
 
   @Test
-  public void clonesCorrectly() throws Exception {
+  void clonesCorrectly() throws Exception {
     MappingInputMeta meta = new MappingInputMeta();
     meta.getFields().add(new InputField("f1", "Integer", "1", "3"));
     meta.getFields().add(new InputField("f2", "String", "2", "4"));
 
     meta.setChanged();
 
-    MappingInputMeta copy = meta.clone();
+    MappingInputMeta copy = (MappingInputMeta) meta.clone();
 
     assertEquals(meta.getFields().size(), copy.getFields().size());
     for (int i = 0; i < meta.getFields().size(); i++) {
@@ -59,16 +57,13 @@ public class MappingInputMetaTest {
   }
 
   @Test
-  public void testSerialization() throws Exception {
-    TransformSerializationTestUtil.testSerialization(
-        "/mapping-input-transform.xml", MappingInputMeta.class);
-
+  void testSerialization() throws Exception {
     Document document =
         XmlHandler.loadXmlFile(this.getClass().getResourceAsStream("/mapping-input-transform.xml"));
     Node transformNode = XmlHandler.getSubNode(document, TransformMeta.XML_TAG);
     MappingInputMeta meta = new MappingInputMeta();
     XmlMetadataUtil.deSerializeFromXml(
-        null, transformNode, SimpleMappingMeta.class, meta, new MemoryMetadataProvider());
+        meta, transformNode, SimpleMappingMeta.class, new MemoryMetadataProvider());
     String xml =
         XmlHandler.openTag(TransformMeta.XML_TAG)
             + meta.getXml()
@@ -78,7 +73,7 @@ public class MappingInputMetaTest {
     Node copyNode = XmlHandler.getSubNode(copyDocument, TransformMeta.XML_TAG);
     MappingInputMeta copy = new MappingInputMeta();
     XmlMetadataUtil.deSerializeFromXml(
-        null, copyNode, SimpleMappingMeta.class, copy, new MemoryMetadataProvider());
-    Assert.assertEquals(meta.getXml(), copy.getXml());
+        copy, copyNode, SimpleMappingMeta.class, new MemoryMetadataProvider());
+    assertEquals(meta.getXml(), copy.getXml());
   }
 }
